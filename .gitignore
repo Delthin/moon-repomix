@@ -1,0 +1,16 @@
+# Host metadata
+.DS_Store
+
+# MoonBit / Node build and dependency directories
+_build/
+.mooncakes/
+node_modules/
+dist/
+
+# Local verification artifacts and credentials
+.artifacts/
+.env
+.env.local
+
+# Local repository backups
+*.bundle
