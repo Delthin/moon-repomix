@@ -1,0 +1,23 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "delthin/moon_repomix/input"
+
+// Values
+pub async fn read(String, Int) -> ReadResult
+
+// Errors
+
+// Types and methods
+pub(all) enum ReadResult {
+  Loaded(Snapshot)
+  Skipped(String)
+}
+
+pub(all) struct Snapshot {
+  text : String
+  disk_bytes : Int
+  bom_bytes : Int
+}
+
+// Type aliases
+
+// Traits
