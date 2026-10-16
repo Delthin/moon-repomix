@@ -37,7 +37,7 @@ moon run --target native scripts/install.mbtx "$env:LOCALAPPDATA\moon-repomix"
 
 将前缀下的 `bin` 加入 `PATH`。安装版从程序所在位置寻找 `../share/moon-repomix/`，不依赖当前工作目录。移动安装目录时，请一起保留 `bin`、`share` 及其相对位置；仅复制可执行文件不构成完整安装。
 
-源码运行需要像上面的命令一样显式指定词表。项目面向 macOS、Linux 和 Windows；各平台构建须使用相应的 native C 工具链。
+源码运行需要像上面的命令一样显式指定词表。[三平台 CI](https://github.com/Delthin/moon-repomix/actions/workflows/ci.yml) 已验证 macOS arm64、Linux x64 和 Windows x64 的检查、构建、功能测试、安装及归档。各平台构建须使用相应的 native C 工具链。CI 安装 `latest` 工具链后核对 `moon-toolchain`，遇到版本变化会停止。
 
 ## CLI 用法
 
@@ -70,7 +70,7 @@ moon-repomix ./project --init
 
 ## 库 API
 
-在调用项目中添加 `delthin/moon_repomix` 依赖，并在 `moon.pkg` 导入：
+本地引用源码时，用 `moon.work` 将调用项目与本仓库列为 `members`，在调用项目的 `moon.mod` 声明 `delthin/moon_repomix@0.1.0` 依赖，并在 `moon.pkg` 导入：
 
 ```moonbit
 import {
@@ -100,7 +100,16 @@ moon build --target native --release
 moon run --target native scripts/package.mbtx dist macos-arm64
 ```
 
-打包标签为 `macos-arm64`、`macos-x64`、`linux-x64`、`windows-x64`，在对应平台和架构上构建。归档包含程序、词表、Unicode 数据及许可证。
+打包标签为 `macos-arm64`、`macos-x64`、`linux-x64`、`windows-x64`，在对应平台和架构上构建；macOS x64 尚无 CI 运行证据。归档包含程序、词表、Unicode 数据及许可证。
+
+构建后可运行常见场景及真实 CLI 功能测试：
+
+```sh
+moon run --target native scripts/scenarios.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
+moon run --target native scripts/functional.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
+```
+
+测试覆盖编码和大小边界、配置合并、密钥排除、输出格式、预算、错误保护及路径处理；Linux CI 还用独立 XML 解析器核对输出，并验证 `moon package` 生成的源码包解压后能运行 demo。源码包位于 `_build/publish/delthin-moon_repomix-0.1.0.zip`。
 
 ## 来源与许可
 

@@ -39,6 +39,11 @@ jobs:
         run: moon run --target native scripts/functional.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken --xml-oracle
       - name: Common input and configuration scenarios
         run: moon run --target native scripts/scenarios.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
+      - name: Reproducible demo
+        run: moon run --target native scripts/demo.mbtx
+      - name: Source archive demo
+        if: runner.os == 'Linux'
+        run: moon run --target native scripts/source-package-test.mbtx
       - name: Install and extracted-archive smoke
         run: moon run --target native scripts/distribution-test.mbtx ${{ matrix.platform }}
       - name: Package native distribution
@@ -47,4 +52,10 @@ jobs:
         with:
           name: moon-repomix-${{ matrix.platform }}
           path: dist/*.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: moon-repomix-source
+          path: _build/publish/*.zip
           if-no-files-found: error

@@ -1,0 +1,3 @@
+# Keep the nested ignore rule and its fixture in source packages.
+!.gitignore
+!.moonignore
