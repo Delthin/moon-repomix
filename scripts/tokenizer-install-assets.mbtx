@@ -1,7 +1,7 @@
 ///|
 import {
-  "moonbitlang/async",
-  "moonbitlang/async/fs",
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
   "moonbitlang/core/env",
   "moonbitlang/core/encoding/hex",
   "moonbitlang/x/crypto",
