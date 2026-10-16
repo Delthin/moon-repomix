@@ -1,0 +1,135 @@
+///|
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/shell",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+}
+
+// Usage: moon run scripts/tokenizer-golden.mbtx --target native ABS_REPO PYTHON REF_DIR
+// REF_DIR is an isolated uv --target directory containing tiktoken==0.14.0
+// and fire==0.7.1. Fire invokes the reference's public API without any custom
+// Python/JS/shell adapter. No product code is involved in computing the IDs.
+
+///|
+struct Input {
+  name : String
+  text : String
+} derive(FromJson)
+
+///|
+struct Golden {
+  name : String
+  text : String
+  ids : Array[Int32]
+} derive(ToJson)
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 4 else { abort("expected ABS_REPO PYTHON REF_DIR") }
+  let repo = args[1]
+  let python = args[2]
+  let ref_dir = args[3]
+  let env = {
+    "PYTHONPATH": ref_dir,
+    "TIKTOKEN_CACHE_DIR": ref_dir + "/cache",
+    "PAGER": "cat",
+  }
+  let version = @shell.Cmd(
+    python,
+    ["-m", "fire", "tiktoken", "__version__"],
+    env~,
+  ).output()
+  version.check()
+  assert_true(version.stdout().trim() == "0.14.0")
+  let cases : Array[Input] = @json.from_json(
+    @json.parse(@fs.read_file(repo + "/assets/tokenizer-cases.json").text()),
+  )
+  cases.push({ name: "long-space", text: " ".repeat(4096), })
+  cases.push({ name: "long-bpe-piece", text: "ab".repeat(4096), })
+  cases.push({ name: "long-newlines", text: "\n ".repeat(1024), })
+  // Exercise both sides of every Unicode category range, including excluded
+  // categories and supplementary planes, next to cased letters and punctuation.
+  let ucd = @fs.read_file(repo + "/assets/tokenizer-unicode-16.0.0.txt").text()
+  let mut buffer = StringBuilder()
+  let mut group = 0
+  let mut points = 0
+  for line in ucd.split("\n") {
+    let record = line.split("#").collect()[0].trim()
+    if record.is_empty() {
+      continue
+    }
+    let range = record.split(";").collect()[0].trim().split("..").collect()
+    let first = @string.parse_int(range[0], base=16)
+    let last = @string.parse_int(range[range.length() - 1], base=16)
+    for cp in [first - 1, first, last, last + 1] {
+      if cp < 0 || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) {
+        continue
+      }
+      buffer.write_string("A")
+      buffer.write_char(cp.unsafe_to_char())
+      buffer.write_string("b.")
+      points += 1
+      if points % 256 == 0 {
+        cases.push({
+          name: "ucd-boundaries-\{group}",
+          text: buffer.to_string(),
+        })
+        buffer = StringBuilder()
+        group += 1
+      }
+    }
+  }
+  if !buffer.to_string().is_empty() {
+    cases.push({ name: "ucd-boundaries-\{group}", text: buffer.to_string(), })
+  }
+  // Seeded mixes stress regex backtracking, stale BPE entries, and rank ties.
+  let alphabet = "AaBz中Жёǅʰ́१½ \t\n\r!/'ſ😀".to_array()
+  let mut seed = 712367
+  for group in 0..<8 {
+    let mixed = StringBuilder()
+    for _ in 0..<2048 {
+      seed = (seed * 1664525 + 1013904223) & 0x7FFFFFFF
+      mixed.write_char(alphabet[seed % alphabet.length()])
+    }
+    cases.push({ name: "seeded-mix-\{group}", text: mixed.to_string(), })
+  }
+  let golden : Array[Golden] = []
+  for case in cases {
+    // JSON quoting forces Fire to parse even empty/numeric/control-heavy text
+    // as a string. encode_ordinary makes all special spellings ordinary text.
+    let output = @shell.Cmd(
+      python,
+      [
+        "-m",
+        "fire",
+        "tiktoken",
+        "get_encoding",
+        "o200k_base",
+        "-",
+        "encode_ordinary",
+        Json(case.text).stringify(),
+      ],
+      env~,
+    ).output(timeout_ms=10000)
+    output.check()
+    let ids : Array[Int32] = []
+    for line in output.stdout().split("\n") {
+      if !line.is_empty() {
+        ids.push(@string.parse_int(line))
+      }
+    }
+    golden.push({ name: case.name, text: case.text, ids, })
+  }
+  @fs.write_file(
+    repo + "/assets/tokenizer-golden.json",
+    Json(golden).stringify(indent=2),
+    create_mode=CreateOrTruncate,
+  )
+  println(
+    "tiktoken 0.14.0: \{golden.length()} cases, \{points} Unicode boundary probes",
+  )
+}

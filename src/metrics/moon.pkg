@@ -1,0 +1,19 @@
+import {
+  "moonbitlang/async/fs",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/encoding/base64",
+  "moonbitlang/core/encoding/hex",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/priority_queue" @pq,
+  "moonbitlang/core/string",
+  "moonbitlang/x/crypto",
+  "moonbitlang/x/path",
+}
+
+import {
+  "moonbitlang/async",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+} for "test"
+
+supported_targets = "native"

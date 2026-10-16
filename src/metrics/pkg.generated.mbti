@@ -1,0 +1,25 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "delthin/moon_repomix/metrics"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+
+// Errors
+pub suberror ResourceError {
+  ResourceError(String)
+} derive(@debug.Debug)
+#deprecated
+pub fn ResourceError::to_repr(Self) -> @debug.Repr
+
+// Types and methods
+type Encoder
+pub fn Encoder::count(Self, String) -> Int
+pub fn Encoder::encode(Self, String) -> Array[Int]
+pub async fn Encoder::load(String) -> Self
+
+// Type aliases
+
+// Traits

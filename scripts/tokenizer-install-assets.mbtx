@@ -1,0 +1,67 @@
+///|
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/core/env",
+  "moonbitlang/core/encoding/hex",
+  "moonbitlang/x/crypto",
+  "moonbitlang/x/path",
+}
+
+// Copy only runtime resources and their redistribution notices. This helper
+// does not build/install a CLI, choose an executable layout, or modify PATH.
+// Usage: moon run scripts/tokenizer-install-assets.mbtx --target native ABS_REPO ABS_DEST
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 3 else { abort("expected ABS_REPO ABS_DEST") }
+  let repo = args[1]
+  let dest = args[2]
+  assert_true(@path.Path(repo).is_absolute())
+  assert_true(@path.Path(dest).is_absolute())
+  // Verify all inputs before creating/writing the installation directory.
+  let resources : Array[(String, Bytes)] = []
+  for
+    (name, digest) in [
+      (
+        "tokenizer-o200k_base.tiktoken", "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
+      ),
+      (
+        "tokenizer-unicode-16.0.0.txt", "7676ab755a41ef82108460238569e60ad65c191ddafe61b36c6765ec1353f293",
+      ),
+    ] {
+    let data = @fs.read_file(repo + "/assets/" + name).binary()
+    assert_eq(
+      @hex.encode(Bytes::from_array(@crypto.sha256(data)[:])),
+      digest,
+      msg=name,
+    )
+    resources.push((name, data))
+  }
+  let notices : Array[(String, Bytes)] = []
+  for
+    name in [
+      "tokenizer-tiktoken-MIT.txt", "tokenizer-Unicode.txt", "tokenizer-tokenizers-moonbit-Apache-2.0.txt",
+      "tokenizer-Apache-2.0.txt",
+    ] {
+    notices.push((name, @fs.read_file(repo + "/LICENSES/" + name).binary()))
+  }
+  if !@fs.exists(dest) {
+    @fs.mkdir(dest, recursive=true)
+  }
+  if !@fs.exists(dest + "/LICENSES") {
+    @fs.mkdir(dest + "/LICENSES", recursive=true)
+  }
+  for (name, data) in resources {
+    @fs.write_file(dest + "/" + name, data, create_mode=CreateOrTruncate)
+  }
+  for (name, data) in notices {
+    @fs.write_file(
+      dest + "/LICENSES/" + name,
+      data,
+      create_mode=CreateOrTruncate,
+    )
+  }
+  println(dest + "/tokenizer-o200k_base.tiktoken")
+}
