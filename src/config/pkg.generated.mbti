@@ -1,0 +1,98 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "delthin/moon_repomix/config"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn parse_cli(Array[String]) -> Cli raise ConfigError
+
+pub fn parse_json(String) -> Patch raise ConfigError
+
+pub fn resolve(Cli, Patch?) -> Options raise ConfigError
+
+// Errors
+pub(all) suberror ConfigError {
+  InvalidJson
+  UnknownField(String)
+  InvalidValue(String)
+  UnknownOption(String)
+  MissingValue(String)
+  Conflict(String)
+  MultipleDirectories
+} derive(Eq, @debug.Debug)
+pub fn ConfigError::equal(Self, Self) -> Bool
+pub fn ConfigError::not_equal(Self, Self) -> Bool
+pub fn ConfigError::to_repr(Self) -> @debug.Repr
+
+// Types and methods
+pub(all) enum Action {
+  Pack
+  Init
+  Help
+  Version
+} derive(Eq, @debug.Debug)
+pub fn Action::equal(Self, Self) -> Bool
+pub fn Action::not_equal(Self, Self) -> Bool
+pub fn Action::to_repr(Self) -> @debug.Repr
+
+pub(all) struct Cli {
+  directory : String
+  config_path : String?
+  action : Action
+  stdout : Bool
+  quiet : Bool
+  verbose : Bool
+  patch : Patch
+} derive(@debug.Debug)
+pub fn Cli::to_repr(Self) -> @debug.Repr
+
+pub(all) struct Options {
+  directory : String
+  output : String
+  stdout : Bool
+  style : Style
+  include_patterns : Array[String]
+  ignore : Array[String]
+  use_gitignore : Bool
+  use_dot_ignore : Bool
+  use_default_patterns : Bool
+  security_check : Bool
+  encoding : String
+  token_budget : Int?
+  max_file_size : Int
+  tokenizer_path : String?
+  quiet : Bool
+  verbose : Bool
+} derive(@debug.Debug)
+pub fn Options::to_repr(Self) -> @debug.Repr
+
+pub(all) struct Patch {
+  mut output : String?
+  mut style : Style?
+  mut include_patterns : Array[String]
+  mut ignore : Array[String]
+  mut use_gitignore : Bool?
+  mut use_dot_ignore : Bool?
+  mut use_default_patterns : Bool?
+  mut security_check : Bool?
+  mut encoding : String?
+  mut token_budget : Int?
+  mut max_file_size : Int?
+  mut tokenizer_path : String?
+} derive(@debug.Debug)
+pub fn Patch::empty() -> Self
+pub fn Patch::to_repr(Self) -> @debug.Repr
+
+pub(all) enum Style {
+  Xml
+  Markdown
+} derive(Eq, @debug.Debug)
+pub fn Style::equal(Self, Self) -> Bool
+pub fn Style::not_equal(Self, Self) -> Bool
+pub fn Style::to_repr(Self) -> @debug.Repr
+
+// Type aliases
+
+// Traits
