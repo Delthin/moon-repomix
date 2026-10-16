@@ -1,0 +1,36 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "delthin/moon_repomix/security"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn scan(String, String, Int) -> Array[Finding] raise ScanError
+
+// Errors
+pub(all) suberror ScanError {
+  InvalidBomOffset
+  InvalidText
+  InvalidEngineRange
+  InputTooLarge
+} derive(Eq, @debug.Debug)
+pub fn ScanError::equal(Self, Self) -> Bool
+pub fn ScanError::not_equal(Self, Self) -> Bool
+pub fn ScanError::to_repr(Self) -> @debug.Repr
+
+// Types and methods
+pub(all) struct Finding {
+  rule : String
+  path : String
+  start : Int
+  end : Int
+  line : Int
+} derive(Eq, @debug.Debug)
+pub fn Finding::equal(Self, Self) -> Bool
+pub fn Finding::not_equal(Self, Self) -> Bool
+pub fn Finding::to_repr(Self) -> @debug.Repr
+
+// Type aliases
+
+// Traits
