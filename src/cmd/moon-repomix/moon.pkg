@@ -1,0 +1,8 @@
+import {
+  "delthin/moon_repomix" @repomix,
+  "moonbitlang/core/env",
+}
+
+pkgtype(kind: "executable")
+
+supported_targets = "native"

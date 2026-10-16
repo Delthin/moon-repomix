@@ -1,0 +1,13 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "delthin/moon_repomix"
+
+// Values
+pub fn version() -> String
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
