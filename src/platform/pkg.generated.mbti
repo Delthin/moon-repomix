@@ -1,0 +1,34 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "delthin/moon_repomix/platform"
+
+// Values
+pub fn absolute(String, String) -> String
+
+pub fn basename(String) -> String
+
+pub async fn commit(String, String) -> Unit
+
+pub async fn create_new(String, String) -> Unit
+
+pub async fn executable_path() -> String
+
+pub fn is_windows() -> Bool
+
+pub fn join(String, String) -> String
+
+pub async fn output_path(String, String) -> String
+
+pub fn parent(String) -> String
+
+pub fn separators(String) -> String
+
+pub async fn tokenizer_path() -> String
+
+// Errors
+pub(all) suberror OutputError
+
+// Types and methods
+
+// Type aliases
+
+// Traits
