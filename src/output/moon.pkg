@@ -1,0 +1,5 @@
+import {
+  "delthin/moon_repomix/document",
+}
+
+supported_targets = "native"

@@ -1,0 +1,25 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "delthin/moon_repomix/document"
+
+// Values
+pub fn compare_path(String, String) -> Int
+
+pub fn create(Array[File]) -> Document
+
+pub fn tree(Document) -> String
+
+// Errors
+
+// Types and methods
+pub(all) struct Document {
+  files : Array[File]
+}
+
+pub(all) struct File {
+  path : String
+  text : String
+}
+
+// Type aliases
+
+// Traits
