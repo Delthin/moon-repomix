@@ -1,0 +1,16 @@
+supported_targets = "native"
+
+options(
+  "native-stub": [ "canonical.c" ],
+)
+
+import {
+  "moonbitlang/async/fs",
+  "moonbitlang/async/os_error",
+  "moonbitlang/core/encoding/utf8",
+}
+
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/process",
+} for "wbtest"

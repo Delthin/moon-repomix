@@ -1,0 +1,45 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "delthin/moon_repomix/selection"
+
+// Values
+pub async fn select(String, SelectionOptions) -> Selection
+
+// Errors
+pub(all) suberror SelectionError {
+  InvalidRoot(String)
+  InvalidPattern(source~ : String, line~ : Int, pattern~ : String, detail~ : String)
+  InvalidRuleFile(String)
+  InvalidGitMetadata(String)
+  InvalidOutput(String)
+}
+
+// Types and methods
+pub(all) struct Candidate {
+  path : String
+  relative : String
+}
+
+pub(all) struct Selection {
+  root : String
+  files : Array[Candidate]
+  skipped : Array[Skipped]
+}
+
+pub(all) struct SelectionOptions {
+  include : Array[String]
+  ignore : Array[String]
+  use_gitignore : Bool
+  use_dot_ignore : Bool
+  use_default_patterns : Bool
+  output : String?
+}
+pub fn SelectionOptions::default() -> Self
+
+pub(all) struct Skipped {
+  path : String
+  reason : String
+}
+
+// Type aliases
+
+// Traits
