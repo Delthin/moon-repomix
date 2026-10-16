@@ -1,8 +1,14 @@
 import {
   "delthin/moon_repomix" @repomix,
+  "delthin/moon_repomix/config",
+  "delthin/moon_repomix/platform",
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/stdio",
+  "moonbitlang/async/os_error",
   "moonbitlang/core/env",
 }
 
-pkgtype(kind: "executable")
-
 supported_targets = "native"
+
+pkgtype(kind: "executable")

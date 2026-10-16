@@ -1,0 +1,28 @@
+///|
+let help : String =
+  #|moon-repomix — pack a local repository
+  #|Usage: moon-repomix [directory] [options]
+  #|
+  #|  -o, --output PATH              Output file (relative to working directory)
+  #|      --stdout                   Write only the document to stdout
+  #|      --style xml|markdown       Document format (default: xml)
+  #|      --include GLOBS            Comma-separated positive filters
+  #|  -i, --ignore GLOBS             Comma-separated exclusion filters
+  #|      --no-gitignore             Disable .gitignore and Git exclude rules
+  #|      --no-dot-ignore            Disable .ignore and .repomixignore
+  #|      --no-default-patterns      Disable built-in excludes
+  #|      --no-security-check        Disable secret scanning (warns)
+  #|      --token-count-encoding NAME  Only o200k_base is supported
+  #|      --token-budget N           Positive limit; output is kept if exceeded
+  #|      --tokenizer-path PATH      Explicit o200k_base.tiktoken resource
+  #|  -c, --config PATH              Select JSON configuration
+  #|      --init                     Create configuration without overwriting
+  #|      --parsable-style           Accepted compatibility option
+  #|      --quiet / --verbose        Diagnostic level (mutually exclusive)
+  #|  -h, --help                     Show this help without loading resources
+  #|  -v, --version                  Show version without loading resources
+  #|
+  #|Default config: <directory>/repomix.config.json.
+  #|Default output: repomix-output.xml or repomix-output.md.
+  #|With --stdout, redirect outside the input root or explicitly ignore the target.
+  #|

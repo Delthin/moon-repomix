@@ -1,13 +1,70 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "delthin/moon_repomix"
 
+import {
+  "delthin/moon_repomix/config",
+  "delthin/moon_repomix/metrics",
+  "delthin/moon_repomix/security",
+  "delthin/moon_repomix/selection",
+}
+
 // Values
+pub fn options(String) -> @config.Options raise
+
+pub async fn pack(@config.Options, Runtime) -> PackResult
+
 pub fn version() -> String
 
 // Errors
+pub(all) suberror PackError {
+  ConfigurationError
+  SelectionError
+  ScanError
+  ResourceError
+}
 
 // Types and methods
+pub(all) enum BudgetStatus {
+  NotSet
+  Within(Int)
+  Exceeded(Int)
+}
+
+pub(all) struct FileStats {
+  path : String
+  disk_bytes : Int
+  tokens : Int
+}
+
+pub struct PackResult {
+  text : String
+  bytes : Int
+  tokens : Int
+  files : Array[FileStats]
+  skipped : Array[@selection.Skipped]
+  findings : Array[@security.Finding]
+  security : SecurityStatus
+  budget : BudgetStatus
+}
+
+pub struct Runtime {
+  encoder : @metrics.Encoder
+}
+pub async fn Runtime::load(String) -> Self
+
+pub(all) enum SecurityStatus {
+  Passed
+  Excluded
+  Disabled
+}
 
 // Type aliases
+pub using @security {type Finding}
+
+pub using @config {type Options}
+
+pub using @selection {type Skipped}
+
+pub using @config {type Style}
 
 // Traits

@@ -1,4 +1,4 @@
-# 文件选择（C05 / C08）
+# 文件选择
 
 包：`delthin/moon_repomix/selection`。仅发现候选与读取规则，不打开候选正文；读取快照、二进制判断、安全扫描与输出提交由后续阶段负责。
 
@@ -6,7 +6,7 @@
 
 ```moonbit
 pub(all) struct SelectionOptions {
-  include : Array[String]
+  include_patterns : Array[String]
   ignore : Array[String]
   use_gitignore : Bool
   use_dot_ignore : Bool
@@ -24,7 +24,7 @@ pub(all) struct Selection {
 pub async fn select(root : String, options : SelectionOptions) -> Selection
 ```
 
-异步函数隐式 raises。默认 include/ignore 为空、三个开关均 true、output 为 None。`include` 是约定字段名，当前编译器会给出 reserved_keyword 警告，不影响接口。
+异步函数隐式 raises。默认 include_patterns/ignore 为空、三个开关均 true、output 为 None。下文的 include 指正向选择模式。
 
 `root` 必须是绝对普通目录；最终根组件是链接/reparse point 时拒绝，包括尾随 `/`、`/.` 的写法。返回 root 为真实绝对路径。Windows 接受盘符绝对路径或 UNC share，输入反斜杠转为 `/`。候选 path 为绝对 I/O 路径，relative 为根相对路径；skipped.path 同样根相对。保留大小写、Unicode 原文，不折叠、不做 Unicode 归一化；Unix 文件名内的反斜杠是普通字符而非分隔符。
 
@@ -84,7 +84,7 @@ skipped.reason 当前形式：`Symlink`、`UnsupportedFileType`、`OutputFile`�
 
 ## 定点验证
 
-使用任务指定 MOON_HOME，均在 selection 工作树运行：
+在仓库根目录运行：
 
 ```text
 moon fmt src/selection
@@ -95,4 +95,4 @@ moon check src/selection --target native
 
 `selection_wbtest.mbt` 的 6 个测试仅创建自动清理的临时合成树：逐项比较真实 `git check-ignore --no-index`（屏蔽全局/系统配置）、父层/嵌套/目录反选与剪枝、dot/custom/默认独立开关、真实父路径输出别名与缺失输出、UTF-8 顺序、未读正文、链接/断链/FIFO、规则解码和类型错误、无 Git 父层与 worktree commondir。测试需要现有 Git，Unix 类型夹具还需要现有 mkfifo。
 
-macOS 原生运行已覆盖上述夹具；Windows MoonBit 条件分支通过 `moonc check ... -cfg platform=windows -no-mi` 静态检查（复用本地依赖接口，不等于 Windows 构建）。Windows C 分支、junction/UNC/大小写别名运行时，以及 socket/设备实物夹具未在本机验证；需要主代理的目标平台测试。未运行全仓 build/e2e。
+CLI 功能测试还覆盖 Windows junction 排除；目标平台运行由 native CI 矩阵执行。

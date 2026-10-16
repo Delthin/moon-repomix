@@ -1,7 +1,7 @@
 ///|
 /// Positive include filters and independent exclusion layers. Output must be absolute.
 pub(all) struct SelectionOptions {
-  include : Array[String]
+  include_patterns : Array[String]
   ignore : Array[String]
   use_gitignore : Bool
   use_dot_ignore : Bool
@@ -13,7 +13,7 @@ pub(all) struct SelectionOptions {
 /// Enable project ignore files and built-in exclusions, with no include restriction.
 pub fn SelectionOptions::default() -> SelectionOptions {
   {
-    include: [],
+    include_patterns: [],
     ignore: [],
     use_gitignore: true,
     use_dot_ignore: true,

@@ -1,11 +1,132 @@
 ///|
-fn main {
-  let args = @env.args()
-  if args.contains("--version") {
-    println("moon-repomix \{@repomix.version()}")
+extern "c" fn exit(code : Int32) -> Unit = "exit"
+
+///|
+async fn read_config(cli : @config.Cli, cwd : String) -> @config.Patch? {
+  let explicit = cli.config_path is Some(_)
+  let path = match cli.config_path {
+    Some(path) => @platform.absolute(path, cwd)
+    None =>
+      @platform.join(
+        @platform.absolute(cli.directory, cwd),
+        "repomix.config.json",
+      )
+  }
+  let kind = @fs.kind(path, follow_symlink=false) catch {
+    @os_error.OSError(_, context=_) as err if !explicit && err.is_ENOENT() =>
+      return None
+    _ => raise Configuration
+  }
+  if kind != @fs.Regular {
+    raise Configuration
+  }
+  let text = @fs.read_file(path).text() catch { _ => raise Configuration }
+  Some(@config.parse_json(text) catch { _ => raise Configuration })
+}
+
+///|
+suberror CliError {
+  Configuration
+  Resource
+  Write
+}
+
+///|
+async fn run() -> Int32 {
+  let argv = @env.args()
+  let cli = @config.parse_cli(argv[1:].to_owned()) catch {
+    _ => raise Configuration
+  }
+  match cli.action {
+    Help => {
+      @stdio.stdout.write(help)
+      return 0
+    }
+    Version => {
+      @stdio.stdout.write("moon-repomix " + @repomix.version() + "\n")
+      return 0
+    }
+    _ => ()
+  }
+  let cwd = @env.current_dir().unwrap_or(".")
+  if cli.action is Init {
+    let path = match cli.config_path {
+      Some(path) => @platform.absolute(path, cwd)
+      None =>
+        @platform.join(
+          @platform.absolute(cli.directory, cwd),
+          "repomix.config.json",
+        )
+    }
+    @platform.create_new(
+      path, "{\n  \"output\": { \"style\": \"xml\" },\n  \"security\": { \"enableSecurityCheck\": true }\n}\n",
+    ) catch {
+      _ => raise Write
+    }
+    if !cli.quiet {
+      @stdio.stderr.write("Created configuration.\n")
+    }
+    return 0
+  }
+  let patch = read_config(cli, cwd)
+  let options = @config.resolve(cli, patch) catch { _ => raise Configuration }
+  if !options.security_check {
+    @stdio.stderr.write("Warning: secret scanning is disabled.\n")
+  }
+  let resource = match options.tokenizer_path {
+    Some(path) => @platform.absolute(path, cwd)
+    None => @platform.tokenizer_path() catch { _ => raise Resource }
+  }
+  let runtime = @repomix.Runtime::load(resource)
+  let result = @repomix.pack(options, runtime)
+  if options.stdout {
+    @stdio.stdout.write(result.text) catch {
+      _ => raise Write
+    }
   } else {
-    println(
-      "moon-repomix — pack a local repository\nUsage: moon-repomix [directory] [options]\n  --help       Show help\n  --version    Show version",
-    )
+    let path = @platform.output_path(options.output, cwd) catch {
+      _ => raise Write
+    }
+    @platform.commit(path, result.text) catch {
+      _ => raise Write
+    }
+  }
+  report(result, options)
+  if result.budget is Exceeded(_) {
+    1
+  } else {
+    0
+  }
+}
+
+///|
+async fn main {
+  let code = run() catch {
+    err => {
+      let category = if @async.is_cancellation_error(err) {
+        "Cancelled"
+      } else {
+        match err {
+          Configuration | @repomix.ConfigurationError => "ConfigurationError"
+          @repomix.SelectionError => "SelectionError"
+          @repomix.ScanError => "ScanError"
+          Resource | @repomix.ResourceError => "ResourceError"
+          Write => "OutputError"
+          _ => "OperationError"
+        }
+      }
+      @async.protect_from_cancel(
+        () => {
+          @stdio.stderr.write("moon-repomix: " + category + "\n") catch {
+            _ => ()
+          }
+        },
+        resume_on_cancel=false,
+      )
+      1
+    }
+  }
+  if code != 0 {
+    exit(code)
   }
 }

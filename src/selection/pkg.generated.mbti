@@ -26,7 +26,7 @@ pub(all) struct Selection {
 }
 
 pub(all) struct SelectionOptions {
-  include : Array[String]
+  include_patterns : Array[String]
   ignore : Array[String]
   use_gitignore : Bool
   use_dot_ignore : Bool

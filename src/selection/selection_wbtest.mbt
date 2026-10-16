@@ -148,7 +148,7 @@ async test "scoped gitignore agrees with Git; excluded parents cannot be re-incl
     }
     let options = {
       ..SelectionOptions::default(),
-      include: [
+      include_patterns: [
         "**/*.txt", "**/*.log", "**/*.c", "**/*.h", "**/*.uni", "**/*.multi",
       ],
       use_dot_ignore: false,
@@ -255,7 +255,7 @@ async test "output aliases, nonordinary files, include directories and UTF8 orde
     @fs.chmod(join(root, "src/readme.md"), 0)
     let options = {
       ..SelectionOptions::default(),
-      include: ["src/"],
+      include_patterns: ["src/"],
       output: Some(join(parent_dir, "alias/src/output.txt")),
     }
     let result = @async.with_timeout(5000, () => select(root, options))

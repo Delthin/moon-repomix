@@ -4,6 +4,7 @@ package "delthin/moon_repomix/cmd/moon-repomix"
 // Values
 
 // Errors
+type CliError
 
 // Types and methods
 
