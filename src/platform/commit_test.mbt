@@ -1,5 +1,12 @@
 ///|
 async test "atomic replacement and executable-relative resource paths" {
+  if @platform.is_windows() {
+    assert_eq(
+      @platform.separators("C:\\目录\\nested\\file"),
+      "C:/目录/nested/file",
+    )
+    assert_eq(@platform.parent("C:\\目录\\nested\\file"), "C:/目录/nested")
+  }
   let dir = @fs.tmpdir(prefix="moon-repomix-commit-")
   defer @fs.rmdir(dir, recursive=true)
   let output = dir + "/上下文.xml"

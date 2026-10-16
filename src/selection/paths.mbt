@@ -1,7 +1,7 @@
 ///|
 #cfg(platform="windows")
 fn separators(path : String) -> String {
-  path.replace(old="\\", new="/")
+  path.replace_all(old="\\", new="/")
 }
 
 ///|

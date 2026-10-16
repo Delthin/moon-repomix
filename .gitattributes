@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+# These runtime resources are checked by their exact SHA-256 digest.
+assets/*.tiktoken -text
+assets/tokenizer-unicode-16.0.0.txt -text

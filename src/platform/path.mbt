@@ -15,7 +15,7 @@ pub fn is_windows() -> Bool {
 ///|
 pub fn separators(path : String) -> String {
   if is_windows() {
-    path.replace(old="\\", new="/")
+    path.replace_all(old="\\", new="/")
   } else {
     path
   }
