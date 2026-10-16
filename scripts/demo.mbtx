@@ -1,0 +1,123 @@
+///|
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/async@0.22.5/io",
+  "moonbitlang/core/env",
+}
+
+///|
+async fn put(path : String, data : &@io.Data) -> Unit {
+  @fs.write_file(path, data, create_mode=CreateNew)
+}
+
+///|
+async fn capture(
+  binary : String,
+  args : Array[String],
+  log : String,
+) -> (Int32, String) {
+  let (code, out, err) = @process.collect_output(binary, args)
+  let diagnostics = err.text()
+  put(log, diagnostics)
+  assert_eq(out.text(), "")
+  (code, diagnostics)
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() <= 2 else {
+    fail("Usage: moon run --target native scripts/demo.mbtx [NEW_OUTPUT_DIR]")
+  }
+  let repo = @fs.realpath(".")
+  let destination = if args.length() == 2 {
+    args[1]
+  } else {
+    if @fs.exists("dist") {
+      assert_true(@fs.kind("dist", follow_symlink=false) == Directory)
+    } else {
+      @fs.mkdir("dist")
+    }
+    "dist/demo"
+  }
+  // A non-recursive mkdir reserves a fresh directory; existing paths fail.
+  @fs.mkdir(destination)
+  let output = @fs.realpath(destination)
+  let input = output + "/input"
+  @fs.mkdir(input + "/src", recursive=true)
+  // Isolate this fixture from ancestor ignore rules such as the repo's dist/.
+  @fs.mkdir(input + "/.git")
+  for
+    path in [
+      "README.md", ".gitignore", "debug.log", "src/.gitignore", "src/greet.mbt",
+      "src/greet.ts", "src/scratch.txt",
+    ] {
+    put(input + "/" + path, @fs.read_file(repo + "/examples/demo/" + path))
+  }
+  // Synthetic scanner input, assembled only at runtime; never print its value.
+  let secret = "ghp_" + "Ab9Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
+  put(input + "/credentials.txt", "token=" + secret + "\n")
+  let build = @process.run("moon", ["build", "--target", "native", "--release"])
+  assert_eq(build, 0)
+  let binary = repo +
+    "/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe"
+  let common = [
+    input,
+    "--tokenizer-path",
+    repo + "/assets/tokenizer-o200k_base.tiktoken",
+  ]
+  println("输出目录：" + output)
+  let (xml_code, xml_log) = capture(
+    binary,
+    common + ["--output", output + "/context.xml", "--verbose"],
+    output + "/xml.log",
+  )
+  assert_eq(xml_code, 0)
+  let xml = @fs.read_file(output + "/context.xml").text()
+  assert_true(xml.has_prefix("<?xml version="))
+  assert_true(xml.contains("path=\"src/greet.mbt\""))
+  assert_true(xml.contains("path=\"src/greet.ts\""))
+  assert_true(xml.contains("你好"))
+  for path in ["debug.log", "src/scratch.txt", "credentials.txt"] {
+    assert_false(xml.contains("path=\"" + path + "\""))
+    assert_true(xml_log.contains("\"" + path + "\""))
+  }
+  assert_true(xml_log.contains("SecurityFinding"))
+  assert_false(xml.contains(secret))
+  assert_false(xml_log.contains(secret))
+  println(
+    "1. XML：包含两种语言的源码；日志、嵌套忽略文件和密钥文件已排除。",
+  )
+  let (md_code, md_log) = capture(
+    binary,
+    common + ["--style", "markdown", "--output", output + "/context.md"],
+    output + "/markdown.log",
+  )
+  assert_eq(md_code, 0)
+  let markdown = @fs.read_file(output + "/context.md").text()
+  assert_true(markdown.contains("src/greet.mbt"))
+  assert_true(markdown.contains("src/greet.ts"))
+  assert_true(markdown.contains("```"))
+  assert_false(markdown.contains(secret))
+  assert_false(md_log.contains(secret))
+  println(
+    "2. Markdown：相同输入，换一种便于直接阅读的输出格式。",
+  )
+  let (budget_code, budget_log) = capture(
+    binary,
+    common + ["--output", output + "/budget.xml", "--token-budget", "1"],
+    output + "/budget.log",
+  )
+  assert_eq(budget_code, 1)
+  assert_true(budget_log.contains("complete output retained"))
+  assert_false(budget_log.contains(secret))
+  assert_eq(@fs.read_file(output + "/budget.xml").text(), xml)
+  println(
+    "3. 预算 1 token：CLI 退出码为 1；budget.xml 与 context.xml 完全一致。",
+  )
+  println(
+    "演示完成。文档和诊断日志已保留；input/credentials.txt 仅含合成测试数据。",
+  )
+}
