@@ -1,0 +1,73 @@
+///|
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/core/env",
+}
+
+///|
+async fn copy(source : String, target : String) -> Unit {
+  let data = @fs.read_file(source)
+  @fs.write_file(target, data, create_mode=CreateOrTruncate)
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 3 else {
+    fail("Usage: moon run scripts/package.mbtx DESTINATION PLATFORM")
+  }
+  let destination = args[1]
+  let platform = args[2]
+  guard ["macos-arm64", "macos-x64", "linux-x64", "windows-x64"].contains(
+    platform,
+  ) else {
+    fail("Unsupported platform label")
+  }
+  let windows = platform == "windows-x64"
+  let code = @process.run("moon", ["build", "--target", "native", "--release"])
+  guard code == 0 else { fail("Native release build failed") }
+  let stage = destination + "/moon-repomix-" + platform
+  guard !@fs.exists(stage) else { fail("Package directory already exists") }
+  @fs.mkdir(stage + "/bin", recursive=true)
+  @fs.mkdir(stage + "/share/moon-repomix", recursive=true)
+  @fs.mkdir(stage + "/LICENSES", recursive=true)
+  let binary = stage + "/bin/moon-repomix" + (if windows { ".exe" } else { "" })
+  copy("_build/native/release/build/cmd/moon-repomix/moon-repomix.exe", binary)
+  if !windows {
+    @fs.chmod(binary, 0o755)
+  }
+  copy(
+    "assets/tokenizer-o200k_base.tiktoken",
+    stage + "/share/moon-repomix/o200k_base.tiktoken",
+  )
+  copy(
+    "assets/tokenizer-unicode-16.0.0.txt",
+    stage + "/share/moon-repomix/tokenizer-unicode-16.0.0.txt",
+  )
+  @fs.mkdir(stage + "/docs", recursive=true)
+  for name in @fs.readdir("docs") {
+    if @fs.kind("docs/" + name, follow_symlink=false) is Regular {
+      copy("docs/" + name, stage + "/docs/" + name)
+    }
+  }
+  copy("README.md", stage + "/README.md")
+  copy("LICENSE", stage + "/LICENSE")
+  for name in @fs.readdir("LICENSES") {
+    if @fs.kind("LICENSES/" + name, follow_symlink=false) is Regular {
+      copy("LICENSES/" + name, stage + "/LICENSES/" + name)
+    }
+  }
+  copy("docs/tokenization.md", stage + "/share/moon-repomix/RESOURCE.md")
+  let archive = "moon-repomix-" + platform + ".tar.gz"
+  let packed = @process.run("tar", [
+    "-czf",
+    destination + "/" + archive,
+    "-C",
+    destination,
+    "moon-repomix-" + platform,
+  ])
+  guard packed == 0 else { fail("Archive creation failed") }
+  println(destination + "/" + archive)
+}

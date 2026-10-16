@@ -1,0 +1,21 @@
+///|
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/process",
+}
+
+///|
+async fn main {
+  let expected = "v0.10.15+943464bfa"
+  let (code, stdout, stderr) = @process.collect_output("moonc", ["-v"])
+  let actual = stdout.text() + stderr.text()
+  guard code == 0 && actual.contains(expected) else {
+    fail(
+      "Expected moonc " +
+      expected +
+      "; update the toolchain and golden fixtures together before changing this requirement. Found: " +
+      actual,
+    )
+  }
+  println("Verified moonc " + expected)
+}

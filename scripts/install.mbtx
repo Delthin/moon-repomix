@@ -1,0 +1,70 @@
+///|
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/core/env",
+}
+
+///|
+async fn install_file(
+  source : String,
+  target : String,
+  executable : Bool,
+) -> Unit {
+  if @fs.exists(target) && @fs.kind(target, follow_symlink=false) != Regular {
+    fail("Installation target must be a regular file")
+  }
+  let temporary = target + ".install-\{@env.now()}.tmp"
+  @fs.write_file(temporary, @fs.read_file(source), create_mode=CreateNew)
+  errdefer (@fs.remove(temporary) catch { _ => () })
+  if executable {
+    @fs.chmod(temporary, 0o755)
+  }
+  @fs.rename(temporary, target, replace=true)
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 2 else {
+    fail("Usage: moon run scripts/install.mbtx PREFIX")
+  }
+  let prefix = args[1]
+  guard !prefix.is_empty() else { fail("PREFIX must not be empty") }
+  let windows = @env.get_env_var("OS") == Some("Windows_NT")
+  let code = @process.run("moon", ["build", "--target", "native", "--release"])
+  guard code == 0 else { fail("Native release build failed") }
+  @fs.mkdir(prefix + "/bin", recursive=true)
+  @fs.mkdir(prefix + "/share/moon-repomix", recursive=true)
+  install_file(
+    "assets/tokenizer-o200k_base.tiktoken",
+    prefix + "/share/moon-repomix/o200k_base.tiktoken",
+    false,
+  )
+  install_file(
+    "assets/tokenizer-unicode-16.0.0.txt",
+    prefix + "/share/moon-repomix/tokenizer-unicode-16.0.0.txt",
+    false,
+  )
+  let binary = prefix +
+    "/bin/moon-repomix" +
+    (if windows { ".exe" } else { "" })
+  install_file(
+    "_build/native/release/build/cmd/moon-repomix/moon-repomix.exe",
+    binary,
+    !windows,
+  )
+  @fs.mkdir(prefix + "/share/moon-repomix/LICENSES", recursive=true)
+  install_file("LICENSE", prefix + "/share/moon-repomix/LICENSE", false)
+  for name in @fs.readdir("LICENSES") {
+    if @fs.kind("LICENSES/" + name, follow_symlink=false) is Regular {
+      install_file(
+        "LICENSES/" + name,
+        prefix + "/share/moon-repomix/LICENSES/" + name,
+        false,
+      )
+    }
+  }
+  println("Installed " + binary)
+}

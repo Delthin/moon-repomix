@@ -154,9 +154,7 @@ file keeps golden generation offline after tooling setup. For tests launched
 from another cwd, set `TOKENIZER_ASSETS` to the absolute fixture directory.
 The loader itself needs only its absolute ranks path, not this test variable.
 
-Validated on macOS arm64 native with MoonBit toolchain
-`moon 0.1.20261012 (748b63c)` / `moonc v0.10.15+943464bfa`. Standalone `.mbtx`
-helpers were exercised with resolved `moonbitlang/async@0.22.5`; product tests
-use the pinned module dependencies. Windows/Linux and CLI installation-layout
-integration are not yet runtime-validated. This fixture set is not an exhaustive
-proof for every possible string, and no throughput target is claimed.
+The reference fixtures target MoonBit `moonc v0.10.15+943464bfa`.
+Standalone `.mbtx` helpers resolve their own dependencies; product tests use
+those pinned in `moon.mod`. The native CI matrix also exercises installed
+resources and extracted distributions from an unrelated working directory.

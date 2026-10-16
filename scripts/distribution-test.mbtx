@@ -1,0 +1,73 @@
+///|
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/core/env",
+}
+
+///|
+async fn smoke(binary : String, cwd : String) -> Unit {
+  let (code, stdout, stderr) = @process.collect_output(
+    binary,
+    [".", "--stdout", "--quiet"],
+    cwd~,
+  )
+  assert_eq(code, 0)
+  assert_true(stdout.text().contains("path=\"你好.txt\""))
+  assert_true(stdout.text().contains("hello 😀"))
+  assert_eq(stderr.text(), "")
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 2 else {
+    fail(
+      "Usage: moon run --target native scripts/distribution-test.mbtx PLATFORM",
+    )
+  }
+  let platform = args[1]
+  let windows = @env.get_env_var("OS") == Some("Windows_NT")
+  let suffix = if windows { ".exe" } else { "" }
+  let temp = @fs.tmpdir(prefix="moon-repomix-install-")
+  defer @fs.rmdir(temp, recursive=true)
+  let prefix = temp + "/安装 空间"
+  let fixture = temp + "/项目"
+  @fs.mkdir(fixture)
+  @fs.write_file(fixture + "/你好.txt", "hello 😀", create_mode=CreateNew)
+  let installed = @process.run("moon", [
+    "run", "--target", "native", "scripts/install.mbtx", prefix,
+  ])
+  assert_eq(installed, 0)
+  smoke(prefix + "/bin/moon-repomix" + suffix, fixture)
+  let moved = temp + "/relocated"
+  @fs.rename(prefix, moved)
+  smoke(moved + "/bin/moon-repomix" + suffix, fixture)
+  if !windows {
+    let link = temp + "/alias"
+    @fs.symlink(target=moved + "/bin/moon-repomix", link)
+    smoke(link, fixture)
+  }
+  let distribution = temp + "/dist"
+  let packed = @process.run("moon", [
+    "run", "--target", "native", "scripts/package.mbtx", distribution, platform,
+  ])
+  assert_eq(packed, 0)
+  let unpacked = temp + "/unpacked"
+  @fs.mkdir(unpacked)
+  let unpack = @process.run("tar", [
+    "-xzf",
+    distribution + "/moon-repomix-" + platform + ".tar.gz",
+    "-C",
+    unpacked,
+  ])
+  assert_eq(unpack, 0)
+  smoke(
+    unpacked + "/moon-repomix-" + platform + "/bin/moon-repomix" + suffix,
+    fixture,
+  )
+  println(
+    "PASS: install, relocation, executable-relative assets and extracted archive",
+  )
+}
