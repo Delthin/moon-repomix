@@ -1,0 +1,202 @@
+///|
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/process",
+  "moonbitlang/async/io",
+  "moonbitlang/core/env",
+  "moonbitlang/core/string",
+}
+
+///|
+async fn put(path : String, data : &@io.Data) -> Unit {
+  @fs.write_file(path, data, create_mode=CreateOrTruncate)
+}
+
+///|
+async fn run(
+  binary : String,
+  args : Array[String],
+  cwd : String,
+) -> (Int32, String, String) {
+  let (code, out, err) = @process.collect_output(binary, args, cwd~)
+  (code, out.text(), err.text())
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() >= 3 else {
+    fail(
+      "Usage: moon run scripts/functional.mbtx BINARY VOCABULARY [--xml-oracle]",
+    )
+  }
+  let binary = @fs.realpath(args[1])
+  let vocabulary = @fs.realpath(args[2])
+  let windows = @env.get_env_var("OS") == Some("Windows_NT")
+  let temp = @fs.tmpdir(prefix="moon-repomix-functional-")
+  defer @fs.rmdir(temp, recursive=true)
+  let root = temp + "/项目 空间"
+  @fs.mkdir(root + "/src", recursive=true)
+  put(root + "/.gitignore", "ignored.txt\n")
+  put(root + "/ignored.txt", "excluded")
+  put(
+    root + "/src/hello.mbt",
+    "/// 中文 😀\r\nfn hello { println(\"hi\") }\r",
+  )
+  put(root + "/README.md", "hello\n````\n# data\n")
+  put(root + "/bad.bin", b"a\x00b")
+  let secret = "ghp_" + "Ab9Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
+  put(root + "/secret.txt", "token=" + secret)
+  if !windows {
+    @fs.symlink(target="src/hello.mbt", root + "/linked.mbt")
+    let code = @process.run("mkfifo", [root + "/pipe"])
+    assert_eq(code, 0)
+  } else {
+    let code = @process.run("cmd", [
+      "/c",
+      "mklink",
+      "/J",
+      root + "/junction",
+      root + "/src",
+    ])
+    assert_eq(code, 0)
+  }
+  let common = [
+    root, "--tokenizer-path", vocabulary, "--include", "src/**,README.md,secret.txt,bad.bin,linked.mbt,pipe,junction/**",
+  ]
+  let output = temp + "/context.xml"
+  let (code, stdout, stderr) = run(
+    binary,
+    common + ["--output", output, "--verbose"],
+    temp,
+  )
+  assert_eq(code, 0)
+  assert_eq(stdout, "")
+  let xml = @fs.read_file(output).text()
+  assert_true(xml.has_prefix("<?xml version="))
+  assert_true(xml.contains("path=\"src/hello.mbt\""))
+  assert_false(xml.contains(secret))
+  assert_false(stderr.contains(secret))
+  assert_false(xml.contains("path=\"secret.txt\""))
+  assert_false(xml.contains("path=\"bad.bin\""))
+  assert_true(stderr.contains("SecurityFinding"))
+  assert_true(stderr.contains("Binary"))
+  assert_false(xml.contains("path=\"linked.mbt\""))
+  assert_false(xml.contains("path=\"junction/"))
+  let tokens = for word in stderr.split(" "); previous = "" {
+    if word == "tokens" {
+      break @string.parse_int(previous)
+    }
+    continue word.to_owned()
+  } nobreak {
+    fail("Missing full-document token count")
+  }
+  let (equal, _, _) = run(
+    binary,
+    common + ["--output", output, "--token-budget", tokens.to_string()],
+    temp,
+  )
+  assert_eq(equal, 0)
+  let (over, _, over_err) = run(
+    binary,
+    common + ["--output", output, "--token-budget", (tokens - 1).to_string()],
+    temp,
+  )
+  assert_eq(over, 1)
+  assert_eq(@fs.read_file(output).text(), xml)
+  assert_true(over_err.contains("complete output retained"))
+  let (bad, _, _) = run(
+    binary,
+    [root, "--tokenizer-path", temp + "/missing", "-o", output],
+    temp,
+  )
+  assert_eq(bad, 1)
+  assert_eq(@fs.read_file(output).text(), xml)
+  let (stream_code, stream, stream_err) = run(
+    binary,
+    common + ["--stdout", "--quiet"],
+    temp,
+  )
+  assert_eq(stream_code, 0)
+  assert_eq(stream, xml)
+  assert_eq(stream_err, "")
+  let (off_code, off, off_err) = run(
+    binary,
+    common + ["--stdout", "--no-security-check", "--quiet"],
+    temp,
+  )
+  assert_eq(off_code, 0)
+  assert_true(off.contains(secret))
+  assert_true(off_err.contains("scanning is disabled"))
+  let (md_code, md, _) = run(
+    binary,
+    common + ["--stdout", "--style", "markdown", "--quiet"],
+    temp,
+  )
+  assert_eq(md_code, 0)
+  assert_true(md.contains("`````\nhello\n````\n# data\n`````"))
+  let (invalid, invalid_out, _) = run(binary, [root, "--unknown"], temp)
+  assert_eq(invalid, 1)
+  assert_eq(invalid_out, "")
+  let (init, _, _) = run(binary, [root, "--init", "--quiet"], temp)
+  assert_eq(init, 0)
+  let config = @fs.read_file(root + "/repomix.config.json").text()
+  let (again, _, _) = run(binary, [root, "--init"], temp)
+  assert_eq(again, 1)
+  assert_eq(@fs.read_file(root + "/repomix.config.json").text(), config)
+  put(root + "/repomix.config.json", "{\"output\":{\"unknown\":true}}")
+  let (config_error, config_out, _) = run(binary, common + ["--stdout"], temp)
+  assert_eq(config_error, 1)
+  assert_eq(config_out, "")
+  @fs.remove(root + "/repomix.config.json")
+  let self_output = root + "/self.xml"
+  let self_args = [
+    root, "--tokenizer-path", vocabulary, "-o", self_output, "--no-default-patterns",
+    "--quiet",
+  ]
+  let (self_first, _, _) = run(binary, self_args, temp)
+  assert_eq(self_first, 0)
+  let first = @fs.read_file(self_output).text()
+  let (self_second, _, _) = run(binary, self_args, temp)
+  assert_eq(self_second, 0)
+  assert_eq(@fs.read_file(self_output).text(), first)
+  if args.contains("--xml-oracle") {
+    let (parsed, _, parse_err) = run("xmllint", ["--noout", output], temp)
+    assert_eq(parsed, 0)
+    assert_eq(parse_err, "")
+    let (readback, body, _) = run(
+      "xmllint",
+      [
+        "--xpath", "string(/repository/files/file[@path='src/hello.mbt'])", output,
+      ],
+      temp,
+    )
+    assert_eq(readback, 0)
+    // xmllint appends one newline after the XPath string result.
+    assert_eq(body, @fs.read_file(root + "/src/hello.mbt").text() + "\n")
+    if !windows {
+      let unusual = "a\r\n\t\"<&.txt"
+      put(root + "/" + unusual, "A\r\nB\r<&>")
+      let (edge, _, _) = run(
+        binary,
+        [
+          root, "--tokenizer-path", vocabulary, "--include", unusual, "-o", output,
+          "--quiet",
+        ],
+        temp,
+      )
+      assert_eq(edge, 0)
+      let (path_code, path_value, _) = run(
+        "xmllint",
+        ["--xpath", "string(/repository/files/file/@path)", output],
+        temp,
+      )
+      assert_eq(path_code, 0)
+      assert_eq(path_value, unusual + "\n")
+    }
+  }
+  println(
+    "PASS: CLI, scans, XML/Markdown, budget, failure preservation, config, output exclusion and platform links",
+  )
+}

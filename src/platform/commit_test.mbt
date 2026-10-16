@@ -17,6 +17,19 @@ async test "atomic replacement and executable-relative resource paths" {
   } noraise {
     _ => fail("a directory must not be replaced")
   }
+  let cancelled = @async.with_task_group(group => {
+    let task = group.spawn(async fn() { @platform.commit(output, "cancelled") })
+    @async.pause()
+    task.cancel()
+    try {
+      task.wait()
+      false
+    } catch {
+      error => @async.is_cancellation_error(error)
+    }
+  })
+  assert_true(cancelled)
+  assert_eq(@fs.read_file(output).binary(), b"new\r\n")
   assert_eq(@fs.readdir(dir).length(), 1)
   let executable = @platform.executable_path()
   assert_true(@fs.kind(executable) is Regular)
