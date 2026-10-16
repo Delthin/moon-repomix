@@ -1,0 +1,157 @@
+///|
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+}
+
+///|
+async fn cli(
+  binary : String,
+  args : Array[String],
+  cwd : String,
+) -> (Int32, String, String) {
+  let (code, out, err) = @process.collect_output(binary, args, cwd~)
+  (code, out.text(), err.text())
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 3 else {
+    fail(
+      "Usage: moon run --target native scripts/scenarios.mbtx BINARY VOCABULARY",
+    )
+  }
+  let binary = @fs.realpath(args[1])
+  let vocabulary = @fs.realpath(args[2])
+  let temp = @fs.tmpdir(prefix="moon-repomix-scenarios-")
+  defer @fs.rmdir(temp, recursive=true)
+  for action in ["--help", "--version"] {
+    let (code, text, error) = cli(
+      binary,
+      [action, "--tokenizer-path", temp + "/missing"],
+      temp,
+    )
+    assert_eq(code, 0)
+    assert_true(text.contains("moon-repomix"))
+    assert_eq(error, "")
+  }
+
+  let root = temp + "/字节 边界"
+  @fs.mkdir(root)
+  @fs.write_file(
+    root + "/repomix.config.json",
+    "{\"include\":[\"*.txt\"],\"input\":{\"maxFileSize\":4}}",
+    create_mode=CreateNew,
+  )
+  @fs.write_file(root + "/bom.txt", b"\xef\xbb\xbfA", create_mode=CreateNew)
+  @fs.write_file(root + "/exact.txt", "1234", create_mode=CreateNew)
+  @fs.write_file(root + "/large.txt", "12345", create_mode=CreateNew)
+  @fs.write_file(root + "/invalid.txt", b"\xc0\xaf", create_mode=CreateNew)
+  @fs.write_file(root + "/nul.txt", b"a\x00b", create_mode=CreateNew)
+  @fs.write_file(root + "/empty.txt", "", create_mode=CreateNew)
+  let common = ["--tokenizer-path", vocabulary]
+  let (bytes_code, bytes_xml, bytes_error) = cli(
+    binary,
+    [root, "--stdout"] + common,
+    temp,
+  )
+  assert_eq(bytes_code, 0)
+  for accepted in ["bom.txt", "exact.txt", "empty.txt"] {
+    assert_true(
+      bytes_xml.contains("<file path=\"" + accepted + "\">"),
+      msg=accepted,
+    )
+  }
+  for rejected in ["large.txt", "invalid.txt", "nul.txt"] {
+    assert_false(
+      bytes_xml.contains("<file path=\"" + rejected + "\">"),
+      msg=rejected,
+    )
+  }
+  assert_false(bytes_xml.contains("\uFEFF"))
+  assert_true(bytes_error.contains("TooLarge"))
+  assert_true(bytes_error.contains("InvalidUtf8"))
+  assert_true(bytes_error.contains("Binary"))
+
+  let config_root = temp + "/配置"
+  @fs.mkdir(config_root)
+  @fs.write_file(config_root + "/alpha.txt", "alpha", create_mode=CreateNew)
+  @fs.write_file(config_root + "/kept.txt", "kept", create_mode=CreateNew)
+  @fs.write_file(config_root + "/other.txt", "other", create_mode=CreateNew)
+  @fs.write_file(
+    config_root + "/.gitignore",
+    "kept.txt\n",
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    temp + "/custom.json",
+    "{\"include\":[\"alpha.txt\"],\"ignore\":{\"useGitignore\":false,\"customPatterns\":[\"alpha.txt\"]},\"output\":{\"style\":\"markdown\"}}",
+    create_mode=CreateNew,
+  )
+  let (merge_code, merged, _) = cli(
+    binary,
+    [
+      config_root, "--config", "custom.json", "--include", "kept.txt", "--style",
+      "xml", "--stdout", "--quiet",
+    ] +
+    common,
+    temp,
+  )
+  assert_eq(merge_code, 0)
+  assert_true(merged.has_prefix("<?xml"))
+  assert_true(merged.contains("<file path=\"kept.txt\">"))
+  assert_false(merged.contains("<file path=\"alpha.txt\">"))
+  assert_false(merged.contains("<file path=\"other.txt\">"))
+
+  let empty = temp + "/empty"
+  @fs.mkdir(empty)
+  let (empty_code, empty_xml, empty_err) = cli(
+    binary,
+    [empty, "--stdout", "--quiet"] + common,
+    temp,
+  )
+  assert_eq(empty_code, 0)
+  assert_true(empty_xml.has_prefix("<?xml"))
+  assert_false(empty_xml.contains("<file path="))
+  assert_true(empty_err.contains("no files were accepted"))
+  let old = temp + "/existing.xml"
+  @fs.write_file(old, "old output", create_mode=CreateNew)
+  let (missing, missing_out, missing_err) = cli(
+    binary,
+    [temp + "/absent", "-o", old] + common,
+    temp,
+  )
+  assert_eq(missing, 1)
+  assert_eq(missing_out, "")
+  assert_true(missing_err.contains("SelectionError"))
+  assert_eq(@fs.read_file(old).text(), "old output")
+  let blocked = temp + "/output-directory"
+  @fs.mkdir(blocked)
+  @fs.write_file(blocked + "/keep", "keep", create_mode=CreateNew)
+  let (write_code, _, write_err) = cli(
+    binary,
+    [config_root, "-o", blocked] + common,
+    temp,
+  )
+  assert_eq(write_code, 1)
+  assert_true(write_err.contains("OutputError"))
+  assert_eq(@fs.read_file(blocked + "/keep").text(), "keep")
+  assert_false(@fs.readdir(temp).any(name => name.contains(".moon-repomix-")))
+
+  let dash = temp + "/-project"
+  @fs.mkdir(dash)
+  @fs.write_file(dash + "/file.txt", "dash directory", create_mode=CreateNew)
+  let (dash_code, dash_xml, _) = cli(
+    binary,
+    common + ["--stdout", "--quiet", "--", "-project"],
+    temp,
+  )
+  assert_eq(dash_code, 0)
+  assert_true(dash_xml.contains("dash directory"))
+  println(
+    "PASS: resource-free help, BOM/UTF-8/size boundaries, config precedence, empty/missing roots, failed output and dash paths",
+  )
+}

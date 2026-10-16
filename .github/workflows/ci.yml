@@ -21,6 +21,7 @@ jobs:
         with:
           version: latest
       - run: moon version --all
+      - run: moon update
       - name: Require the verified compiler version
         run: moon run --target native scripts/check-toolchain.mbtx
       - run: moon check --target native --deny-warn
@@ -36,6 +37,8 @@ jobs:
         run: sudo apt-get install -y libxml2-utils
       - if: runner.os == 'Linux'
         run: moon run --target native scripts/functional.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken --xml-oracle
+      - name: Common input and configuration scenarios
+        run: moon run --target native scripts/scenarios.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
       - name: Install and extracted-archive smoke
         run: moon run --target native scripts/distribution-test.mbtx ${{ matrix.platform }}
       - name: Package native distribution
