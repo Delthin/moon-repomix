@@ -106,6 +106,30 @@ async fn main {
   assert_false(merged.contains("<file path=\"alpha.txt\">"))
   assert_false(merged.contains("<file path=\"other.txt\">"))
 
+  let controls = temp + "/XML controls"
+  @fs.mkdir(controls)
+  let unusual = "alpha\u0001\uFFFE\uFFFFomega"
+  @fs.write_file(controls + "/unusual.txt", unusual, create_mode=CreateNew)
+  @fs.write_file(controls + "/ordinary.txt", "ordinary", create_mode=CreateNew)
+  let (controls_code, controls_xml, controls_error) = cli(
+    binary,
+    [controls, "--stdout"] + common,
+    temp,
+  )
+  assert_eq(controls_code, 0)
+  assert_true(controls_xml.contains("<file path=\"ordinary.txt\">"))
+  assert_false(controls_xml.contains("<file path=\"unusual.txt\">"))
+  assert_true(controls_error.contains("UnrepresentableText"))
+  let (md_code, controls_md, md_error) = cli(
+    binary,
+    [controls, "--style", "markdown", "--stdout"] + common,
+    temp,
+  )
+  assert_eq(md_code, 0)
+  assert_true(controls_md.contains("## File: unusual.txt"))
+  assert_true(controls_md.contains(unusual))
+  assert_false(md_error.contains("UnrepresentableText"))
+
   let empty = temp + "/empty"
   @fs.mkdir(empty)
   let (empty_code, empty_xml, empty_err) = cli(
@@ -152,6 +176,6 @@ async fn main {
   assert_eq(dash_code, 0)
   assert_true(dash_xml.contains("dash directory"))
   println(
-    "PASS: resource-free help, BOM/UTF-8/size boundaries, config precedence, empty/missing roots, failed output and dash paths",
+    "PASS: resource-free help, BOM/UTF-8/size boundaries, config precedence, XML-forbidden characters and Markdown preservation, empty/missing roots, failed output and dash paths",
   )
 }

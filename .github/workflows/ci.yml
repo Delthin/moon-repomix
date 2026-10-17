@@ -41,6 +41,12 @@ jobs:
         run: moon run --target native scripts/scenarios.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
       - name: Reproducible demo
         run: moon run --target native scripts/demo.mbtx
+      - name: Real repository self-pack
+        if: runner.os != 'Linux'
+        run: moon run --target native scripts/self-pack-test.mbtx dist/self-pack
+      - name: Real repository self-pack with XML readback
+        if: runner.os == 'Linux'
+        run: moon run --target native scripts/self-pack-test.mbtx dist/self-pack --xml-oracle
       - name: Source archive demo
         if: runner.os == 'Linux'
         run: moon run --target native scripts/source-package-test.mbtx

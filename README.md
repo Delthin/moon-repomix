@@ -70,6 +70,8 @@ moon-repomix ./project --init
 
 默认输出 `repomix-output.xml`；Markdown 默认输出 `repomix-output.md`。`-o` 会替换已有同名输出，使用时请选好路径。相对输出路径和显式配置路径以当前工作目录为准；自动发现的 `repomix.config.json` 位于所选目录内。`--init` 创建配置，不覆盖已有配置。全部选项见 `--help` 和 [配置文档](docs/configuration.md)。
 
+本仓库的 `repomix.config.json` 默认忽略 `assets/**`，让自打包文档聚焦代码、脚本和说明，避免词表与黄金数据占用大量 token。需要打包这些资源时，使用 `--config` 指向内容为 `{}` 的配置文件，再用 `--include` 选择目标文件。
+
 ## 打包行为
 
 - 读取 `.gitignore`、`.ignore`、`.repomixignore`（含嵌套规则），支持 include/ignore glob；按相对路径稳定排序。include 不会绕过忽略规则。
@@ -127,7 +129,10 @@ moon run --target native scripts/package.mbtx dist macos-arm64
 ```sh
 moon run --target native scripts/scenarios.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
 moon run --target native scripts/functional.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
+moon run --target native scripts/self-pack-test.mbtx ../moon-repomix-self-check
 ```
+
+自打包检查会新建输出目录，保留 XML、Markdown 和日志；已有目录会报错。安装了 `xmllint` 时可追加 `--xml-oracle`，独立核对黄金数据从 XML 还原后的正文。
 
 测试覆盖编码和大小边界、配置合并、密钥排除、输出格式、预算、错误保护及路径处理；Linux CI 还用独立 XML 解析器核对输出，并验证 `moon package` 生成的源码包解压后能运行 demo。源码包位于 `_build/publish/delthin-moon_repomix-0.1.0.zip`。
 
