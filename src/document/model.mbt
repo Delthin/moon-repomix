@@ -12,7 +12,7 @@ pub(all) struct Document {
 
 ///|
 pub fn compare_path(a : String, b : String) -> Int32 {
-  @utf8.encode(a).compare(@utf8.encode(b))
+  @utf8.encode(a).lexical_compare(@utf8.encode(b))
 }
 
 ///|
