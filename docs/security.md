@@ -15,7 +15,7 @@
 | `credential-assignment` | 引擎识别的敏感字段赋值；值至少 8 个 UTF-16 单位，含字母及数字或凭证标点 |
 | `access-token`、`bearer-token`、`jwt`、`url-credential` | 保留引擎 secrets-only 的对应规则 |
 
-适配层收紧 GitHub/AWS/OpenAI 长度条件，并过滤常见占位符与代码表达式。占位符包括 example/placeholder、changeme、your_/your-、replace_me、redacted、dummy 和重复字符值。通用赋值过滤裸标识符、类型、process/env/config 取值、插值及表达式括号。普通代码和联系方式作为负例；邮箱、IP、电话号码不在此扫描范围。
+适配层收紧 GitHub/AWS/OpenAI 长度条件，并过滤常见占位符与代码表达式。占位符包括 example/placeholder、changeme、your_/your-、replace_me、redacted、dummy 和重复字符值。通用赋值过滤裸标识符、类型、process/env/config 取值、插值及表达式括号。同一行中的字符串拼接（如 `"token=" + value + "\n"`）会结合引号状态识别为代码；带 `+` 的密码字面量仍参与检测。普通代码和联系方式作为负例；邮箱、IP、电话号码不在此扫描范围。
 
 这是启发式检测：短密码、新凭证格式及含占位词的字面值可能漏报，分享前仍应审阅最终文档。引擎在适配过滤前合并重叠发现，因此返回结果不枚举同一位置的全部规则。当前覆盖表来自合成样例，尚未与 Secretlint 做独立差分。
 

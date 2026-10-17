@@ -81,6 +81,63 @@ fn assignment_value(value : String) -> Bool {
 }
 
 ///|
+// The engine can read the closing quote in `"token=" + value + "\n"`
+// as the opening quote of a credential. Filter only a concatenated reference
+// whose preceding quote demonstrably closes a string on the same line.
+fn concatenated_reference(text : String, start : Int32, end : Int32) -> Bool {
+  if start == 0 || end >= text.length() {
+    return false
+  }
+  let quote_at = start - 1
+  let quote = text[quote_at]
+  if !(quote is ('\'' | '"')) || text[end] != quote {
+    return false
+  }
+  let value = text[start:end].trim()
+  if value.length() < 3 || !value.has_prefix("+") || !value.has_suffix("+") {
+    return false
+  }
+  let reference = value[1:value.length() - 1].trim()
+  for part in reference.split(".") {
+    if part.is_empty() || !(part[0] is ('a'..<='z' | 'A'..<='Z' | '_' | '$')) {
+      return false
+    }
+    for c in part {
+      if !(c is ('a'..<='z' | 'A'..<='Z' | '0'..<='9' | '_' | '$')) {
+        return false
+      }
+    }
+  }
+  if reference.is_empty() {
+    return false
+  }
+  let mut line_start = quote_at
+  while line_start > 0 && !(text[line_start - 1] is ('\r' | '\n')) {
+    line_start -= 1
+  }
+  let mut active : UInt16? = None
+  let mut escaped = false
+  for i in line_start..<(quote_at + 1) {
+    let c = text[i]
+    match active {
+      Some(q) =>
+        if escaped {
+          escaped = false
+        } else if c == '\\' {
+          escaped = true
+        } else if c == q {
+          if i == quote_at {
+            return true
+          }
+          active = None
+        }
+      None => if c is ('\'' | '"') { active = Some(c) }
+    }
+  }
+  false
+}
+
+///|
 fn rule_for(text : String, hit : @moon_scrub.Finding) -> String? {
   let value = text[hit.start:hit.end].to_owned()
   match hit.kind {
@@ -129,7 +186,8 @@ fn rule_for(text : String, hit : @moon_scrub.Finding) -> String? {
       }
     }
     CredentialAssignment =>
-      if assignment_value(value) {
+      if assignment_value(value) &&
+        !concatenated_reference(text, hit.start, hit.end) {
         Some("credential-assignment")
       } else {
         None

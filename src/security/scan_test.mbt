@@ -36,6 +36,9 @@ test "selected rule coverage uses synthetic secrets" {
       "-----BEGIN PRIVATE KEY-----\nsynthetic\n-----END PRIVATE KEY-----", "pem-private-key",
     ),
     ("password=\"Correct-Horse-42!\"", "credential-assignment"),
+    ("password=\"+Passw0rd+\"", "credential-assignment"),
+    ("password=\" + Secret99 + \"", "credential-assignment"),
+    ("password=' + Secret99 + '", "credential-assignment"),
   ]
   for prefix in ["gho_", "ghu_", "ghs_", "ghr_"] {
     assert_eq(
@@ -78,6 +81,10 @@ test "length placeholders ordinary code and contact information are negative" {
       "password: String",
       "secret = config.secret_value",
       "let token = parse_token(input)",
+      "put(input + \"/credentials.txt\", \"token=\" + secret + \"\\n\")",
+      "emit('password=' + config.secret + '\\n')",
+      "emit(\"token=\" + api_key + \"\\n\")",
+      "emit(\"quoted \\\"text\\\"\", \"secret=\" + my_secret + \"\\n\")",
       "contact person@company.dev +1-202-555-0199 192.168.1.1",
     ] {
     assert_eq(@security.scan("negative", text, 0).length(), 0)
