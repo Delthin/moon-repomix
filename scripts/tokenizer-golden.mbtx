@@ -126,7 +126,11 @@ async fn main {
   }
   @fs.write_file(
     repo + "/assets/tokenizer-golden.json",
-    Json(golden).stringify(indent=2),
+    // Keep the same JSON strings while making the fixture valid XML text too.
+    Json(golden)
+    .stringify(indent=2)
+    .replace_all(old="\uFFFE", new="\\ufffe")
+    .replace_all(old="\uFFFF", new="\\uffff"),
     create_mode=CreateOrTruncate,
   )
   println(

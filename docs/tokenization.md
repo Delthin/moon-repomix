@@ -29,7 +29,7 @@ pub fn Encoder::count(self : Encoder, text : String) -> Int
 moon run scripts/tokenizer-install-assets.mbtx --target native /absolute/repo /absolute/package/share/moon-repomix
 ```
 
-该辅助脚本校验并复制两份运行资源及许可，重跑会覆盖对应文件，保留其他文件。`tokenizer-cases.json`、`tokenizer-golden.json` 是开发夹具。
+该辅助脚本校验并复制两份运行资源及许可，重跑会覆盖对应文件，保留其他文件。`tokenizer-cases.json`、`tokenizer-golden.json` 是开发夹具。黄金 JSON 将 U+FFFE/U+FFFF 写为 `\ufffe`/`\uffff`，解析后的字符串及 token ID 不变，JSON 文件本身可作为 XML 正文。
 
 最终 token 总数须对完整渲染文档一次编码。BPE 和预切分可能跨拼接边界变化，因此各片段计数相加不能代替总数。`count` 使用与 `encode` 相同的编码过程，目前会在内部分配 ID 数组。
 
@@ -51,7 +51,7 @@ BPE 核心改编自 `howtomakeaname/tokenizers-moonbit@0.16.3`，保留链接符
 | --- | --- | --- | --- |
 | `assets/tokenizer-o200k_base.tiktoken` | [OpenAI ranks](https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken)，由 [tiktoken 0.14.0](https://github.com/openai/tiktoken/blob/0.14.0/tiktoken_ext/openai_public.py) 固定 | `446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d` | `LICENSES/tokenizer-tiktoken-MIT.txt` |
 | `assets/tokenizer-unicode-16.0.0.txt` | [Unicode 16.0.0 DerivedGeneralCategory](https://www.unicode.org/Public/16.0.0/ucd/extracted/DerivedGeneralCategory.txt) | `7676ab755a41ef82108460238569e60ad65c191ddafe61b36c6765ec1353f293` | Unicode License V3；`LICENSES/tokenizer-Unicode.txt` |
-| `assets/tokenizer-golden.json` | tiktoken 0.14.0 `encode_ordinary` 生成的完整 ID | `30d5225ce77d01f3a68d1cb2fc3ebd41a7f9cb9b48829103a78bdf59f6356f03` | 项目夹具；保留参考 MIT 告知 |
+| `assets/tokenizer-golden.json` | tiktoken 0.14.0 `encode_ordinary` 生成的完整 ID | `2b61908c81205275034a1b5551b5a12a8babc80657bc1959db9a8cc9e1a312e8` | 项目夹具；保留参考 MIT 告知 |
 
 内嵌 BPE 源码来自 [tokenizers-moonbit](https://github.com/howtomakeaname/tokenizers-moonbit) 的 Mooncakes **0.16.3** 发布版。原 `src/model/bpe.mbt` 的 SHA-256 为 `00d3af2b82559086cbdb2ab7a82e6634381df04fe481ee25eeb2cf5fd13c072a`。原告知保存在 `LICENSES/tokenizer-tokenizers-moonbit-Apache-2.0.txt`，完整许可在 `LICENSES/tokenizer-Apache-2.0.txt`；修改内容见上文及源码头部。
 
