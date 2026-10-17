@@ -1,8 +1,8 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "delthin/moon_repomix/output"
+package "Delthin/moon_repomix/output"
 
 import {
-  "delthin/moon_repomix/document",
+  "Delthin/moon_repomix/document",
 }
 
 // Values

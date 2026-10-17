@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "delthin/moon_repomix/selection"
+package "Delthin/moon_repomix/selection"
 
 // Values
 pub async fn select(String, SelectionOptions) -> Selection

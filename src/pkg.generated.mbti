@@ -1,11 +1,11 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "delthin/moon_repomix"
+package "Delthin/moon_repomix"
 
 import {
-  "delthin/moon_repomix/config",
-  "delthin/moon_repomix/metrics",
-  "delthin/moon_repomix/security",
-  "delthin/moon_repomix/selection",
+  "Delthin/moon_repomix/config",
+  "Delthin/moon_repomix/metrics",
+  "Delthin/moon_repomix/security",
+  "Delthin/moon_repomix/selection",
 }
 
 // Values

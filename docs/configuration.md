@@ -62,7 +62,7 @@ include 和自定义 ignore 拒绝空模式、前导 `!`、绝对路径、反斜
 
 ## 配置包接口
 
-`delthin/moon_repomix/config` 负责纯解析与合并，返回的相对路径保持原样。调用者负责配置文件 I/O、路径解析、动作执行及资源加载。
+`Delthin/moon_repomix/config` 负责纯解析与合并，返回的相对路径保持原样。调用者负责配置文件 I/O、路径解析、动作执行及资源加载。
 
 ```moonbit
 pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError

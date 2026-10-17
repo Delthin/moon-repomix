@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "delthin/moon_repomix/platform"
+package "Delthin/moon_repomix/platform"
 
 // Values
 pub fn absolute(String, String) -> String

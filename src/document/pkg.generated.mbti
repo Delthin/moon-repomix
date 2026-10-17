@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "delthin/moon_repomix/document"
+package "Delthin/moon_repomix/document"
 
 // Values
 pub fn compare_path(String, String) -> Int

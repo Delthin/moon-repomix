@@ -21,7 +21,7 @@
 
 ## 接口与位置
 
-包：`delthin/moon_repomix/security`。
+包：`Delthin/moon_repomix/security`。
 
 ```text
 pub(all) struct Finding { rule:String, path:String, start:Int, end:Int, line:Int }

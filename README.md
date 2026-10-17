@@ -90,11 +90,11 @@ moon-repomix ./project --init
 
 ## 库 API
 
-本地引用源码时，用 `moon.work` 将调用项目与本仓库列为 `members`，在调用项目的 `moon.mod` 声明 `delthin/moon_repomix@0.1.0` 依赖，并在 `moon.pkg` 导入：
+本地引用源码时，用 `moon.work` 将调用项目与本仓库列为 `members`，在调用项目的 `moon.mod` 声明 `Delthin/moon_repomix@0.1.0` 依赖，并在 `moon.pkg` 导入：
 
 ```moonbit
 import {
-  "delthin/moon_repomix" @repomix,
+  "Delthin/moon_repomix" @repomix,
 }
 ```
 
@@ -134,7 +134,7 @@ moon run --target native scripts/self-pack-test.mbtx ../moon-repomix-self-check
 
 自打包检查会新建输出目录，保留 XML、Markdown 和日志；已有目录会报错。安装了 `xmllint` 时可追加 `--xml-oracle`，独立核对黄金数据从 XML 还原后的正文。
 
-测试覆盖编码和大小边界、配置合并、密钥排除、输出格式、预算、错误保护及路径处理；Linux CI 还用独立 XML 解析器核对输出，并验证 `moon package` 生成的源码包解压后能运行 demo。源码包位于 `_build/publish/delthin-moon_repomix-0.1.0.zip`。
+测试覆盖编码和大小边界、配置合并、密钥排除、输出格式、预算、错误保护及路径处理；Linux CI 还用独立 XML 解析器核对输出，并验证 `moon package` 生成的源码包解压后能运行 demo。源码包位于 `_build/publish/Delthin-moon_repomix-0.1.0.zip`。
 
 ## 来源与许可
 

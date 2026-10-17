@@ -1,4 +1,4 @@
-name = "delthin/moon_repomix"
+name = "Delthin/moon_repomix"
 
 version = "0.1.0"
 

@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "delthin/moon_repomix/config"
+package "Delthin/moon_repomix/config"
 
 import {
   "moonbitlang/core/debug",

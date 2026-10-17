@@ -8,7 +8,7 @@ import {
 ///|
 async fn main {
   assert_eq(@process.run("moon", ["package"]), 0)
-  let archive = @fs.realpath("_build/publish/delthin-moon_repomix-0.1.0.zip")
+  let archive = @fs.realpath("_build/publish/Delthin-moon_repomix-0.1.0.zip")
   let temp = @fs.tmpdir(prefix="moon-repomix-source-")
   defer @fs.rmdir(temp, recursive=true)
   assert_eq(@process.run("unzip", ["-q", archive, "-d", temp]), 0)

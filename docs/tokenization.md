@@ -1,6 +1,6 @@
 # o200k_base 分词
 
-`delthin/moon_repomix/metrics` 是 native 离线编码器，以 **tiktoken 0.14.0 的 `encode_ordinary`** 为兼容基线。`<|endoftext|>`、`<|endofprompt|>` 等特殊标记按普通文本编码；输入为 Unicode 字符串，保留原有形式。UTF-8 解码由调用者完成。
+`Delthin/moon_repomix/metrics` 是 native 离线编码器，以 **tiktoken 0.14.0 的 `encode_ordinary`** 为兼容基线。`<|endoftext|>`、`<|endofprompt|>` 等特殊标记按普通文本编码；输入为 Unicode 字符串，保留原有形式。UTF-8 解码由调用者完成。
 
 ## 接口与资源
 

@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "delthin/moon_repomix/input"
+package "Delthin/moon_repomix/input"
 
 // Values
 pub async fn read(String, Int) -> ReadResult
