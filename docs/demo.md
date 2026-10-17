@@ -11,7 +11,7 @@ moon update
 moon run --target native scripts/demo.mbtx
 ```
 
-脚本会构建 release CLI，复制 [`examples/demo/`](../examples/demo/) 到 `dist/demo/input/`，并生成一份仅用于扫描的合成凭证。凭证由脚本运行时拼接，不访问真实账号；示例源码没有完整 token。输入副本还会创建一个空的 `.git/` 目录作为规则边界，避免父目录的 `dist/` 忽略规则遮蔽整个示例；不调用 Git，也不创建提交。
+脚本构建 release CLI，将 [`examples/demo/`](../examples/demo/) 复制到 `dist/demo/input/`，并在副本中生成一份用于扫描的合成凭证。
 
 默认输出目录为 `dist/demo/`。也可以指定一个**尚不存在、父目录已存在**的目录，含空格时加引号：
 
@@ -19,9 +19,9 @@ moon run --target native scripts/demo.mbtx
 moon run --target native scripts/demo.mbtx "dist/my demo"
 ```
 
-输出目录只允许新建，已有目录、文件或链接都会使脚本失败；再次演示请换一个新目录。失败时已生成的文件也会保留，便于查看原因。演示数据和输出均写入该新目录，CLI 构建产物仍按项目约定写入 `_build/`。
+输出路径已存在时脚本报错，再次演示请换一个新目录。演示输入、输出及失败时已生成的文件都保留在该目录；CLI 构建产物位于 `_build/`。
 
-## 看什么
+## 演示步骤与输出
 
 脚本依次运行以下三步并核对结果；任意一步不符合预期都会失败：
 
@@ -31,9 +31,9 @@ moon run --target native scripts/demo.mbtx "dist/my demo"
 | 2. Markdown 打包 | `context.md`、`markdown.log` | 同一输入以目录结构和代码围栏呈现，适合直接阅读。 |
 | 3. 预算设为 1 token | `budget.xml`、`budget.log` | CLI 返回 **1**，日志含 `complete output retained`；`budget.xml` 与第一步 XML 逐字节一致，没有裁剪内容。 |
 
-预算超限是这次演示的预期结果，因此第三步的 CLI 返回 1，而脚本确认完整输出保留后正常结束。其他退出码或不符合预期的输出不会被忽略。
+预算超限是这次演示的预期结果，因此第三步的 CLI 返回 1，而脚本确认完整输出保留后正常结束。
 
-`input/` 也会保留，包括那份合成凭证。需要分享的是检查过的 `context.xml` 或 `context.md`，而不是整个输入目录。扫描只是启发式检测，不能代替分享前审阅；详见 [安全边界](security.md)。
+分享前检查 `context.xml` 或 `context.md`；`input/` 中仍保留合成凭证。扫描的覆盖范围见 [扫描规则](security.md)。
 
 ## 手动调整
 

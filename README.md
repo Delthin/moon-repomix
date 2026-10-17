@@ -1,6 +1,6 @@
 # moon-repomix
 
-把本地代码目录整理成一份 XML 或 Markdown，方便交给 AI 阅读或留作代码上下文。使用 MoonBit native 实现，提供 CLI 和库 API；运行时不需要 Node.js，也不上传代码或下载分词资源。
+把本地代码目录整理成一份 XML 或 Markdown，方便交给 AI 阅读或留作代码上下文。使用 MoonBit native 实现，提供 CLI 和库 API，运行时不需要 Node.js。代码处理在本地完成，分词资源随安装包提供。
 
 ## 最快上手
 
@@ -23,6 +23,24 @@ moon run --target native scripts/demo.mbtx
 
 ## 安装
 
+### 使用平台归档
+
+解压对应平台的构建归档，保留 `bin`、`share` 和 `LICENSES` 目录。在解压目录中直接运行：
+
+```sh
+./bin/moon-repomix /path/to/project -o context.xml
+```
+
+Windows PowerShell：
+
+```powershell
+.\bin\moon-repomix.exe "C:\path\to\project" -o context.xml
+```
+
+运行归档中的程序不需要安装 MoonBit；也可将 `bin` 加入 `PATH`。
+
+### 从源码安装
+
 在完成 `moon update` 后，把程序与分词资源一起安装到指定前缀：
 
 ```sh
@@ -37,7 +55,7 @@ moon run --target native scripts/install.mbtx "$env:LOCALAPPDATA\moon-repomix"
 
 将前缀下的 `bin` 加入 `PATH`。安装版从程序所在位置寻找 `../share/moon-repomix/`，不依赖当前工作目录。移动安装目录时，请一起保留 `bin`、`share` 及其相对位置；仅复制可执行文件不构成完整安装。
 
-源码运行需要像上面的命令一样显式指定词表。[三平台 CI](https://github.com/Delthin/moon-repomix/actions/workflows/ci.yml) 已验证 macOS arm64、Linux x64 和 Windows x64 的检查、构建、功能测试、安装及归档。各平台构建须使用相应的 native C 工具链。CI 安装 `latest` 工具链后核对 `moon-toolchain`，遇到版本变化会停止。
+通过 `moon run` 执行 CLI 时须显式指定词表。[三平台 CI](https://github.com/Delthin/moon-repomix/actions/workflows/ci.yml) 已验证 macOS arm64、Linux x64 和 Windows x64 的检查、构建、功能测试、安装及归档。各平台构建须使用相应的 native C 工具链。
 
 ## CLI 用法
 
@@ -52,7 +70,7 @@ moon-repomix ./project --init
 
 默认输出 `repomix-output.xml`；Markdown 默认输出 `repomix-output.md`。`-o` 会替换已有同名输出，使用时请选好路径。相对输出路径和显式配置路径以当前工作目录为准；自动发现的 `repomix.config.json` 位于所选目录内。`--init` 创建配置，不覆盖已有配置。全部选项见 `--help` 和 [配置文档](docs/configuration.md)。
 
-当前功能：
+## 打包行为
 
 - 读取 `.gitignore`、`.ignore`、`.repomixignore`（含嵌套规则），支持 include/ignore glob；按相对路径稳定排序。include 不会绕过忽略规则。
 - 打包有效 UTF-8 普通文件；去掉 UTF-8 BOM，保留原始换行。默认单文件上限为 **50 MiB**；链接、二进制、不可读或超限文件跳过。
@@ -91,6 +109,8 @@ let result = @repomix.pack(options, runtime)
 `pack` 返回结果，不写文件；由调用者决定如何处理输出和预算超限。词表同目录还须有 `tokenizer-unicode-16.0.0.txt`，两份资源均校验 SHA-256。一个 `Runtime` 可复用于多次顺序打包。接口见 [`src/pkg.generated.mbti`](src/pkg.generated.mbti)。
 
 ## 开发与打包
+
+CI 安装 `latest` 后核对 `moon-toolchain`；版本不一致时停止，须核对并更新工具链要求。
 
 ```sh
 moon update

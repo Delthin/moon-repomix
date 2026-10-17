@@ -1,55 +1,39 @@
-# Secret scanning
+# 密钥扫描
 
-`delthin/moon_repomix/security` exposes:
+默认使用 `123123213weqw/moon_scrub@0.5.2` 的 `ScanConfig::secrets_only()` 扫描即将输出的文本快照。发现密钥时，打包器排除整个文件，诊断只保留规则、路径和位置。
+
+## 检测范围
+
+以下规则已用合成数据验证：
+
+| 规则 ID | 识别形状与适配策略 |
+| --- | --- |
+| `github-token` | `ghp_`、`gho_`、`ghu_`、`ghs_`、`ghr_`：总长 40；`github_pat_`：总长 93 |
+| `aws-access-key` | `AKIA` / `ASIA`：总长 20，使用大写 ASCII 字母和数字 |
+| `openai-key` | 旧式 `sk-`：总长 51；`sk-proj-` / `sk-svcacct-`：总长 48–256 |
+| `pem-private-key` | 从引擎识别的私钥 BEGIN 标记到结尾标记或文本末尾；证书和公钥不属于此项 |
+| `credential-assignment` | 引擎识别的敏感字段赋值；值至少 8 个 UTF-16 单位，含字母及数字或凭证标点 |
+| `access-token`、`bearer-token`、`jwt`、`url-credential` | 保留引擎 secrets-only 的对应规则 |
+
+适配层收紧 GitHub/AWS/OpenAI 长度条件，并过滤常见占位符与代码表达式。占位符包括 example/placeholder、changeme、your_/your-、replace_me、redacted、dummy 和重复字符值。通用赋值过滤裸标识符、类型、process/env/config 取值、插值及表达式括号。普通代码和联系方式作为负例；邮箱、IP、电话号码不在此扫描范围。
+
+这是启发式检测：短密码、新凭证格式及含占位词的字面值可能漏报，分享前仍应审阅最终文档。引擎在适配过滤前合并重叠发现，因此返回结果不枚举同一位置的全部规则。当前覆盖表来自合成样例，尚未与 Secretlint 做独立差分。
+
+## 接口与位置
+
+包：`delthin/moon_repomix/security`。
 
 ```text
 pub(all) struct Finding { rule:String, path:String, start:Int, end:Int, line:Int }
 pub fn scan(path:String, text:String, bom_bytes:Int) -> Array[Finding] raise ScanError
 ```
 
-Scan the same decoded snapshot that will be rendered. Pass `bom_bytes=3` only
-when the reader stripped an initial UTF-8 BOM, otherwise `0`. Findings contain
-no original value or preview. `start`/`end` are zero-based, half-open **disk
-UTF-8 byte** offsets; `line` is one-based (CRLF counts once; bare CR and LF also
-advance the line). The caller excludes the entire file on any finding.
+调用者传入与渲染相同的已解码快照。读取时去掉 UTF-8 BOM，传 `bom_bytes=3`；否则传 `0`。`start`、`end` 是以磁盘文件首字节为 0 的 UTF-8 字节半开区间；`line` 从 1 开始，CRLF 计一次换行，裸 CR、LF 也各计一次。
 
-The engine is `123123213weqw/moon_scrub@0.5.2`, using
-`ScanConfig::secrets_only()`. Its `String.length()`/index-based detectors return
-UTF-16 code-unit offsets, not codepoint offsets. A synthetic regression checks
-that directly and verifies conversion after Chinese, emoji, a combining mark,
-CRLF and a stripped BOM. Surrogate-interior ranges fail closed.
+引擎返回 UTF-16 单位索引，适配层转换为 UTF-8 字节偏移后加上 BOM 长度。范围落在代理对内部时报错。回归覆盖中文、emoji、组合字符、CRLF 和 BOM。
 
-## Verified coverage
+## 错误与调用约束
 
-| Rule ID | Shapes / policy verified with synthetic data |
-| --- | --- |
-| `github-token` | `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`: total 40 units; `github_pat_`: total 93 |
-| `aws-access-key` | `AKIA` / `ASIA`: total 20 uppercase ASCII letters/digits |
-| `openai-key` | Legacy `sk-`: total 51; `sk-proj-` / `sk-svcacct-`: total 48–256 |
-| `pem-private-key` | Engine private-key BEGIN markers, through footer or remaining text; not certificates/public keys |
-| `credential-assignment` | Engine sensitive-key assignments; values at least 8 units with a letter and a digit or credential punctuation |
-| `access-token`, `bearer-token`, `jwt`, `url-credential` | Other engine secrets-only credential families retained |
+`ScanError` 包含 `InvalidBomOffset`、`InvalidText`、`InvalidEngineRange`、`InputTooLarge`，不携带原文或引擎消息。扫描函数同步执行，无 I/O 和日志；调用者处理失败时也不得记录快照正文。内存耗尽等原生运行时终止不属于可恢复的 MoonBit 错误。
 
-The adapter tightens the engine's permissive GitHub/AWS/OpenAI minimum lengths
-and filters common placeholders and code-valued assignments. No upstream source
-is modified or vendored. Placeholder suppression includes example/placeholder,
-changeme, your_/your-, replace_me, redacted, dummy and repeated-character values.
-Generic assignments suppress bare identifiers/types, process/env/config lookups,
-interpolations and expression brackets. Ordinary code and contact details are
-negative regression cases; emails, IPs and phone numbers are not scanned.
-
-This is a bounded heuristic policy, not proof of absence of secrets, format
-validation with service providers, or full Secretlint parity. In particular,
-short/password-only literals and new token formats may not be detected. Literal
-values containing placeholder words are intentionally suppressed. The engine
-merges overlapping findings before adapter filtering, so the result is not an
-exhaustive list of every rule at a location. No Secretlint differential run is
-claimed.
-
-`ScanError` carries only stable variants: `InvalidBomOffset`, `InvalidText`,
-`InvalidEngineRange`, `InputTooLarge`; no source text, engine message or preview
-is included. The pinned engine API is synchronous and non-raising; native
-runtime aborts (including out-of-memory) are not recoverable MoonBit errors.
-Scanning performs no I/O and emits no logs. Callers must not log snapshot text
-on failure. Explicitly disabling scanning is a separate caller policy and must
-be recorded as disabled, not passed.
+依赖原码保持原样，坐标转换和过滤位于本项目适配层。显式关闭扫描时，CLI 显示警告，结果记录 `SecurityStatus.Disabled`。

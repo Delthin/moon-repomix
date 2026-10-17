@@ -1,13 +1,23 @@
-# Output and file handling
+# 文件读取与输出
 
-The packer reads complete regular-file snapshots as strict UTF-8, removes an initial UTF-8 BOM, and preserves all other newline bytes. NUL-bearing, invalid UTF-8, unreadable and oversized files are skipped. The default maximum file size is 52,428,800 bytes; reading enforces the limit even if a file grows after the initial size check.
+## 文本与格式
 
-XML preserves accepted body text and relative paths after XML parsing. Carriage returns are character references; path attributes also encode line feeds and tabs. Files whose path or body contains an XML 1.0 forbidden character are omitted from XML output. Markdown uses a backtick fence longer than any run in the body and escapes the file heading. Markdown may add a final newline before a closing fence. Both formats contain an accepted-file directory outline and a reminder that repository contents are untrusted data.
+打包器完整读取普通文件，按严格 UTF-8 解码，去除开头的 UTF-8 BOM，保留其余换行。含 NUL、无效 UTF-8、不可读或超限的文件会跳过。默认单文件上限为 **52,428,800 字节**；读取中持续检查大小，文件在预检后增长也受此限制。
 
-Paths are sorted by their UTF-8 byte representation. No Unicode normalization or case folding is performed.
+XML 对正文和路径属性分别转义：正文中的 CR 写为字符引用，属性中的 LF 和 TAB 也编码。解析后可还原被接受的正文与相对路径。正文或路径含 XML 1.0 禁止字符时，该文件从 XML 输出中排除。
 
-File output is written to a new sibling temporary file, synchronized, closed, then renamed over the destination. Links and non-regular destinations are rejected. Failure before replacement keeps the previous file; temporary-file cleanup also runs during task cancellation. stdout is written only after packing and token counting complete, but cannot be rolled back once writing starts.
+Markdown 为每个文件使用比正文最长连续反引号更长的围栏，并转义文件标题；闭合围栏前可能补一个换行。两种格式都包含已接受文件的目录树，并提示将仓库内容视为待分析数据。
 
-The executable locates its vocabulary at `../share/moon-repomix/o200k_base.tiktoken` relative to its resolved executable path. Platform code uses the operating system's executable-path API, so resource discovery does not depend on the working directory.
+文件按相对路径的 UTF-8 字节序排序，保留原始大小写和 Unicode 形式。
 
-Filesystem type checks and later opens are separate operations. Concurrent path replacement can race those checks; this is a local packer, not an operating-system sandbox. Windows replacement and reparse-point handling require verification on the Windows runner.
+## 文件提交与标准输出
+
+文件输出先写入同目录新建临时文件，再同步、关闭并重命名替换目标。目标是链接或非普通文件时拒绝写入。替换前失败会保留旧文件；任务取消也会清理临时文件。
+
+stdout 在打包及计数完成后开始写入，已发送的内容无法回滚。shell 重定向的目标路径对打包器不可见；应将目标放在输入根目录外，或用 ignore 排除。
+
+文件类型检查与打开是分开的操作，并发替换路径仍可能造成竞争。打包期间应避免不可信进程修改输入目录。
+
+## 安装资源
+
+程序通过操作系统的可执行路径接口定位自身，从 `../share/moon-repomix/` 加载 `o200k_base.tiktoken` 及同目录的 `tokenizer-unicode-16.0.0.txt`。移动安装目录时保留 `bin` 与 `share` 的相对位置，即可从其他工作目录运行。资源校验及接口见 [分词文档](tokenization.md)。

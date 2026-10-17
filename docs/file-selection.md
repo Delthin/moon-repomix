@@ -2,7 +2,7 @@
 
 包：`delthin/moon_repomix/selection`。仅发现候选与读取规则，不打开候选正文；读取快照、二进制判断、安全扫描与输出提交由后续阶段负责。
 
-## 固定接口
+## 接口
 
 ```moonbit
 pub(all) struct SelectionOptions {
@@ -24,21 +24,21 @@ pub(all) struct Selection {
 pub async fn select(root : String, options : SelectionOptions) -> Selection
 ```
 
-异步函数隐式 raises。默认 include_patterns/ignore 为空、三个开关均 true、output 为 None。下文的 include 指正向选择模式。
+MoonBit 异步函数隐式具有 `raise` 效果。默认 include_patterns/ignore 为空、三个开关均 true、output 为 None。下文的 include 指正向选择模式。
 
 `root` 必须是绝对普通目录；最终根组件是链接/reparse point 时拒绝，包括尾随 `/`、`/.` 的写法。返回 root 为真实绝对路径。Windows 接受盘符绝对路径或 UNC share，输入反斜杠转为 `/`。候选 path 为绝对 I/O 路径，relative 为根相对路径；skipped.path 同样根相对。保留大小写、Unicode 原文，不折叠、不做 Unicode 归一化；Unix 文件名内的反斜杠是普通字符而非分隔符。
 
-files 和 skipped 分别按相对路径的 **UTF-8 字节词典序** 排序，短前缀在前（既不是 UTF-16 顺序，也不是先比较字节长度）。
+files 和 skipped 分别按相对路径的 **UTF-8 字节词典序** 排序，短前缀在前。
 
 ## 路径、文件类型与输出
 
 - 只遍历普通目录，只返回普通文件。先用 async fs.kind(follow_symlink=false) 分类，再决定递归；目录/文件链接、断链记 Symlink，FIFO/socket/设备/未知类型记 UnsupportedFileType，均不打开。
-- 本地 async **0.19.2** 的 `src/internal/event_loop/detect_file_kind.c` 先检查 `FILE_ATTRIBUTE_REPARSE_POINT`，将其判为 SymLink，覆盖 junction 等 reparse point。
+- async **0.19.2** 的 `src/internal/event_loop/detect_file_kind.c` 先检查 `FILE_ATTRIBUTE_REPARSE_POINT`，将其判为 SymLink，覆盖 junction 等 reparse point。
 - 相对路径从真实根加单个 readdir 名称构造，边界比较带 `/`，不会把 `/root-other` 误当 `/root` 子目录。include 无法指定绝对路径或 `..` 穿越根。
 - output 必须绝对。输出已有时解析真实目标，尚不存在时解析最深已存在父目录再附加剩余组件；保留符号链接后 `..` 的实际解析顺序。解析后与候选路径相同的输出强制记 OutputFile，任何 include、反选或关闭默认忽略都不能恢复它。父目录别名、cwd 别名、文件链接别名均纳入比较；输出位于根外不会排除同名的根内文件。
 - Windows 的 async 0.19.2 realpath 只调用 GetFullPathNameW，不解 junction，因此本包 `canonical.c` 对根和输出的已存在祖先用 metadata-only CreateFileW + GetFinalPathNameByHandleW 取得真实路径；不用于打开遍历候选。
-- 不按 inode 合并不同的硬链接路径。选择阶段不是文件系统快照；lstat 与读取/递归之间仍有 TOCTOU 窗口，读取阶段必须重新检查文件身份/类型，不能把本结果当成抗恶意并发修改的沙箱。规则文件也先 no-follow 分类；不宣称原子 no-follow open 保证。
-- 本次输出临时文件在 pack 后才创建；这里不排除任意临时文件名。
+- 不同硬链接路径分别保留。lstat 与读取/递归之间存在 TOCTOU 竞争窗口，读取阶段须重新检查类型；规则文件也先做 no-follow 分类。类型检查和打开分离，调用者应避免不可信进程在打包时替换路径。
+- 输出临时文件在 pack 返回后创建；选择阶段不按临时文件名排除其他文件。
 
 ## 作用域与顺序
 
@@ -51,7 +51,7 @@ files 和 skipped 分别按相对路径的 **UTF-8 字节词典序** 排序，�
 
 目录在完整适用规则集合计算完之后才剪枝。同层 `dir/` 后的 `!dir/` 可以恢复目录；只有 `!dir/file` 不能穿透已排除的 dir，目录内部规则也不能恢复已被父层剪枝的目录。每个剪枝目录仅记一条 IgnoredDirectory，不枚举其内容，不报告精确内部文件数。选择根本身被父规则剪枝时只记路径 `.`。
 
-## glob 边界
+## glob 语法
 
 共通：区分大小写，`/` 分隔组件；`*` 匹配组件内零或多个单位、`?` 一个单位、`[abc]`/`[a-z]`/`[!abc]`/`[^abc]` 字符类，支持类首字面 `]` 和反斜杠转义。完整组件 `**` 匹配零或多级目录，尾部 `a/**` 至少匹配一项内容，不匹配 a 本身。尾 `/` 仅匹配目录，目录匹配后覆盖后代。无 `/` 的模式按任意深度 basename 匹配；含 `/` 的模式相对其规则基准匹配。
 
@@ -78,11 +78,11 @@ files 和 skipped 分别按相对路径的 **UTF-8 字节词典序** 排序，�
 - `InvalidGitMetadata(String)`：Git marker/目录结构/commondir 不合法或含链接。
 - `InvalidOutput(String)`：相对或无法建立绝对身份的输出参数。
 
-仅 ENOENT 被当成规则/元数据不存在；权限、解码、遍历、其他 I/O 错误和取消全部原样传播，不吞错、不重试、不伪装空成功结果。
+ENOENT 表示规则或元数据不存在；权限、解码、遍历、其他 I/O 错误和取消均向调用者传播。
 
 skipped.reason 当前形式：`Symlink`、`UnsupportedFileType`、`OutputFile`、`NotIncluded`、`Ignored:default`、`IgnoredDirectory:default`、`Ignored:custom`、`IgnoredDirectory:custom`、`Ignored:<source>:<line>`、`IgnoredDirectory:<source>:<line>`。冒号后的来源是诊断信息，不宜按冒号拆字段（Windows 盘符也含冒号）；目录统计应识别 IgnoredDirectory 前缀。
 
-## 定点验证
+## 测试
 
 在仓库根目录运行：
 
@@ -93,6 +93,6 @@ moon info src/selection --target native
 moon check src/selection --target native
 ```
 
-`selection_wbtest.mbt` 的 6 个测试仅创建自动清理的临时合成树：逐项比较真实 `git check-ignore --no-index`（屏蔽全局/系统配置）、父层/嵌套/目录反选与剪枝、dot/custom/默认独立开关、真实父路径输出别名与缺失输出、UTF-8 顺序、未读正文、链接/断链/FIFO、规则解码和类型错误、无 Git 父层与 worktree commondir。测试需要现有 Git，Unix 类型夹具还需要现有 mkfifo。
+`selection_wbtest.mbt` 使用自动清理的临时合成树，覆盖：逐项比较真实 `git check-ignore --no-index`（屏蔽全局/系统配置）、父层/嵌套/目录反选与剪枝、dot/custom/默认独立开关、真实父路径输出别名与缺失输出、UTF-8 顺序、未读正文、链接/断链/FIFO、规则解码和类型错误、无 Git 父层与 worktree commondir。测试需要现有 Git，Unix 类型夹具还需要现有 mkfifo。
 
 CLI 功能测试还覆盖 Windows junction 排除；目标平台运行由 native CI 矩阵执行。

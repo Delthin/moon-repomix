@@ -1,7 +1,7 @@
 # 问候示例
 
 这里用 MoonBit 和 TypeScript 表达同一个小函数：向给定名字问好。
-这是供打包阅读的微型目录，不需要安装 Node.js 或运行其中的代码。
+此目录作为打包输入，直接阅读生成的文档即可。
 
 `debug.log` 被根目录 `.gitignore` 排除，`src/scratch.txt` 被嵌套规则排除。
-密钥扫描示例由 `scripts/demo.mbtx` 在输出目录的输入副本中另行生成。
+仓库根目录的 `scripts/demo.mbtx` 会复制此目录，并在副本中生成密钥扫描样例。

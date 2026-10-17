@@ -1,99 +1,38 @@
-# Configuration and argument parsing
+# 配置与命令行
 
-Package: `delthin/moon_repomix/config`. This package is pure: it does not inspect
-cwd, read or create files, load tokenizer resources, print diagnostics, or run a
-pack operation. Relative paths are returned unchanged.
+配置按“默认值 → 选定的 JSON 文件 → 显式 CLI 参数”合并。普通字段由后者覆盖；include 和自定义 ignore 列表按 JSON、CLI 的顺序追加，按原字符串去重并保留首次出现的位置。未出现的布尔参数不参与覆盖，因此 JSON 中的 `false` 会保留。
 
-## Integration API
+CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 `repomix.config.json`。显式配置路径、输出路径以启动时的工作目录为基准；include/ignore 以输入根目录为基准。默认配置文件不存在时使用默认值，显式指定的文件不存在则报错。
 
-```moonbit
-pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError
-pub fn parse_json(text : String) -> Patch raise ConfigError
-pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError
-pub fn Patch::empty() -> Patch
-```
+## 命令行参数
 
-Pass arguments **without argv[0]**. `Cli` has `directory` (default `.`),
-`config_path : String?`, `action : Action`, `stdout`, `quiet`, `verbose`, and
-`patch : Patch`. `Action` is `Pack | Init | Help | Version`; `Style` is
-`Xml | Markdown`. No action is executed during parsing. Different explicit
-actions conflict; repeated identical actions are harmless.
-
-The caller selects at most one JSON file: the explicit `config_path`, or
-`repomix.config.json` under the input root. The caller owns cwd-relative path
-resolution, missing/default versus explicit-file error policy, reading JSON,
-help/version output, and safe initialization without overwriting existing files.
-An absent file is passed as `None`, not an empty string. The caller can handle
-help/version/init before loading configuration or tokenizer resources.
-
-`Options` fields:
-
-| Field | Type / default |
+| 参数 | 行为 |
 | --- | --- |
-| `directory` | `String`, `.` |
-| `output` | `String`, style-dependent filename |
-| `stdout` | `Bool`, false |
-| `style` | `Style`, `Xml` |
-| `include_patterns`, `ignore` | `Array[String]`, empty |
-| `use_gitignore`, `use_dot_ignore`, `use_default_patterns` | `Bool`, true |
-| `security_check` | `Bool`, true |
-| `encoding` | `String`, `o200k_base` only |
-| `token_budget` | `Int?`, `None` (unlimited) |
-| `max_file_size` | `Int`, 52428800 disk bytes |
-| `tokenizer_path` | `String?`, `None` |
-| `quiet`, `verbose` | `Bool`, false |
+| `[directory]` | 单个输入目录，默认 `.` |
+| `-o, --output PATH` | 输出文件路径 |
+| `--stdout` | 正文写入 stdout，诊断写入 stderr |
+| `--style xml\|markdown` | 默认 XML；默认文件名分别为 `repomix-output.xml`、`repomix-output.md` |
+| `--include GLOBS` | 追加逗号分隔的正向选择模式 |
+| `-i, --ignore GLOBS` | 追加逗号分隔的自定义排除模式 |
+| `--no-gitignore` | 关闭 Git 规则 |
+| `--no-dot-ignore` | 关闭 `.ignore`、`.repomixignore` |
+| `--no-default-patterns` | 关闭内置忽略规则 |
+| `--no-security-check` | 关闭扫描，记录关闭状态并显示警告 |
+| `--token-count-encoding o200k_base` | 指定当前支持的编码 |
+| `--token-budget N` | 正整数预算；等于预算通过，超限保留完整输出并返回 1 |
+| `--tokenizer-path PATH` | 显式指定词表文件；加载时校验资源 |
+| `-c, --config PATH` | 显式选择 JSON 配置 |
+| `--init` | 创建配置文件；已有文件不覆盖 |
+| `--parsable-style` | 兼容参数；两种格式始终按可解析规则生成 |
+| `--quiet`, `--verbose` | 互斥的诊断模式 |
+| `-h, --help` | 显示帮助 |
+| `-v, --version` | 显示版本；`-v` 不是 verbose |
 
-`Patch` has the same configuration fields (not directory/stdout/quiet/verbose),
-with optional scalars and additive arrays. Its fields are mutable to support
-programmatic construction from `Patch::empty()`. `resolve` validates both
-patches, even fields subsequently overridden, and does not mutate either patch
-or its lists. `Options` arrays are newly allocated.
+值参数支持 `--key=value` 和分开传值，`-o=PATH` 也可用。以 `-` 开头的值须使用等号形式。短选项不能合并，也不接受 `-oPATH`。`--` 结束参数解析，可用于输入名以 `-` 开头的目录。CSV 项会去除首尾空白，空项报错；重复的标量参数取最后一个值，列表参数继续追加。
 
-Precedence is defaults → selected JSON → explicit CLI scalar values. Missing
-booleans remain `None`, so JSON `false` survives. Include and custom-ignore lists
-append JSON first, CLI second, and deduplicate exact strings in first-occurrence
-order (no case folding or normalization).
+`--stdout` 与显式 CLI `--output` 冲突，但与 JSON 中的输出文件名不冲突。stdout 模式不创建输出文件。文件名 `-` 表示普通文件，标准输出须使用 `--stdout`。
 
-## CLI subset
-
-| Arguments | Effect |
-| --- | --- |
-| `[directory]` | One directory, default `.` |
-| `-o, --output PATH` | Explicit output filename |
-| `--stdout` | Request body-only stdout; caller sends diagnostics to stderr |
-| `--style xml\|markdown` | XML or Markdown; default filenames `repomix-output.xml` / `repomix-output.md` |
-| `--include GLOBS` | Append comma-separated include patterns |
-| `-i, --ignore GLOBS` | Append comma-separated custom-ignore patterns |
-| `--no-gitignore` | Set `use_gitignore=false` |
-| `--no-dot-ignore` | Set `use_dot_ignore=false` |
-| `--no-default-patterns` | Set `use_default_patterns=false` |
-| `--no-security-check` | Set `security_check=false`; caller must warn and record disabled status |
-| `--token-count-encoding o200k_base` | Only supported encoding |
-| `--token-budget N` | Positive integer token limit; caller enforces budget, equality passes |
-| `--tokenizer-path PATH` | Explicit tokenizer resource path, returned unchanged; caller loads and verifies it |
-| `-c, --config PATH` | Explicit JSON config path, queryable on `Cli` |
-| `--init` | Initialization action only |
-| `--parsable-style` | Accepted compatibility no-op; output is always parseable |
-| `--quiet`, `--verbose` | Mutually exclusive diagnostic modes |
-| `-h, --help` | Help action |
-| `-v, --version` | Version action (**not** verbose) |
-
-Short names were checked against the fixed Repomix 1.18.1 CLI; `-h` is its
-Commander help alias. Only the listed subset is accepted. In particular, quiet
-and verbose have no short aliases. Value options accept `--key=value` as well as
-separate values (`-o=PATH` also works). Separate values beginning with `-` must
-use the equals form. Short-option clustering and attached `-oPATH` are not
-supported. `--` ends option parsing, allowing a directory beginning with `-`.
-CSV entries are trimmed; empty entries are errors. Repeated scalar options use
-the last value; repeated list options append and deduplicate.
-
-`--stdout` conflicts with an explicit CLI `--output` in either order. A filename
-from JSON is not a CLI output request and does not conflict. `Options.output`
-still contains the resolved filename in stdout mode; the caller must obey
-`stdout` and not create that file. No implicit stdout behavior is attached to a
-filename of `-`; use `--stdout` explicitly.
-
-## Strict JSON subset
+## JSON 配置
 
 ```json
 {
@@ -115,32 +54,40 @@ filename of `-`; use `--stdout` explicitly.
 }
 ```
 
-Every shown field is optional. Every other field is rejected, at every nesting
-level; unsupported upstream fields are not silently ignored. JSON must have an
-object root and the exact field types shown. `null` is not absence. Lists must
-contain strings. Budget and max-file-size values must be positive integral
-numbers in `1..2147483647`; CLI budget uses decimal digits only. Empty paths and
-NUL-containing paths are invalid. An omitted output filename is chosen after
-resolving style, not while parsing a patch. `tokenizer_path` is CLI/programmatic
-only, not a JSON extension.
+以上字段均可省略。所有层级都拒绝未知字段；根节点必须为对象，字段类型须与示例一致，`null` 不等于省略。列表元素必须是字符串。预算和单文件字节上限须为 `1..2147483647` 的整数；CLI 预算只接受十进制数字。路径必须非空且不含 NUL。默认输出文件名在样式合并完成后选择。
 
-Both parsers and `resolve` reject empty glob patterns, leading `!`, absolute
-paths, backslashes, colons, braces, and `..` path segments in custom include or
-ignore patterns. This is **not** the `.gitignore` grammar: negation remains the
-selection package's responsibility when reading ignore files. Supported glob
-syntax includes `*`, `?`, `**`, character classes and directory patterns; deeper
-glob syntax validation/compilation belongs to selection.
+`tokenizer_path` 通过 CLI 或编程接口设置，不属于 JSON 字段。
 
-`ConfigError` variants are `InvalidJson`, `UnknownField(String)`,
-`InvalidValue(String)`, `UnknownOption(String)`, `MissingValue(String)`,
-`Conflict(String)`, `MultipleDirectories`. String payloads identify fields or
-options, not supplied values or JSON text. Exceptions from JSON parsing are
-normalized to `InvalidJson`; errors are not ignored or retried.
+include 和自定义 ignore 拒绝空模式、前导 `!`、绝对路径、反斜杠、冒号、花括号及 `..` 组件。支持 `*`、`?`、`**`、字符类和目录模式；完整语法由文件选择包校验。规则文件中的 `!` 反选另按 [文件选择规则](file-selection.md) 处理。
 
-## Verification boundary
+## 配置包接口
 
-Three aggregate native tests cover defaults and precedence (including explicit
-false/true), stable list merging without input mutation, CLI options/actions,
-strict nested JSON types/unknown fields, integer bounds, conflicts, and unsafe
-glob rejection. Actual CLI I/O, config discovery, diagnostics, resource loading,
-initialization safety and end-to-end execution belong to the integrating CLI.
+`delthin/moon_repomix/config` 负责纯解析与合并，返回的相对路径保持原样。调用者负责配置文件 I/O、路径解析、动作执行及资源加载。
+
+```moonbit
+pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError
+pub fn parse_json(text : String) -> Patch raise ConfigError
+pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError
+pub fn Patch::empty() -> Patch
+```
+
+传入 `parse_cli` 的参数不含 `argv[0]`。`Cli` 包含 `directory`、`config_path : String?`、`action : Action`、`stdout`、`quiet`、`verbose` 和 `patch : Patch`。`Action` 为 `Pack | Init | Help | Version`；不同显式动作冲突，相同动作可重复。CLI 在读取配置和词表前处理 help/version/init。
+
+没有选定配置文件时，向 `resolve` 传 `None`。`Patch` 的标量字段为可选值，列表为追加项；可从 `Patch::empty()` 修改字段构造。它不含 directory/stdout/quiet/verbose。`resolve` 校验两份 Patch 中的全部字段，包括随后被覆盖的值；合并不修改输入，结果数组独立分配。
+
+| `Options` 字段 | 类型与默认值 |
+| --- | --- |
+| `directory` | `String`，`.` |
+| `output` | `String`，由样式决定 |
+| `stdout` | `Bool`，false |
+| `style` | `Style`，`Xml`；另一值为 `Markdown` |
+| `include_patterns`, `ignore` | `Array[String]`，空 |
+| `use_gitignore`, `use_dot_ignore`, `use_default_patterns` | `Bool`，true |
+| `security_check` | `Bool`，true |
+| `encoding` | `String`，`o200k_base` |
+| `token_budget` | `Int?`，`None`，不限 |
+| `max_file_size` | `Int`，52,428,800 磁盘字节 |
+| `tokenizer_path` | `String?`，`None` |
+| `quiet`, `verbose` | `Bool`，false |
+
+`ConfigError` 包含 `InvalidJson`、`UnknownField(String)`、`InvalidValue(String)`、`UnknownOption(String)`、`MissingValue(String)`、`Conflict(String)`、`MultipleDirectories`。字符串负载只标识字段或选项；JSON 解析异常统一为 `InvalidJson`。
