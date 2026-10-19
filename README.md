@@ -113,7 +113,7 @@ let result = @repomix.pack(options, runtime)
 
 ## 开发与打包
 
-CI 安装 `latest` 后核对 `moon-toolchain`；版本不一致时停止，须核对并更新工具链要求。
+CI 通过官方安装脚本安装固定版本，再从 `moon-toolchain` 读取要求并核对实际编译器。升级时同步修改该文件与工作流中的 `MOONBIT_INSTALL_VERSION`，并重新运行黄金夹具和功能测试。
 
 ```sh
 moon update

@@ -1,15 +1,20 @@
 ///|
 import {
   "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
   "moonbitlang/async@0.22.5/process",
 }
 
 ///|
 async fn main {
-  let expected = "v0.10.15+943464bfa"
+  let version = @fs.read_file("moon-toolchain").text().trim().to_owned()
+  guard !version.is_empty() else {
+    fail("moon-toolchain must contain the required compiler version")
+  }
+  let expected = "v" + version
   let (code, stdout, stderr) = @process.collect_output("moonc", ["-v"])
-  let actual = stdout.text() + stderr.text()
-  guard code == 0 && actual.contains(expected) else {
+  let actual = (stdout.text() + stderr.text()).trim().to_owned()
+  guard code == 0 && (actual == expected || actual.has_prefix(expected + " ")) else {
     fail(
       "Expected moonc " +
       expected +

@@ -4,6 +4,9 @@ permissions:
   contents: read
 jobs:
   native:
+    env:
+      # Keep this equal to moon-toolchain; check-toolchain verifies the installation.
+      MOONBIT_INSTALL_VERSION: "0.10.15+943464bfa"
     strategy:
       fail-fast: false
       matrix:
@@ -17,9 +20,18 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: moonbit-community/setup-moonbit@04293a8a813bfd4b6c2fce22701b52ae1050d100
-        with:
-          version: latest
+      - name: Install pinned MoonBit toolchain (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Install pinned MoonBit toolchain (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Invoke-RestMethod https://cli.moonbitlang.com/install/powershell.ps1 | Invoke-Expression
+          "$HOME\.moon\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - run: moon version --all
       - run: moon update
       - name: Require the verified compiler version
