@@ -61,6 +61,8 @@ pub(all) struct Options {
   security_check : Bool
   encoding : String
   token_budget : Int?
+  top_files_length : Int
+  token_count_tree : TokenCountTree
   max_file_size : Int
   tokenizer_path : String?
   quiet : Bool
@@ -79,6 +81,8 @@ pub(all) struct Patch {
   mut security_check : Bool?
   mut encoding : String?
   mut token_budget : Int?
+  mut top_files_length : Int?
+  mut token_count_tree : TokenCountTree?
   mut max_file_size : Int?
   mut tokenizer_path : String?
 } derive(@debug.Debug)
@@ -92,6 +96,14 @@ pub(all) enum Style {
 pub fn Style::equal(Self, Self) -> Bool
 pub fn Style::not_equal(Self, Self) -> Bool
 pub fn Style::to_repr(Self) -> @debug.Repr
+
+pub(all) enum TokenCountTree {
+  Disabled
+  Enabled(Int)
+} derive(Eq, @debug.Debug)
+pub fn TokenCountTree::equal(Self, Self) -> Bool
+pub fn TokenCountTree::not_equal(Self, Self) -> Bool
+pub fn TokenCountTree::to_repr(Self) -> @debug.Repr
 
 // Type aliases
 

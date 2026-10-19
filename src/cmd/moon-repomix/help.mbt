@@ -14,6 +14,8 @@ let help : String =
   #|      --no-security-check        Disable secret scanning (warns)
   #|      --token-count-encoding NAME  Only o200k_base is supported
   #|      --token-budget N           Positive limit; output is kept if exceeded
+  #|      --top-files-len N          Top content-token files (default: 5; 0 hides)
+  #|      --token-count-tree [N]     Content-token tree; optional minimum (>= 0)
   #|      --tokenizer-path PATH      Explicit o200k_base.tiktoken resource
   #|  -c, --config PATH              Select JSON configuration
   #|      --init                     Create configuration without overwriting
@@ -24,5 +26,8 @@ let help : String =
   #|
   #|Default config: <directory>/repomix.config.json.
   #|Default output: repomix-output.xml or repomix-output.md.
+  #|Token reports use stderr and are hidden by --quiet.
+  #|Place directory before --token-count-tree, or separate it with --.
+  #|Directory token sums are not the final document count used for budgets.
   #|With --stdout, redirect outside the input root or explicitly ignore the target.
   #|

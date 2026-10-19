@@ -27,11 +27,33 @@ fn json_bool(value : Json, field : String) -> Bool raise ConfigError {
 }
 
 ///|
-fn json_positive_int(value : Json, field : String) -> Int32 raise ConfigError {
+fn json_nonnegative_int(
+  value : Json,
+  field : String,
+) -> Int32 raise ConfigError {
   match value {
-    Number(n, ..) if n > 0 && n <= 2147483647.0 && n.to_int().to_double() == n =>
+    Number(n, ..) if n >= 0 && n <= 2147483647.0 && n.to_int().to_double() == n =>
       n.to_int()
     _ => raise InvalidValue(field)
+  }
+}
+
+///|
+fn json_positive_int(value : Json, field : String) -> Int32 raise ConfigError {
+  let result = json_nonnegative_int(value, field)
+  if result == 0 {
+    raise InvalidValue(field)
+  }
+  result
+}
+
+///|
+fn json_token_tree(value : Json) -> TokenCountTree raise ConfigError {
+  match value {
+    False => Disabled
+    True => Enabled(0)
+    String(text) => Enabled(nonnegative_int(text, "output.tokenCountTree"))
+    _ => Enabled(json_nonnegative_int(value, "output.tokenCountTree"))
   }
 }
 
@@ -67,6 +89,12 @@ pub fn parse_json(text : String) -> Patch raise ConfigError {
               patch.token_budget = Some(
                 json_positive_int(value, "output.tokenBudget"),
               )
+            "topFilesLength" =>
+              patch.top_files_length = Some(
+                json_nonnegative_int(value, "output.topFilesLength"),
+              )
+            "tokenCountTree" =>
+              patch.token_count_tree = Some(json_token_tree(value))
             _ => raise UnknownField("output." + key)
           }
         }

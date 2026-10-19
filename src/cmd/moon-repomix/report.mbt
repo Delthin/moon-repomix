@@ -33,6 +33,13 @@ async fn report(
         ":\{hit.line} bytes [\{hit.start}, \{hit.end})\n",
       )
     }
+    let top = top_files(result.files, options.top_files_length)
+    if !top.is_empty() {
+      @stdio.stderr.write(top)
+    }
+    if options.token_count_tree is Enabled(threshold) {
+      @stdio.stderr.write(token_tree(result.files, threshold))
+    }
     if options.verbose {
       for file in result.files {
         @stdio.stderr.write(

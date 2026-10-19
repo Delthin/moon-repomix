@@ -7,6 +7,7 @@ import {
   "moonbitlang/async/stdio",
   "moonbitlang/async/os_error",
   "moonbitlang/core/env",
+  "moonbitlang/core/encoding/utf8",
 }
 
 supported_targets = "native"

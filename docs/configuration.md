@@ -20,6 +20,8 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--no-security-check` | 关闭扫描，记录关闭状态并显示警告 |
 | `--token-count-encoding o200k_base` | 指定当前支持的编码 |
 | `--token-budget N` | 正整数预算；等于预算通过，超限保留完整输出并返回 1 |
+| `--top-files-len N` | 按文件正文 token 数降序显示前 N 个文件，默认 5；0 关闭 |
+| `--token-count-tree [N]` | 显示文件和目录的 token 树；省略 N 时为 0，只显示计数 ≥ N 的节点 |
 | `--tokenizer-path PATH` | 显式指定词表文件；加载时校验资源 |
 | `-c, --config PATH` | 显式选择 JSON 配置 |
 | `--init` | 创建配置文件；已有文件不覆盖 |
@@ -30,6 +32,8 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 
 值参数支持 `--key=value` 和分开传值，`-o=PATH` 也可用。以 `-` 开头的值须使用等号形式。短选项不能合并，也不接受 `-oPATH`。`--` 结束参数解析，可用于输入名以 `-` 开头的目录。CSV 项会去除首尾空白，空项报错；重复的标量参数取最后一个值，列表参数继续追加。
 
+`--token-count-tree` 会将紧随其后的非选项参数作为阈值。目录应放在该选项之前，或用 `--token-count-tree -- directory` 分隔；也可使用 `--token-count-tree=0 directory`。两项统计参数只影响 stderr，`--quiet` 会隐藏它们，打包正文与预算不受影响。详见 [Token 分布与排名](tokenization.md#token-分布与排名)。
+
 `--stdout` 与显式 CLI `--output` 冲突，但与 JSON 中的输出文件名不冲突。stdout 模式不创建输出文件。文件名 `-` 表示普通文件，标准输出须使用 `--stdout`。
 
 ## JSON 配置
@@ -39,7 +43,9 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
   "output": {
     "filePath": "context.md",
     "style": "markdown",
-    "tokenBudget": 200000
+    "tokenBudget": 200000,
+    "topFilesLength": 5,
+    "tokenCountTree": 100
   },
   "include": ["src/**", "docs/*.md"],
   "ignore": {
@@ -55,6 +61,8 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 ```
 
 以上字段均可省略。所有层级都拒绝未知字段；根节点必须为对象，字段类型须与示例一致，`null` 不等于省略。列表元素必须是字符串。预算和单文件字节上限须为 `1..2147483647` 的整数；CLI 预算只接受十进制数字。路径必须非空且不含 NUL。默认输出文件名在样式合并完成后选择。
+
+`output.topFilesLength` 为 `0..2147483647` 的整数，默认 5。`output.tokenCountTree` 默认为 `false`；`true` 开启完整树，非负整数或只含十进制数字的字符串表示阈值。阈值范围为 `0..2147483647`，0 也会显示空文件。CLI 的排名数量和阈值均只接受十进制数字。
 
 `tokenizer_path` 通过 CLI 或编程接口设置，不属于 JSON 字段。
 
@@ -86,6 +94,8 @@ pub fn Patch::empty() -> Patch
 | `security_check` | `Bool`，true |
 | `encoding` | `String`，`o200k_base` |
 | `token_budget` | `Int?`，`None`，不限 |
+| `top_files_length` | `Int`，5；CLI 报告使用，0 关闭排名 |
+| `token_count_tree` | `TokenCountTree`，`Disabled`；`Enabled(Int)` 指定非负阈值，供 CLI 报告使用 |
 | `max_file_size` | `Int`，52,428,800 磁盘字节 |
 | `tokenizer_path` | `String?`，`None` |
 | `quiet`, `verbose` | `Bool`，false |

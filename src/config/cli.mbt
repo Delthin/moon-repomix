@@ -1,5 +1,5 @@
 ///|
-fn cli_positive_int(value : String, field : String) -> Int32 raise ConfigError {
+fn nonnegative_int(value : String, field : String) -> Int32 raise ConfigError {
   if value.is_empty() {
     raise InvalidValue(field)
   }
@@ -14,7 +14,13 @@ fn cli_positive_int(value : String, field : String) -> Int32 raise ConfigError {
     }
     result = result * 10 + digit
   }
-  if result <= 0 {
+  result
+}
+
+///|
+fn cli_positive_int(value : String, field : String) -> Int32 raise ConfigError {
+  let result = nonnegative_int(value, field)
+  if result == 0 {
     raise InvalidValue(field)
   }
   result
@@ -70,6 +76,20 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       Some((key, value)) => (key.to_owned(), Some(value.to_owned()))
       None => (arg, None)
     }
+    if key == "--token-count-tree" {
+      // Like Repomix's optional argument, a following non-option is a threshold.
+      let threshold = match inline {
+        Some(value) => nonnegative_int(value, "output.tokenCountTree")
+        None if index < args.length() && !args[index].has_prefix("-") => {
+          let value = args[index]
+          index += 1
+          nonnegative_int(value, "output.tokenCountTree")
+        }
+        None => 0
+      }
+      patch.token_count_tree = Some(Enabled(threshold))
+      continue
+    }
     let takes_value = match key {
       "-o"
       | "--output"
@@ -79,6 +99,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       | "--ignore"
       | "--token-count-encoding"
       | "--token-budget"
+      | "--top-files-len"
       | "-c"
       | "--config"
       | "--tokenizer-path" => true
@@ -118,6 +139,10 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
         "--token-budget" =>
           patch.token_budget = Some(
             cli_positive_int(value, "output.tokenBudget"),
+          )
+        "--top-files-len" =>
+          patch.top_files_length = Some(
+            nonnegative_int(value, "output.topFilesLength"),
           )
         "-c" | "--config" => {
           validate_path(value, "config")

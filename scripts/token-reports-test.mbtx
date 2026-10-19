@@ -1,0 +1,203 @@
+///|
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+}
+
+///|
+async fn cli(
+  binary : String,
+  args : Array[String],
+  cwd : String,
+) -> (Int32, String, String) {
+  let (code, out, err) = @process.collect_output(binary, args, cwd~)
+  (code, out.text(), err.text())
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 3 else {
+    fail(
+      "Usage: moon run --target native scripts/token-reports-test.mbtx BINARY VOCABULARY",
+    )
+  }
+  let binary = @fs.realpath(args[1])
+  let vocabulary = @fs.realpath(args[2])
+  let temp = @fs.tmpdir(prefix="moon-repomix-token-reports-")
+  defer @fs.rmdir(temp, recursive=true)
+  let root = temp + "/reports"
+  @fs.mkdir(root + "/src/deep", recursive=true)
+  @fs.mkdir(root + "/组 合")
+  @fs.mkdir(root + "/private")
+  // Counts come from the checked-in tiktoken 0.14.0 golden cases, not this CLI.
+  // hello: 1; helloworld: 2; Привет мир: 3; empty: 0. Accepted sum: 8.
+  for
+    (name, text) in [
+      ("a.txt", "hello"),
+      ("b.txt", "hello"),
+      ("empty.txt", ""),
+      ("src/a.txt", "helloworld"),
+      ("src/deep/z.txt", "Привет мир"),
+      ("组 合/c.txt", "hello"),
+      ("ignored.txt", "hello"),
+    ] {
+    @fs.write_file(root + "/" + name, text, create_mode=CreateNew)
+  }
+  @fs.write_file(root + "/.gitignore", "ignored.txt\n", create_mode=CreateNew)
+  @fs.write_file(root + "/bad.txt", b"a\x00b", create_mode=CreateNew)
+  let secret = "ghp_" + "Ab9Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
+  @fs.write_file(root + "/private/secret.txt", secret, create_mode=CreateNew)
+  let common = [
+    root, "--stdout", "--include", "**/*.txt", "--tokenizer-path", vocabulary,
+  ]
+  let expected_top =
+    #|Top files by content tokens (showing 5 of 6):
+    #|  1. "src/deep/z.txt": 3 tokens (19 bytes)
+    #|  2. "src/a.txt": 2 tokens (10 bytes)
+    #|  3. "a.txt": 1 tokens (5 bytes)
+    #|  4. "b.txt": 1 tokens (5 bytes)
+    #|  5. "组 合/c.txt": 1 tokens (5 bytes)
+  let expected_tree =
+    #|Token count tree (content tokens; directory sums; minimum 0):
+    #|. (8 tokens)
+    #|├── "a.txt" (1 tokens)
+    #|├── "b.txt" (1 tokens)
+    #|├── "empty.txt" (0 tokens)
+    #|├── "src/" (5 tokens)
+    #|│   ├── "a.txt" (2 tokens)
+    #|│   └── "deep/" (3 tokens)
+    #|│       └── "z.txt" (3 tokens)
+    #|└── "组 合/" (1 tokens)
+    #|    └── "c.txt" (1 tokens)
+  let (code, xml, report) = cli(binary, common + ["--token-count-tree"], temp)
+  assert_eq(code, 0)
+  assert_true(report.contains("Packed 6 files,"))
+  assert_true(report.has_suffix(expected_top + "\n" + expected_tree + "\n"))
+  assert_false(xml.contains("path=\"private/"))
+  assert_false(xml.contains("path=\"ignored.txt\""))
+  assert_false(xml.contains("path=\"bad.txt\""))
+  assert_false(xml.contains(secret))
+  assert_false(report.contains(secret))
+  let (default_code, default_xml, default_report) = cli(binary, common, temp)
+  assert_eq(default_code, 0)
+  assert_eq(default_xml, xml)
+  assert_true(default_report.has_suffix(expected_top + "\n"))
+  assert_false(default_report.contains("Token count tree"))
+
+  let config = temp + "/report.json"
+  @fs.write_file(
+    config,
+    "{\"output\":{\"topFilesLength\":1,\"tokenCountTree\":2}}",
+    create_mode=CreateNew,
+  )
+  let (configured_code, configured_xml, configured) = cli(
+    binary,
+    common + ["--config", config],
+    temp,
+  )
+  assert_eq(configured_code, 0)
+  assert_eq(configured_xml, xml)
+  assert_true(
+    configured.contains(
+      "Top files by content tokens (showing 1 of 6):\n  1. \"src/deep/z.txt\": 3 tokens",
+    ),
+  )
+  assert_true(
+    configured.has_suffix(
+      (
+        #|Token count tree (content tokens; directory sums; minimum 2):
+        #|. (8 tokens)
+        #|└── "src/" (5 tokens)
+        #|    ├── "a.txt" (2 tokens)
+        #|    └── "deep/" (3 tokens)
+        #|        └── "z.txt" (3 tokens)
+      ) +
+      "\n",
+    ),
+  )
+  let (override_code, override_xml, overridden) = cli(
+    binary,
+    common +
+    ["--config", config, "--top-files-len", "0", "--token-count-tree=5"],
+    temp,
+  )
+  assert_eq(override_code, 0)
+  assert_eq(override_xml, xml)
+  assert_false(overridden.contains("Top files"))
+  // A directory remains visible even if every descendant is below the threshold.
+  assert_true(
+    overridden.has_suffix(
+      "Token count tree (content tokens; directory sums; minimum 5):\n. (8 tokens)\n└── \"src/\" (5 tokens)\n",
+    ),
+  )
+  let (none_code, none_xml, none_report) = cli(
+    binary,
+    common + ["--token-count-tree", "9", "--top-files-len=0"],
+    temp,
+  )
+  assert_eq(none_code, 0)
+  assert_eq(none_xml, xml)
+  assert_true(
+    none_report.has_suffix(
+      ". (8 tokens)\nNo files or directories with at least 9 tokens.\n",
+    ),
+  )
+
+  let (md_code, markdown, md_report) = cli(
+    binary,
+    common + ["--style=markdown", "--token-count-tree", "--top-files-len=100"],
+    temp,
+  )
+  assert_eq(md_code, 0)
+  assert_true(markdown.contains("## File: src/deep/z.txt"))
+  assert_true(
+    md_report.contains("Top files by content tokens (showing 6 of 6):"),
+  )
+  assert_true(md_report.has_suffix(expected_tree + "\n"))
+  let (quiet_code, quiet_xml, quiet_report) = cli(
+    binary,
+    common + ["--quiet", "--token-count-tree"],
+    temp,
+  )
+  assert_eq(quiet_code, 0)
+  assert_eq(quiet_xml, xml)
+  assert_eq(quiet_report, "")
+  let (over_code, over_xml, over_report) = cli(
+    binary,
+    common + ["--token-count-tree", "--token-budget=8"],
+    temp,
+  )
+  assert_eq(over_code, 1)
+  assert_eq(over_xml, xml)
+  assert_true(over_report.contains("Token budget exceeded:"))
+  assert_true(over_report.contains(" > 8; complete output retained."))
+
+  let empty = temp + "/empty"
+  @fs.mkdir(empty)
+  let (empty_code, _, empty_report) = cli(
+    binary,
+    [empty, "--stdout", "--token-count-tree", "--tokenizer-path", vocabulary],
+    temp,
+  )
+  assert_eq(empty_code, 0)
+  assert_true(empty_report.contains("no files were accepted"))
+  assert_false(empty_report.contains("Top files"))
+  assert_true(empty_report.has_suffix(". (0 tokens)\nNo accepted files.\n"))
+  if @env.get_env_var("OS") != Some("Windows_NT") {
+    @fs.write_file(root + "/line\nbreak.txt", "hello", create_mode=CreateNew)
+    let (quoted_code, _, quoted_report) = cli(
+      binary,
+      common + ["--token-count-tree", "--top-files-len=100"],
+      temp,
+    )
+    assert_eq(quoted_code, 0)
+    assert_true(quoted_report.contains("\"line\\nbreak.txt\""))
+    assert_false(quoted_report.contains("line\nbreak.txt"))
+  }
+  println(
+    "PASS: token ranking, ties, directory sums, thresholds, zero/empty files, JSON/CLI precedence, XML/Markdown, stdout/quiet, budget independence, safe names and accepted-only metadata",
+  )
+}

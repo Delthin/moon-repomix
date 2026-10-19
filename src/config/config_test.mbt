@@ -12,6 +12,8 @@ test "defaults and presence-aware configuration precedence" {
   assert_true(defaults.security_check)
   assert_eq(defaults.max_file_size, 52428800)
   assert_eq(defaults.token_budget, None)
+  assert_eq(defaults.top_files_length, 5)
+  assert_eq(defaults.token_count_tree, @config.TokenCountTree::Disabled)
   let file = @config.parse_json(
     (
       #|{"include":["src/**","src/**"],"ignore":{"customPatterns":["tmp/**"],"useGitignore":false,"useDotIgnore":false,"useDefaultPatterns":false},"security":{"enableSecurityCheck":false},"output":{"style":"markdown","tokenBudget":200},"input":{"maxFileSize":1024},"tokenCount":{"encoding":"o200k_base"}}
@@ -154,6 +156,15 @@ test "strict rejection of invalid configuration and CLI" {
       ["--no-security-check=false"],
       ["--init", "--version"],
       ["--tokenizer-path="],
+      ["--top-files-len"],
+      ["--top-files-len=-1"],
+      ["--top-files-len=1.5"],
+      ["--top-files-len=2147483648"],
+      ["--token-count-tree="],
+      ["--token-count-tree=-1"],
+      ["--token-count-tree", "invalid"],
+      ["--token-count-tree=1.5"],
+      ["--token-count-tree=2147483648"],
     ] {
     try @config.parse_cli(args) catch {
       @config.ConfigError::UnknownOption(_)
@@ -175,6 +186,85 @@ test "strict rejection of invalid configuration and CLI" {
       _ => fail("expected glob error")
     } noraise {
       _ => fail("expected invalid glob")
+    }
+  }
+}
+
+///|
+test "token report configuration, optional threshold and explicit overrides" {
+  let file = @config.parse_json(
+    (
+      #|{"output":{"topFilesLength":2,"tokenCountTree":true}}
+    ),
+  )
+  let configured = @config.resolve(@config.parse_cli([]), Some(file))
+  assert_eq(configured.top_files_length, 2)
+  assert_eq(configured.token_count_tree, @config.TokenCountTree::Enabled(0))
+  let overridden = @config.resolve(
+    @config.parse_cli(["repo", "--top-files-len=0", "--token-count-tree", "7"]),
+    Some(file),
+  )
+  assert_eq(overridden.top_files_length, 0)
+  assert_eq(overridden.token_count_tree, @config.TokenCountTree::Enabled(7))
+  for
+    args in [
+      ["repo", "--token-count-tree"],
+      ["--token-count-tree", "--", "repo"],
+      ["--token-count-tree=0", "repo"],
+    ] {
+    let options = @config.resolve(@config.parse_cli(args), None)
+    assert_eq(options.directory, "repo")
+    assert_eq(options.token_count_tree, @config.TokenCountTree::Enabled(0))
+  }
+  for
+    (value, expected) in [
+      ("false", @config.TokenCountTree::Disabled),
+      ("true", @config.TokenCountTree::Enabled(0)),
+      ("0", @config.TokenCountTree::Enabled(0)),
+      ("12", @config.TokenCountTree::Enabled(12)),
+      ("\"12\"", @config.TokenCountTree::Enabled(12)),
+    ] {
+    let json = @config.parse_json(
+      "{\"output\":{\"tokenCountTree\":" + value + "}}",
+    )
+    assert_eq(
+      @config.resolve(@config.parse_cli([]), Some(json)).token_count_tree,
+      expected,
+    )
+  }
+  let explicit = @config.Patch::empty()
+  explicit.token_count_tree = Some(@config.TokenCountTree::Disabled)
+  let base = @config.parse_cli([])
+  assert_eq(
+    @config.resolve({ ..base, patch: explicit, }, Some(file)).token_count_tree,
+    @config.TokenCountTree::Disabled,
+  )
+  for field in ["topFilesLength", "tokenCountTree"] {
+    for value in ["-1", "1.5", "2147483648", "null", "[]", "\"invalid\""] {
+      try
+        @config.parse_json("{\"output\":{\"" + field + "\":" + value + "}}")
+      catch {
+        @config.ConfigError::InvalidValue(actual) =>
+          assert_eq(actual, "output." + field)
+        _ => fail("unexpected token report error")
+      } noraise {
+        _ => fail("expected invalid token report field")
+      }
+    }
+  }
+  for field in ["topFilesLength", "tokenCountTree"] {
+    let invalid = @config.Patch::empty()
+    if field == "topFilesLength" {
+      invalid.top_files_length = Some(-1)
+    } else {
+      invalid.token_count_tree = Some(@config.TokenCountTree::Enabled(-1))
+    }
+    try @config.resolve({ ..base, patch: invalid, }, None) catch {
+      @config.ConfigError::InvalidValue(actual) =>
+        assert_eq(actual, "output." + field)
+      _ => fail("unexpected patch error")
+    } noraise {
+      _ => fail("expected invalid report patch")
     }
   }
 }

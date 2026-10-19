@@ -33,6 +33,22 @@ moon run scripts/tokenizer-install-assets.mbtx --target native /absolute/repo /a
 
 最终 token 总数须对完整渲染文档一次编码。BPE 和预切分可能跨拼接边界变化，因此各片段计数相加不能代替总数。`count` 使用与 `encode` 相同的编码过程，目前会在内部分配 ID 数组。
 
+## Token 分布与排名
+
+```sh
+moon-repomix ./project --top-files-len 10 --token-count-tree 100
+```
+
+CLI 默认在 stderr 显示正文 token 数最多的 5 个文件，包含相对路径和磁盘字节数；`--top-files-len 0` 关闭排名。计数相同时按 UTF-8 相对路径字节排序。
+
+`--token-count-tree` 开启统计树。省略阈值时显示全部节点，包含 token 数为 0 的空文件；指定 N 时，仅显示计数 ≥ N 的文件或目录。每层先列文件，再列目录，各自按 UTF-8 路径字节排序。名称以 JSON 字符串显示，转义换行和终端控制字符。
+
+目录计数是所有已接受后代文件正文计数之和，筛选阈值不改变这个和。因此，一个目录可能达到阈值，而它的每个子节点都低于阈值，此时只显示目录及其总数。树根显示所有已接受文件的计数之和；空结果或没有节点达到阈值时附有提示。被忽略、扫描命中或因读取/格式问题被跳过的文件不参与排名和树统计。
+
+报告复用打包时的 `FileStats`，不会重新读文件或分词；`--quiet` 隐藏报告，`--stdout` 的正文保持不变。**文件与目录计数用于定位上下文占用，预算仍以最终完整文档的一次编码为准。** 删除一个文件实际减少的 token 数还受包装和拼接边界影响。
+
+库调用者可从 `PackResult.files` 读取原始逐文件计数。`Options.top_files_length` 和 `Options.token_count_tree` 只控制 CLI 报告，`pack` 本身返回文档和统计，不向终端写入报告。
+
 ## BPE 与预切分
 
 BPE 核心改编自 `howtomakeaname/tokenizers-moonbit@0.16.3`，保留链接符号、优先队列、过期合并失效及最左优先规则。原公开模型使用 HF pair-merges、字符串词表和字节映射；本项目的 `src/metrics/bpe.mbt` 改为原始 UTF-8 字节区间和 OpenAI `Map[Bytes, Int]` ranks，通过区间端点及链接判断堆记录是否失效。较低 rank 优先，同 rank 时合并最左侧，返回原始 OpenAI rank ID。

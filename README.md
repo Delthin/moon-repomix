@@ -65,6 +65,7 @@ moon-repomix ./project --style markdown -o context.md
 moon-repomix ./project --include 'src/**,README.md' --ignore '**/*_test.mbt'
 moon-repomix ./project --stdout > context.xml
 moon-repomix ./project --token-budget 100000
+moon-repomix ./project --token-count-tree 100 --top-files-len 10
 moon-repomix ./project --init
 ```
 
@@ -77,7 +78,7 @@ moon-repomix ./project --init
 - 读取 `.gitignore`、`.ignore`、`.repomixignore`（含嵌套规则），支持 include/ignore glob；按相对路径稳定排序。include 不会绕过忽略规则。
 - 打包有效 UTF-8 普通文件；去掉 UTF-8 BOM，保留原始换行。默认单文件上限为 **50 MiB**；链接、二进制、不可读或超限文件跳过。
 - 默认扫描密钥，排除命中的**整个文件**。诊断给出规则、路径、行号和磁盘字节区间，不打印匹配值。
-- 用完整 `o200k_base` 词表计算最终文档的 token 数，同时报告逐文件统计。超预算不截断：仍输出完整文档，CLI 返回 **1**；正常完成且未超预算返回 **0**。配置、资源、扫描或写入错误也返回 **1**，需结合诊断区分。
+- 用完整 `o200k_base` 词表计算最终文档的 token 数，默认显示正文 token 数最多的 5 个文件。`--top-files-len` 调整排名数量，`--token-count-tree [N]` 显示带阈值的文件/目录统计；目录值为文件正文计数之和。超预算不截断：仍输出完整文档，CLI 返回 **1**；正常完成且未超预算返回 **0**。配置、资源、扫描或写入错误也返回 **1**，需结合诊断区分。
 - 文件输出先写同目录临时文件，再原子替换；打包失败时保留已有输出。`--stdout` 将文档写到标准输出，统计和诊断写到标准错误。
 
 更多细节：[文件选择](docs/file-selection.md) · [输出格式](docs/output.md) · [扫描规则](docs/security.md) · [分词](docs/tokenization.md)。
@@ -129,6 +130,7 @@ moon run --target native scripts/package.mbtx dist macos-arm64
 ```sh
 moon run --target native scripts/scenarios.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
 moon run --target native scripts/functional.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
+moon run --target native scripts/token-reports-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
 moon run --target native scripts/self-pack-test.mbtx ../moon-repomix-self-check
 ```
 
