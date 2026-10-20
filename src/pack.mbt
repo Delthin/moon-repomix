@@ -218,9 +218,9 @@ async fn pack_directory(
   let document = @document.create(accepted, sections=git.sections, metadata~)
   let text = match options.style {
     Xml => @output.xml(document)
-    Markdown => @output.markdown(document)
+    Markdown => @output.markdown(document, full_metadata=options.full_metadata)
     Json => @output.json(document)
-    Plain => @output.plain(document)
+    Plain => @output.plain(document, full_metadata=options.full_metadata)
   }
   @async.sleep(0)
   let tokens = runtime.encoder.count(text)

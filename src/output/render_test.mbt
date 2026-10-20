@@ -32,10 +32,34 @@ test "document paths use UTF-8 lexical order and keep directory children togethe
 }
 
 ///|
-test "Markdown uses a longer fence and a single escaped path heading" {
+test "text renderers use safe fences and summarize metadata while keeping the complete model" {
   let metadata : Json = {
     "source": { "kind": "local" },
-    "compression": [{ "path": "中文.ts", "ranges": [[1, 3], [8, 8]] }],
+    "compression": [
+      {
+        "path": "中文.ts",
+        "language": "typescript",
+        "applied": true,
+        "reason": null,
+        "ranges": [[1, 3], [8, 8]],
+        "originalTokens": 30,
+        "outputTokens": 12,
+      },
+      {
+        "path": "notes.md",
+        "language": null,
+        "applied": false,
+        "reason": "unsupported",
+        "ranges": [],
+        "originalTokens": 7,
+        "outputTokens": 7,
+      },
+    ],
+    "git": {
+      "diffs": [{ "kind": "unstaged", "paths": ["中文.ts"] }],
+      "commits": [],
+    },
+    "custom": "retained",
   }
   let doc = @document.create(
     [{ path: "#a\n<script>.mbt", text: "````\n# injected\n```", }],
@@ -44,8 +68,28 @@ test "Markdown uses a longer fence and a single escaped path heading" {
   let md = @output.markdown(doc)
   assert_true(md.contains("## File: \\#a&#10;&lt;script&gt;.mbt"))
   assert_true(md.contains("`````moonbit\n````\n# injected\n```\n`````\n"))
-  assert_true(md.contains("```json\n" + metadata.stringify() + "\n```"))
-  assert_true(@output.plain(doc).contains(metadata.stringify() + "\n"))
+  assert_true(md.contains("\"files\":2"))
+  assert_true(md.contains("\"applied\":1"))
+  assert_true(md.contains("\"originalTokens\":37"))
+  assert_true(md.contains("\"outputTokens\":19"))
+  assert_true(md.contains("\"fallbacks\":{\"unsupported\":1}"))
+  assert_true(md.contains("\"git\":{\"diffs\":1,\"commits\":0}"))
+  assert_true(md.contains("\"custom\":\"retained\""))
+  assert_false(md.contains("\"ranges\""))
+  assert_true(
+    @output.markdown(doc, full_metadata=true).contains(
+      "```json\n" + metadata.stringify() + "\n```",
+    ),
+  )
+  assert_true(
+    @output.plain(doc, full_metadata=true).contains(metadata.stringify() + "\n"),
+  )
+  assert_false(@output.plain(doc).contains("\"ranges\""))
+  assert_eq(doc.metadata, metadata)
+  guard @json.parse(@output.json(doc)) is { "metadata": full, .. } else {
+    fail("Expected complete structured metadata")
+  }
+  assert_eq(full, metadata)
   assert_true(@output.xml(@document.create([])).contains("<files>\n  </files>"))
 }
 

@@ -189,6 +189,8 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
         "--no-security-check" => patch.security_check = Some(false)
         "--compress" => patch.compress = Some(true)
         "--no-compress" => patch.compress = Some(false)
+        "--full-metadata" => patch.full_metadata = Some(true)
+        "--no-full-metadata" => patch.full_metadata = Some(false)
         "--include-diffs" => patch.include_diffs = Some(true)
         "--no-include-diffs" => patch.include_diffs = Some(false)
         "--include-logs" => patch.include_logs = Some(true)

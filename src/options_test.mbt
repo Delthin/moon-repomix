@@ -12,5 +12,7 @@ test "library options select formats and their matching output filenames" {
     assert_eq(options.style, style)
     assert_eq(options.output, "repomix-output." + suffix)
     assert_true(options.security_check)
+    assert_false(options.full_metadata)
   }
+  assert_true(@moon_repomix.options(".", full_metadata=true).full_metadata)
 }

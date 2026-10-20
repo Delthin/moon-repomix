@@ -1,6 +1,9 @@
 ///|
-/// Readable text with quoted path labels and unchanged file bodies.
-pub fn plain(document : @document.Document) -> String {
+/// Readable text with quoted paths, unchanged bodies and a context overview.
+pub fn plain(
+  document : @document.Document,
+  full_metadata~ : Bool = false,
+) -> String {
   let section = "=".repeat(64)
   let file_separator = "=".repeat(16)
   let out = StringBuilder()
@@ -21,7 +24,9 @@ pub fn plain(document : @document.Document) -> String {
   }
   if document.metadata != Json::null() {
     out.write_string("\n" + section + "\nContext Metadata\n" + section + "\n")
-    out.write_string(document.metadata.stringify() + "\n")
+    out.write_string(
+      text_metadata(document.metadata, full_metadata).stringify() + "\n",
+    )
   }
   for extra in document.sections {
     out.write_string(

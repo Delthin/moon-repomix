@@ -54,6 +54,7 @@ pub(all) struct Options {
   stdout : Bool
   style : Style
   compress : Bool
+  full_metadata : Bool
   include_diffs : Bool
   include_logs : Bool
   include_logs_count : Int
@@ -81,6 +82,7 @@ pub(all) struct Patch {
   mut output : String?
   mut style : Style?
   mut compress : Bool?
+  mut full_metadata : Bool?
   mut include_diffs : Bool?
   mut include_logs : Bool?
   mut include_logs_count : Int?

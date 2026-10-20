@@ -13,6 +13,7 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--stdout` | 正文写入 stdout，诊断写入 stderr |
 | `--style xml\|markdown\|json\|plain` | 默认 XML；默认文件名为 `repomix-output` 加对应的 `.xml`、`.md`、`.json`、`.txt` 扩展名 |
 | `--compress`, `--no-compress` | 开启或关闭语法树结构压缩，默认关闭 |
+| `--full-metadata`, `--no-full-metadata` | Markdown/plain 显示完整逐文件元数据，默认使用概览；JSON/XML 始终完整 |
 | `--include-diffs`, `--no-include-diffs` | 开启或关闭 staged/unstaged 差异，默认关闭 |
 | `--include-logs`, `--no-include-logs` | 开启或关闭提交历史，默认关闭 |
 | `--include-logs-count N` | 最近提交数量，默认 50，范围 `1..10000` |
@@ -54,6 +55,7 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
     "topFilesLength": 5,
     "tokenCountTree": 100,
     "compress": true,
+    "fullMetadata": false,
     "git": { "includeDiffs": true, "includeLogs": true, "includeLogsCount": 20 }
   },
   "include": ["src/**", "docs/*.md"],
@@ -108,6 +110,7 @@ pub fn Patch::empty() -> Patch
 | `top_files_length` | `Int`，5；CLI 报告使用，0 关闭排名 |
 | `token_count_tree` | `TokenCountTree`，`Disabled`；`Enabled(Int)` 指定非负阈值，供 CLI 报告使用 |
 | `compress`, `include_diffs`, `include_logs` | `Bool`，false |
+| `full_metadata` | `Bool`，false；控制 Markdown/plain 的逐文件元数据展示 |
 | `include_logs_count` | `Int`，50，范围 `1..10000` |
 | `max_git_bytes` | `Int`，8,388,608 |
 | `remote`, `remote_branch` | `String?`，`None` |

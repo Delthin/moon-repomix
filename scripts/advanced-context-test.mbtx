@@ -333,6 +333,19 @@ async fn main {
     assert_false(err.contains(secret))
     assert_true(rendered.contains("Git commit"))
     assert_true(rendered.contains("Git staged diff:"))
+    if style == "markdown" || style == "plain" {
+      assert_true(rendered.contains("\"files\":"))
+      assert_false(rendered.contains("\"ranges\":"))
+      let (full_ok, detailed, full_report) = run(
+        binary,
+        common + ["--style=" + style, "--stdout", "--full-metadata"],
+        temp,
+      )
+      assert_eq(full_ok, 0)
+      assert_true(detailed.contains("\"ranges\":"))
+      assert_false(detailed.contains(secret))
+      assert_true(tokens(full_report) > tokens(err))
+    }
     if style == "xml" && args.contains("--xml-oracle") {
       let path = temp + "/packed.xml"
       @fs.write_file(path, rendered, create_mode=CreateNew)

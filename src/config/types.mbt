@@ -27,6 +27,7 @@ pub(all) struct Patch {
   mut output : String?
   mut style : Style?
   mut compress : Bool?
+  mut full_metadata : Bool?
   mut include_diffs : Bool?
   mut include_logs : Bool?
   mut include_logs_count : Int32?
@@ -53,6 +54,7 @@ pub fn Patch::empty() -> Patch {
     output: None,
     style: None,
     compress: None,
+    full_metadata: None,
     include_diffs: None,
     include_logs: None,
     include_logs_count: None,
@@ -93,6 +95,7 @@ pub(all) struct Options {
   stdout : Bool
   style : Style
   compress : Bool
+  full_metadata : Bool
   include_diffs : Bool
   include_logs : Bool
   include_logs_count : Int32
@@ -305,6 +308,9 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
     stdout: cli.stdout,
     style,
     compress: patch.compress.unwrap_or(file.compress.unwrap_or(false)),
+    full_metadata: patch.full_metadata.unwrap_or(
+      file.full_metadata.unwrap_or(false),
+    ),
     include_diffs: patch.include_diffs.unwrap_or(
       file.include_diffs.unwrap_or(false),
     ),

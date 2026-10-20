@@ -13,6 +13,17 @@ test "defaults and presence-aware configuration precedence" {
   assert_eq(defaults.max_file_size, 52428800)
   assert_eq(defaults.token_budget, None)
   assert_eq(defaults.top_files_length, 5)
+  assert_false(defaults.full_metadata)
+  let detailed = @config.parse_json("{\"output\":{\"fullMetadata\":true}}")
+  assert_true(
+    @config.resolve(@config.parse_cli([]), Some(detailed)).full_metadata,
+  )
+  assert_false(
+    @config.resolve(@config.parse_cli(["--no-full-metadata"]), Some(detailed)).full_metadata,
+  )
+  assert_true(
+    @config.resolve(@config.parse_cli(["--full-metadata"]), None).full_metadata,
+  )
   assert_eq(defaults.token_count_tree, @config.TokenCountTree::Disabled)
   let file = @config.parse_json(
     (
@@ -162,6 +173,9 @@ test "strict rejection of invalid configuration and CLI" {
         #|{"output":{"compress":1}}
       ),
       (
+        #|{"output":{"fullMetadata":"true"}}
+      ),
+      (
         #|{"include":[false]}
       ),
     ] {
@@ -190,6 +204,7 @@ test "strict rejection of invalid configuration and CLI" {
       ["--token-budget=1.5"],
       ["--token-budget=2147483648"],
       ["--no-security-check=false"],
+      ["--full-metadata=false"],
       ["--init", "--version"],
       ["--tokenizer-path="],
       ["--top-files-len"],
