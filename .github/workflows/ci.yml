@@ -59,6 +59,8 @@ jobs:
       - name: Output formats with independent JSON readback
         if: runner.os == 'Linux'
         run: moon run --target native scripts/output-formats-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken --json-oracle
+      - name: Advanced repository context functional test
+        run: moon run --target native scripts/advanced-context-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken ${{ runner.os == 'Linux' && '--xml-oracle' || '' }}
       - name: Reproducible demo
         run: moon run --target native scripts/demo.mbtx
       - name: Real repository self-pack

@@ -6,8 +6,18 @@ pub(all) struct File {
 }
 
 ///|
+/// Additional untrusted repository context, such as a diff or commit message.
+pub(all) struct Section {
+  kind : String
+  title : String
+  text : String
+}
+
+///|
 pub(all) struct Document {
   files : Array[File]
+  sections : Array[Section]
+  metadata : Json
 }
 
 ///|
@@ -17,10 +27,14 @@ pub fn compare_path(a : String, b : String) -> Int32 {
 
 ///|
 /// Sort once before rendering so every output shares the same order.
-pub fn create(files : Array[File]) -> Document {
+pub fn create(
+  files : Array[File],
+  sections~ : Array[Section] = [],
+  metadata~ : Json = Json::null(),
+) -> Document {
   let sorted = files.copy()
   sorted.sort_by((a, b) => compare_path(a.path, b.path))
-  { files: sorted, }
+  { files: sorted, sections, metadata, }
 }
 
 ///|

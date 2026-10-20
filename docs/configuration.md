@@ -2,7 +2,7 @@
 
 配置按“默认值 → 选定的 JSON 文件 → 显式 CLI 参数”合并。普通字段由后者覆盖；include 和自定义 ignore 列表按 JSON、CLI 的顺序追加，按原字符串去重并保留首次出现的位置。未出现的布尔参数不参与覆盖，因此 JSON 中的 `false` 会保留。
 
-CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 `repomix.config.json`。显式配置路径、输出路径以启动时的工作目录为基准；include/ignore 以输入根目录为基准。默认配置文件不存在时使用默认值，显式指定的文件不存在则报错。
+CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 `repomix.config.json`。远程模式仅加载显式指定的本地配置。显式配置路径、输出路径以启动时的工作目录为基准；include/ignore 以输入根目录为基准。默认配置文件不存在时使用默认值，显式指定的文件不存在则报错。
 
 ## 命令行参数
 
@@ -12,6 +12,13 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `-o, --output PATH` | 输出文件路径 |
 | `--stdout` | 正文写入 stdout，诊断写入 stderr |
 | `--style xml\|markdown\|json\|plain` | 默认 XML；默认文件名为 `repomix-output` 加对应的 `.xml`、`.md`、`.json`、`.txt` 扩展名 |
+| `--compress`, `--no-compress` | 开启或关闭语法树结构压缩，默认关闭 |
+| `--include-diffs`, `--no-include-diffs` | 开启或关闭 staged/unstaged 差异，默认关闭 |
+| `--include-logs`, `--no-include-logs` | 开启或关闭提交历史，默认关闭 |
+| `--include-logs-count N` | 最近提交数量，默认 50，范围 `1..10000` |
+| `--max-git-bytes N` | Git 文本收集上限，默认 8,388,608 字节 |
+| `--remote URL` | 获取公开 HTTPS 仓库；与另一个输入目录互斥 |
+| `--remote-branch REF` | 指定 branch/tag/full commit；需要远程 URL |
 | `--include GLOBS` | 追加逗号分隔的正向选择模式 |
 | `-i, --ignore GLOBS` | 追加逗号分隔的自定义排除模式 |
 | `--no-gitignore` | 关闭 Git 规则 |
@@ -45,7 +52,9 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
     "style": "markdown",
     "tokenBudget": 200000,
     "topFilesLength": 5,
-    "tokenCountTree": 100
+    "tokenCountTree": 100,
+    "compress": true,
+    "git": { "includeDiffs": true, "includeLogs": true, "includeLogsCount": 20 }
   },
   "include": ["src/**", "docs/*.md"],
   "ignore": {
@@ -56,13 +65,15 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
   },
   "security": { "enableSecurityCheck": true },
   "tokenCount": { "encoding": "o200k_base" },
-  "input": { "maxFileSize": 52428800 }
+  "input": { "maxFileSize": 52428800, "maxGitBytes": 8388608 }
 }
 ```
 
 以上字段均可省略。所有层级都拒绝未知字段；根节点必须为对象，字段类型须与示例一致，`null` 不等于省略。列表元素必须是字符串。预算和单文件字节上限须为 `1..2147483647` 的整数；CLI 预算只接受十进制数字。路径必须非空且不含 NUL。默认输出文件名在样式合并完成后选择；显式 `output.filePath` 或 CLI `--output` 保持用户指定名称。格式结构见 [文件读取与输出](output.md)。
 
 `output.topFilesLength` 为 `0..2147483647` 的整数，默认 5。`output.tokenCountTree` 默认为 `false`；`true` 开启完整树，非负整数或只含十进制数字的字符串表示阈值。阈值范围为 `0..2147483647`，0 也会显示空文件。CLI 的排名数量和阈值均只接受十进制数字。
+
+远程来源可在 `--config` 显式指定的文件中配置为 `"remote": {"url":"https://github.com/octocat/Hello-World.git", "branch":"master"}`。`branch` 可省略，URL 必填；配置中的远程 URL 同样要求目录为 `.`。语法压缩、Git 章节、回退和安全规则详见 [仓库上下文](context.md)。
 
 `tokenizer_path` 通过 CLI 或编程接口设置，不属于 JSON 字段。
 
@@ -96,6 +107,10 @@ pub fn Patch::empty() -> Patch
 | `token_budget` | `Int?`，`None`，不限 |
 | `top_files_length` | `Int`，5；CLI 报告使用，0 关闭排名 |
 | `token_count_tree` | `TokenCountTree`，`Disabled`；`Enabled(Int)` 指定非负阈值，供 CLI 报告使用 |
+| `compress`, `include_diffs`, `include_logs` | `Bool`，false |
+| `include_logs_count` | `Int`，50，范围 `1..10000` |
+| `max_git_bytes` | `Int`，8,388,608 |
+| `remote`, `remote_branch` | `String?`，`None` |
 | `max_file_size` | `Int`，52,428,800 磁盘字节 |
 | `tokenizer_path` | `String?`，`None` |
 | `quiet`, `verbose` | `Bool`，false |

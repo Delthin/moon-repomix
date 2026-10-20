@@ -10,5 +10,19 @@ pub fn json(document : @document.Document) -> String {
     "directoryStructure": @document.tree(document),
     "files": Json::object(files),
   }
+  if value is Object(fields) {
+    if document.metadata != Json::null() {
+      fields["metadata"] = document.metadata
+    }
+    if !document.sections.is_empty() {
+      fields["sections"] = Json::array(
+        document.sections.map(section => {
+          "kind": section.kind,
+          "title": section.title,
+          "text": section.text,
+        }),
+      )
+    }
+  }
   value.stringify(indent=2) + "\n"
 }

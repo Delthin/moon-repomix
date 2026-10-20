@@ -10,12 +10,14 @@ import {
 async fn smoke(binary : String, cwd : String) -> Unit {
   let (code, stdout, stderr) = @process.collect_output(
     binary,
-    [".", "--stdout", "--quiet"],
+    [".", "--stdout", "--quiet", "--compress"],
     cwd~,
   )
   assert_eq(code, 0)
   assert_true(stdout.text().contains("path=\"你好.txt\""))
   assert_true(stdout.text().contains("hello 😀"))
+  assert_true(stdout.text().contains("installedOutline"))
+  assert_false(stdout.text().contains("value += 1;"))
   assert_eq(stderr.text(), "")
 }
 
@@ -36,6 +38,13 @@ async fn main {
   let fixture = temp + "/项目"
   @fs.mkdir(fixture)
   @fs.write_file(fixture + "/你好.txt", "hello 😀", create_mode=CreateNew)
+  @fs.write_file(
+    fixture + "/outline.ts",
+    "export function installedOutline(value: number): number {\n" +
+    "  value += 1;\n".repeat(60) +
+    "  return value;\n}\n",
+    create_mode=CreateNew,
+  )
   let installed = @process.run("moon", [
     "run", "--target", "native", "scripts/install.mbtx", prefix,
   ])
@@ -63,11 +72,26 @@ async fn main {
     unpacked,
   ])
   assert_eq(unpack, 0)
+  for
+    license in [
+      "runtime-MIT.txt", "javascript-MIT.txt", "typescript-MIT.txt", "python-MIT.txt",
+      "ICU.txt", "sources.md",
+    ] {
+    assert_true(
+      @fs.exists(
+        unpacked +
+        "/moon-repomix-" +
+        platform +
+        "/LICENSES/tree-sitter-" +
+        license,
+      ),
+    )
+  }
   smoke(
     unpacked + "/moon-repomix-" + platform + "/bin/moon-repomix" + suffix,
     fixture,
   )
   println(
-    "PASS: install, relocation, executable-relative assets and extracted archive",
+    "PASS: install, relocation, native compression, parser licenses and extracted archive",
   )
 }

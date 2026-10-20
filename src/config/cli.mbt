@@ -100,6 +100,10 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       | "--token-count-encoding"
       | "--token-budget"
       | "--top-files-len"
+      | "--include-logs-count"
+      | "--remote"
+      | "--remote-branch"
+      | "--max-git-bytes"
       | "-c"
       | "--config"
       | "--tokenizer-path" => true
@@ -144,6 +148,22 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
           patch.top_files_length = Some(
             nonnegative_int(value, "output.topFilesLength"),
           )
+        "--include-logs-count" =>
+          patch.include_logs_count = Some(
+            cli_positive_int(value, "output.git.includeLogsCount"),
+          )
+        "--max-git-bytes" =>
+          patch.max_git_bytes = Some(
+            cli_positive_int(value, "input.maxGitBytes"),
+          )
+        "--remote" => {
+          validate_path(value, "remote.url")
+          patch.remote = Some(value)
+        }
+        "--remote-branch" => {
+          validate_path(value, "remote.branch")
+          patch.remote_branch = Some(value)
+        }
         "-c" | "--config" => {
           validate_path(value, "config")
           config_path = Some(value)
@@ -167,6 +187,12 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
         "--no-dot-ignore" => patch.use_dot_ignore = Some(false)
         "--no-default-patterns" => patch.use_default_patterns = Some(false)
         "--no-security-check" => patch.security_check = Some(false)
+        "--compress" => patch.compress = Some(true)
+        "--no-compress" => patch.compress = Some(false)
+        "--include-diffs" => patch.include_diffs = Some(true)
+        "--no-include-diffs" => patch.include_diffs = Some(false)
+        "--include-logs" => patch.include_logs = Some(true)
+        "--no-include-logs" => patch.include_logs = Some(false)
         "--parsable-style" => ()
         "--init" => action = set_action(action, Init)
         "-h" | "--help" => action = set_action(action, Help)

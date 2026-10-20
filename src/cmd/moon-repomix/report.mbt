@@ -19,6 +19,22 @@ async fn report(
     @stdio.stderr.write(
       "Skipped \{result.skipped.length()} entries; secret findings: \{result.findings.length()}.\n",
     )
+    if options.compress {
+      let mut original = 0L
+      let mut rendered = 0L
+      for file in result.files {
+        original += file.original_tokens.to_int64()
+        rendered += file.tokens.to_int64()
+      }
+      @stdio.stderr.write(
+        "File-body tokens: \{original} original -> \{rendered} rendered.\n",
+      )
+    }
+    if !result.document.sections.is_empty() {
+      @stdio.stderr.write(
+        "Git context: \{result.document.sections.length()} sections.\n",
+      )
+    }
     for item in result.skipped {
       @stdio.stderr.write(
         "Skipped " + quote(item.path) + ": " + quote(item.reason) + "\n",

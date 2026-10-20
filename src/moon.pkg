@@ -1,5 +1,7 @@
 import {
   "Delthin/moon_repomix/config",
+  "Delthin/moon_repomix/compression",
+  "Delthin/moon_repomix/git",
   "Delthin/moon_repomix/selection",
   "Delthin/moon_repomix/input",
   "Delthin/moon_repomix/security",

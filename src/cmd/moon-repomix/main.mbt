@@ -4,6 +4,9 @@ extern "c" fn exit(code : Int32) -> Unit = "exit"
 ///|
 async fn read_config(cli : @config.Cli, cwd : String) -> @config.Patch? {
   let explicit = cli.config_path is Some(_)
+  if !explicit && cli.patch.remote is Some(_) {
+    return None
+  }
   let path = match cli.config_path {
     Some(path) => @platform.absolute(path, cwd)
     None =>
@@ -21,7 +24,11 @@ async fn read_config(cli : @config.Cli, cwd : String) -> @config.Patch? {
     raise Configuration
   }
   let text = @fs.read_file(path).text() catch { _ => raise Configuration }
-  Some(@config.parse_json(text) catch { _ => raise Configuration })
+  let patch = @config.parse_json(text) catch { _ => raise Configuration }
+  if !explicit && patch.remote is Some(_) {
+    raise Configuration
+  }
+  Some(patch)
 }
 
 ///|
@@ -50,6 +57,9 @@ async fn run() -> Int32 {
   }
   let cwd = @env.current_dir().unwrap_or(".")
   if cli.action is Init {
+    if cli.patch.remote is Some(_) {
+      raise Configuration
+    }
     let path = match cli.config_path {
       Some(path) => @platform.absolute(path, cwd)
       None =>
@@ -110,6 +120,8 @@ async fn main {
           Configuration | @repomix.ConfigurationError => "ConfigurationError"
           @repomix.SelectionError => "SelectionError"
           @repomix.ScanError => "ScanError"
+          @repomix.GitError => "GitError"
+          @repomix.RemoteError => "RemoteError"
           Resource | @repomix.ResourceError => "ResourceError"
           Write => "OutputError"
           _ => "OperationError"

@@ -1,0 +1,377 @@
+///|
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+}
+
+///|
+async fn run(
+  command : String,
+  args : Array[String],
+  cwd : String,
+) -> (Int32, String, String) {
+  let (code, out, err) = @process.collect_output(command, args, cwd~)
+  (code, out.text(), err.text())
+}
+
+///|
+async fn git(args : Array[String], cwd : String) -> Unit {
+  let null = if @env.get_env_var("OS") == Some("Windows_NT") {
+    "NUL"
+  } else {
+    "/dev/null"
+  }
+  let environment = {
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": null,
+    "GIT_CONFIG_SYSTEM": null,
+    "GIT_ATTR_NOSYSTEM": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+  }
+  for
+    key in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR", "PATHEXT"] {
+    if @env.get_env_var(key) is Some(value) {
+      environment[key] = value
+    }
+  }
+  let (code, _, _) = @process.collect_output(
+    "git",
+    [
+      "-c",
+      "core.hooksPath=" + null,
+      "-c",
+      "core.fsmonitor=false",
+      "-c",
+      "core.attributesFile=" + null,
+    ] +
+    args,
+    cwd~,
+    inherit_env=false,
+    extra_env=environment,
+  )
+  assert_eq(code, 0)
+}
+
+///|
+fn source(header : String, line : String, footer : String) -> String {
+  header + line.repeat(80) + footer
+}
+
+///|
+fn tokens(report : String) -> Int32 raise {
+  for word in report.split(" "); previous = "" {
+    if word == "tokens" {
+      break @string.parse_int(previous)
+    }
+    continue word.to_owned()
+  } nobreak {
+    fail("Missing final document token count")
+  }
+}
+
+///|
+// Explicit opt-in: ordinary CI remains fully local.
+async fn remote_smoke(
+  binary : String,
+  vocabulary : String,
+  cwd : String,
+) -> Unit {
+  @fs.write_file(
+    cwd + "/repomix.config.json",
+    "untrusted startup configuration",
+    create_mode=CreateNew,
+  )
+  let url = "https://github.com/octocat/Hello-World.git"
+  let (code, text, err) = run(
+    binary,
+    [
+      "--remote", url, "--remote-branch", "master", "--include-logs", "--include-logs-count",
+      "2", "--compress", "--style=json", "--stdout", "--quiet", "--tokenizer-path",
+      vocabulary,
+    ],
+    cwd,
+  )
+  guard code == 0 else { fail("Remote context failed: " + err) }
+  guard @json.parse(text)
+    is {
+      "files": Object(files),
+      "metadata": {
+        "source": {
+          "kind": String("remote"),
+          "url": String(source_url),
+          "revision": String(revision),
+          ..
+        },
+        ..
+      },
+      "sections": Array(sections),
+      ..
+    } else {
+    fail("Missing remote source metadata or history")
+  }
+  assert_eq(source_url, url)
+  assert_eq(revision.length(), 40)
+  assert_true(files.contains("README"))
+  assert_eq(sections.length(), 2)
+  println(
+    "PASS: HTTPS master checkout + two historical commits + compression fallback; ignored startup config; revision=" +
+    revision,
+  )
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() >= 3 else {
+    fail(
+      "Usage: moon run --target native scripts/advanced-context-test.mbtx BINARY VOCABULARY [--xml-oracle|--remote-smoke]",
+    )
+  }
+  let binary = @fs.realpath(args[1])
+  let vocabulary = @fs.realpath(args[2])
+  let temp = @fs.tmpdir(prefix="moon-repomix-advanced-")
+  defer @fs.rmdir(temp, recursive=true)
+  if args.contains("--remote-smoke") {
+    remote_smoke(binary, vocabulary, temp)
+    return
+  }
+  let root = temp + "/input"
+  @fs.mkdir(root + "/src", recursive=true)
+  @fs.mkdir(root + "/ignored")
+  git(["init", "--quiet"], root)
+  git(["config", "user.name", "Synthetic Context Fixture"], root)
+  git(["config", "user.email", "fixture@example.invalid"], root)
+  git(["config", "commit.gpgsign", "false"], root)
+  @fs.write_file(root + "/.gitignore", "ignored/\n", create_mode=CreateNew)
+  let header = "export function buildContext(input: number): number {\n"
+  let body = "  input = input + 1;\n"
+  @fs.write_file(
+    root + "/src/main.ts",
+    source(header, body, "  return input;\n}\n"),
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    root + "/src/helper.py",
+    source(
+      "class Helper:\n    def build(self, value: int) -> int:\n", "        value += 1\n",
+      "        return value\n",
+    ),
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    root + "/notes.txt",
+    "plain context remains exact\r\n",
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    root + "/ignored/private.ts",
+    "export const hidden = 'IGNORED_BODY_SENTINEL';\n",
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    root + "/src/rename.ts",
+    "export const renamed = 'RENAMED_BODY_SENTINEL';\n",
+    create_mode=CreateNew,
+  )
+  let secret = "ghp_" + "Ab9Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
+  @fs.write_file(root + "/old-secret.txt", secret + "\n", create_mode=CreateNew)
+  git(["add", "--force", "."], root)
+  git(["commit", "--quiet", "-m", "initial context"], root)
+  @fs.write_file(
+    root + "/history.txt",
+    "public historical body\n",
+    create_mode=CreateNew,
+  )
+  git(["add", "history.txt"], root)
+  git(["commit", "--quiet", "-m", "synthetic credential " + secret], root)
+  @fs.write_file(
+    root + "/src/main.ts",
+    source(header, body, "  return input + 1;\n}\n"),
+    create_mode=CreateOrTruncate,
+  )
+  git(["add", "src/main.ts"], root)
+  @fs.write_file(
+    root + "/src/main.ts",
+    source(header, body, "  return input + 2;\n}\n"),
+    create_mode=CreateOrTruncate,
+  )
+  @fs.write_file(
+    root + "/ignored/private.ts",
+    "export const hidden = 'IGNORED_CHANGED_SENTINEL';\n",
+    create_mode=CreateOrTruncate,
+  )
+  git(["mv", "-f", "src/rename.ts", "ignored/renamed.ts"], root)
+  @fs.remove(root + "/old-secret.txt")
+  let config = temp + "/context.json"
+  @fs.write_file(
+    config,
+    "{\"output\":{\"compress\":true,\"git\":{\"includeDiffs\":true,\"includeLogs\":true,\"includeLogsCount\":2}}}",
+    create_mode=CreateNew,
+  )
+  let common = [root, "--tokenizer-path", vocabulary, "--config", config]
+  let (code, text, report) = run(
+    binary,
+    common + ["--style=json", "--stdout"],
+    temp,
+  )
+  assert_eq(code, 0)
+  assert_false(text.contains(secret))
+  assert_false(report.contains(secret))
+  assert_true(report.contains("SecurityFinding"))
+  assert_false(text.contains("IGNORED_BODY_SENTINEL"))
+  assert_false(text.contains("IGNORED_CHANGED_SENTINEL"))
+  assert_false(text.contains("RENAMED_BODY_SENTINEL"))
+  guard @json.parse(text)
+    is {
+      "files": Object(files),
+      "metadata": Object(metadata),
+      "sections": Array(sections),
+      ..
+    } else {
+    fail("Expected files, metadata and Git sections")
+  }
+  guard files.get("src/main.ts") is Some(String(skeleton)) else {
+    fail("Missing TypeScript skeleton")
+  }
+  assert_true(skeleton.contains("buildContext"))
+  assert_true(skeleton.contains("input: number"))
+  assert_false(skeleton.contains(body + body))
+  assert_eq(
+    files.get("notes.txt"),
+    Some(Json("plain context remains exact\r\n")),
+  )
+  guard metadata.get("compression") is Some(Array(changes)) else {
+    fail("Missing compression records")
+  }
+  let mut compressed = 0
+  for change in changes {
+    if change
+      is {
+        "applied": True,
+        "ranges": Array(ranges),
+        "originalTokens": Number(before, ..),
+        "outputTokens": Number(after, ..),
+        ..
+      } {
+      assert_true(before > after)
+      assert_false(ranges.is_empty())
+      for range in ranges {
+        guard range is Array([Number(start, ..), Number(end, ..)]) else {
+          fail("Missing original line range")
+        }
+        assert_true(start >= 1 && end >= start)
+      }
+      compressed += 1
+    }
+  }
+  assert_true(compressed >= 2)
+  let mut staged = false
+  let mut unstaged = false
+  let mut history = false
+  for section in sections {
+    guard section
+      is {
+        "kind": String(kind),
+        "title": String(title),
+        "text": String(content),
+        ..
+      } else {
+      fail("Malformed context section")
+    }
+    if kind == "git_diff" {
+      staged = staged ||
+        (title.contains("staged diff:") && !title.contains("unstaged"))
+      unstaged = unstaged || title.contains("unstaged diff:")
+      assert_false(title.contains("ignored/"))
+      assert_false(content.contains("old-secret.txt"))
+    }
+    if kind == "git_log" && content.contains("initial context") {
+      history = true
+    }
+  }
+  assert_true(staged && unstaged && history)
+  let count = tokens(report)
+  let output = temp + "/packed.json"
+  let (equal, _, _) = run(
+    binary,
+    common +
+    ["--style=json", "-o", output, "--token-budget=" + count.to_string()],
+    temp,
+  )
+  assert_eq(equal, 0)
+  assert_eq(@fs.read_file(output).text(), text)
+  let (over, _, over_report) = run(
+    binary,
+    common +
+    ["--style=json", "-o", output, "--token-budget=" + (count - 1).to_string()],
+    temp,
+  )
+  assert_eq(over, 1)
+  assert_true(over_report.contains("complete output retained"))
+  assert_eq(@fs.read_file(output).text(), text)
+  @fs.write_file(output, "previous output", create_mode=CreateOrTruncate)
+  let (limited, _, limited_report) = run(
+    binary,
+    common + ["--style=json", "-o", output, "--max-git-bytes=1"],
+    temp,
+  )
+  assert_eq(limited, 1)
+  assert_true(limited_report.contains("GitError"))
+  assert_eq(@fs.read_file(output).text(), "previous output")
+  for style in ["xml", "markdown", "plain"] {
+    let (ok, rendered, err) = run(
+      binary,
+      common + ["--style=" + style, "--stdout"],
+      temp,
+    )
+    assert_eq(ok, 0)
+    assert_false(rendered.contains(secret))
+    assert_false(err.contains(secret))
+    assert_true(rendered.contains("Git commit"))
+    assert_true(rendered.contains("Git staged diff:"))
+    if style == "xml" && args.contains("--xml-oracle") {
+      let path = temp + "/packed.xml"
+      @fs.write_file(path, rendered, create_mode=CreateNew)
+      let (parsed, _, _) = run("xmllint", ["--noout", path], temp)
+      assert_eq(parsed, 0)
+    }
+  }
+  let (raw_ok, raw, _) = run(
+    binary,
+    common +
+    [
+      "--style=json", "--stdout", "--no-compress", "--no-include-diffs", "--no-include-logs",
+      "--quiet",
+    ],
+    temp,
+  )
+  assert_eq(raw_ok, 0)
+  guard @json.parse(raw) is { "files": Object(original), .. } else {
+    fail("Expected original file map")
+  }
+  assert_eq(
+    original.get("src/main.ts"),
+    Some(Json(source(header, body, "  return input + 2;\n}\n"))),
+  )
+  @fs.write_file(
+    root + "/repomix.config.json",
+    "{\"remote\":{\"url\":\"https://example.invalid/repository.git\"}}",
+    create_mode=CreateNew,
+  )
+  let (implicit_remote, implicit_text, implicit_error) = run(
+    binary,
+    [".", "-o", output, "--quiet", "--tokenizer-path", vocabulary],
+    root,
+  )
+  assert_eq(implicit_remote, 1)
+  assert_eq(implicit_text, "")
+  assert_true(implicit_error.contains("ConfigurationError"))
+  assert_eq(@fs.read_file(output).text(), "previous output")
+  println(
+    "PASS: AST skeletons and original lines; staged/unstaged/history; filtered renames and deleted secrets; four formats; whole-document budgets, explicit remote config and failure preservation",
+  )
+}

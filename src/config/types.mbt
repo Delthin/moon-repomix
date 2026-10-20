@@ -26,6 +26,13 @@ pub(all) enum Action {
 pub(all) struct Patch {
   mut output : String?
   mut style : Style?
+  mut compress : Bool?
+  mut include_diffs : Bool?
+  mut include_logs : Bool?
+  mut include_logs_count : Int32?
+  mut remote : String?
+  mut remote_branch : String?
+  mut max_git_bytes : Int32?
   mut include_patterns : Array[String]
   mut ignore : Array[String]
   mut use_gitignore : Bool?
@@ -45,6 +52,13 @@ pub fn Patch::empty() -> Patch {
   {
     output: None,
     style: None,
+    compress: None,
+    include_diffs: None,
+    include_logs: None,
+    include_logs_count: None,
+    remote: None,
+    remote_branch: None,
+    max_git_bytes: None,
     include_patterns: [],
     ignore: [],
     use_gitignore: None,
@@ -78,6 +92,13 @@ pub(all) struct Options {
   output : String
   stdout : Bool
   style : Style
+  compress : Bool
+  include_diffs : Bool
+  include_logs : Bool
+  include_logs_count : Int32
+  remote : String?
+  remote_branch : String?
+  max_git_bytes : Int32
   include_patterns : Array[String]
   ignore : Array[String]
   use_gitignore : Bool
@@ -197,6 +218,18 @@ fn validate_patch(patch : Patch) -> Unit raise ConfigError {
   if patch.tokenizer_path is Some(value) {
     validate_path(value, "tokenizerPath")
   }
+  if patch.include_logs_count is Some(value) && (value <= 0 || value > 10000) {
+    raise InvalidValue("output.git.includeLogsCount")
+  }
+  if patch.max_git_bytes is Some(value) && value <= 0 {
+    raise InvalidValue("input.maxGitBytes")
+  }
+  if patch.remote is Some(value) {
+    validate_path(value, "remote.url")
+  }
+  if patch.remote_branch is Some(value) {
+    validate_path(value, "remote.branch")
+  }
 }
 
 ///|
@@ -243,6 +276,20 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
   }
   let patch = cli.patch
   let style = patch.style.unwrap_or(file.style.unwrap_or(Xml))
+  let remote = match patch.remote {
+    Some(_) as value => value
+    None => file.remote
+  }
+  let remote_branch = match patch.remote_branch {
+    Some(_) as value => value
+    None => file.remote_branch
+  }
+  if remote_branch is Some(_) && remote is None {
+    raise Conflict("remote.branch/remote.url")
+  }
+  if remote is Some(_) && cli.directory != "." {
+    raise Conflict("remote/directory")
+  }
   {
     directory: cli.directory,
     output: patch.output.unwrap_or(
@@ -257,6 +304,21 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
     ),
     stdout: cli.stdout,
     style,
+    compress: patch.compress.unwrap_or(file.compress.unwrap_or(false)),
+    include_diffs: patch.include_diffs.unwrap_or(
+      file.include_diffs.unwrap_or(false),
+    ),
+    include_logs: patch.include_logs.unwrap_or(
+      file.include_logs.unwrap_or(false),
+    ),
+    include_logs_count: patch.include_logs_count.unwrap_or(
+      file.include_logs_count.unwrap_or(50),
+    ),
+    remote,
+    remote_branch,
+    max_git_bytes: patch.max_git_bytes.unwrap_or(
+      file.max_git_bytes.unwrap_or(8388608),
+    ),
     include_patterns: append_unique(
       file.include_patterns,
       patch.include_patterns,

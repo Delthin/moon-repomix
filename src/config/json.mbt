@@ -95,6 +95,26 @@ pub fn parse_json(text : String) -> Patch raise ConfigError {
               )
             "tokenCountTree" =>
               patch.token_count_tree = Some(json_token_tree(value))
+            "compress" =>
+              patch.compress = Some(json_bool(value, "output.compress"))
+            "git" =>
+              for key, value in object_fields(value, "output.git") {
+                match key {
+                  "includeDiffs" =>
+                    patch.include_diffs = Some(
+                      json_bool(value, "output.git.includeDiffs"),
+                    )
+                  "includeLogs" =>
+                    patch.include_logs = Some(
+                      json_bool(value, "output.git.includeLogs"),
+                    )
+                  "includeLogsCount" =>
+                    patch.include_logs_count = Some(
+                      json_positive_int(value, "output.git.includeLogsCount"),
+                    )
+                  _ => raise UnknownField("output.git." + key)
+                }
+              }
             _ => raise UnknownField("output." + key)
           }
         }
@@ -139,11 +159,24 @@ pub fn parse_json(text : String) -> Patch raise ConfigError {
       "input" =>
         for key, value in object_fields(value, "input") {
           match key {
+            "maxGitBytes" =>
+              patch.max_git_bytes = Some(
+                json_positive_int(value, "input.maxGitBytes"),
+              )
             "maxFileSize" =>
               patch.max_file_size = Some(
                 json_positive_int(value, "input.maxFileSize"),
               )
             _ => raise UnknownField("input." + key)
+          }
+        }
+      "remote" =>
+        for key, value in object_fields(value, "remote") {
+          match key {
+            "url" => patch.remote = Some(json_string(value, "remote.url"))
+            "branch" =>
+              patch.remote_branch = Some(json_string(value, "remote.branch"))
+            _ => raise UnknownField("remote." + key)
           }
         }
       _ => raise UnknownField(key)

@@ -2,6 +2,8 @@
 package "Delthin/moon_repomix/selection"
 
 // Values
+pub async fn path_filter(String, SelectionOptions) -> PathFilter
+
 pub async fn select(String, SelectionOptions) -> Selection
 
 // Errors
@@ -18,6 +20,9 @@ pub(all) struct Candidate {
   path : String
   relative : String
 }
+
+type PathFilter
+pub async fn PathFilter::allows(Self, String) -> Bool
 
 pub(all) struct Selection {
   root : String

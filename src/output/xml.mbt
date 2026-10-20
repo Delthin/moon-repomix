@@ -50,6 +50,28 @@ pub fn xml(document : @document.Document) -> String {
     out.write_string(xml_escape(file.text, false))
     out.write_string("</file>\n")
   }
-  out.write_string("  </files>\n</repository>\n")
+  out.write_string("  </files>\n")
+  if document.metadata != Json::null() {
+    out.write_string(
+      "  <metadata>" +
+      xml_escape(document.metadata.stringify(), false) +
+      "</metadata>\n",
+    )
+  }
+  if !document.sections.is_empty() {
+    out.write_string("  <sections>\n")
+    for section in document.sections {
+      out.write_string(
+        "    <section kind=\"" +
+        xml_escape(section.kind, true) +
+        "\" title=\"" +
+        xml_escape(section.title, true) +
+        "\">",
+      )
+      out.write_string(xml_escape(section.text, false) + "</section>\n")
+    }
+    out.write_string("  </sections>\n")
+  }
+  out.write_string("</repository>\n")
   out.to_string()
 }

@@ -10,7 +10,10 @@ diffs. An unborn branch returns `revision=None`, staged patches and no commits.
 Commit dates use ISO 8601 author dates, messages preserve bodies/newlines, and
 files are deduplicated across merge parents. Path-limited Git log follows Git's
 normal history simplification. Callers must apply include/ignore and secret
-filtering before rendering any returned content.
+filtering before rendering any returned content. Optional
+`accept_diff : async (Array[String]) -> Bool` receives each rename-aware path
+group before its patch is read; return false to avoid collecting ignored large
+patches. Returned history still requires the caller's path filtering.
 
 All Git calls use argument arrays, a restricted environment, no inherited/global
 Git configuration, disabled hooks/fsmonitor/signature display/external diff/
@@ -64,5 +67,6 @@ so the caller can retry explicitly. Repository symlinks are removed, not followe
 Package tests use one synthetic real repository for scoped diff/log and dangerous
 extension markers (POSIX marker execution, Windows uses failing extension config),
 plus URL validation and local lifecycle failure/cancellation/foreign-path/symlink
-checks. They make no network requests. End-to-end public HTTPS success and CLI
-integration are deliberately left to the integrating caller's single remote test.
+checks. They make no network requests. The CLI's `scripts/advanced-context-test.mbtx`
+provides local integration coverage and an explicit `--remote-smoke` public HTTPS
+case; ordinary CI uses the local cases.

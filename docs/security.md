@@ -1,6 +1,6 @@
 # 密钥扫描
 
-默认使用 `123123213weqw/moon_scrub@0.5.2` 的 `ScanConfig::secrets_only()` 扫描即将输出的文本快照。发现密钥时，打包器排除整个文件，诊断只保留规则、路径和位置。
+默认使用 `123123213weqw/moon_scrub@0.5.2` 的 `ScanConfig::secrets_only()` 扫描压缩前的原始文本快照。发现密钥时排除整个文件；Git 补丁（含删除行）和提交消息另行扫描，命中时排除对应整个补丁或提交。诊断只保留规则、路径和位置。
 
 ## 检测范围
 
@@ -29,6 +29,8 @@ pub fn scan(path:String, text:String, bom_bytes:Int) -> Array[Finding] raise Sca
 ```
 
 调用者传入与渲染相同的已解码快照。读取时去掉 UTF-8 BOM，传 `bom_bytes=3`；否则传 `0`。`start`、`end` 是以磁盘文件首字节为 0 的 UTF-8 字节半开区间；`line` 从 1 开始，CRLF 计一次换行，裸 CR、LF 也各计一次。
+
+Git 诊断使用 `git:diff:N` 或 `git:commit:ID` 标签，偏移和行号相对于补丁正文或提交章节，而非磁盘文件。补丁行标记不作为源代码参与边界判断，位置仍与原补丁一致。
 
 引擎返回 UTF-16 单位索引，适配层转换为 UTF-8 字节偏移后加上 BOM 长度。范围落在代理对内部时报错。回归覆盖中文、emoji、组合字符、CRLF 和 BOM。
 

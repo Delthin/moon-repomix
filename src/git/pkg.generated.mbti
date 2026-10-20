@@ -6,7 +6,7 @@ pub async fn checkout(String, revision? : String, history? : Int) -> Checkout
 
 pub async fn cleanup(Checkout) -> Unit
 
-pub async fn collect(String, diffs? : Bool, logs? : Int, max_bytes? : Int) -> Snapshot
+pub async fn collect(String, diffs? : Bool, logs? : Int, max_bytes? : Int, accept_diff? : async (Array[String]) -> Bool) -> Snapshot
 
 // Errors
 pub(all) suberror GitError {

@@ -3,13 +3,14 @@ package "Delthin/moon_repomix"
 
 import {
   "Delthin/moon_repomix/config",
+  "Delthin/moon_repomix/document",
   "Delthin/moon_repomix/metrics",
   "Delthin/moon_repomix/security",
   "Delthin/moon_repomix/selection",
 }
 
 // Values
-pub fn options(String, style? : @config.Style) -> @config.Options raise
+pub fn options(String, style? : @config.Style, compress? : Bool, include_diffs? : Bool, include_logs? : Bool, include_logs_count? : Int, remote? : String?, remote_branch? : String?) -> @config.Options raise
 
 pub async fn pack(@config.Options, Runtime) -> PackResult
 
@@ -21,6 +22,8 @@ pub(all) suberror PackError {
   SelectionError
   ScanError
   ResourceError
+  GitError
+  RemoteError
 }
 
 // Types and methods
@@ -34,9 +37,11 @@ pub(all) struct FileStats {
   path : String
   disk_bytes : Int
   tokens : Int
+  original_tokens : Int
 }
 
 pub struct PackResult {
+  document : @document.Document
   text : String
   bytes : Int
   tokens : Int
@@ -59,9 +64,13 @@ pub(all) enum SecurityStatus {
 }
 
 // Type aliases
+pub using @document {type Document}
+
 pub using @security {type Finding}
 
 pub using @config {type Options}
+
+pub using @document {type Section}
 
 pub using @selection {type Skipped}
 

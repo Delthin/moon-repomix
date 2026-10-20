@@ -8,6 +8,9 @@ pub using @security {type Finding}
 pub using @selection {type Skipped}
 
 ///|
+pub using @document {type Document, type Section}
+
+///|
 /// Validated resources shared by sequential pack operations.
 pub struct Runtime {
   encoder : @metrics.Encoder
@@ -32,6 +35,8 @@ pub(all) suberror PackError {
   SelectionError
   ScanError
   ResourceError
+  GitError
+  RemoteError
 }
 
 ///|
@@ -53,11 +58,13 @@ pub(all) struct FileStats {
   path : String
   disk_bytes : Int32
   tokens : Int32
+  original_tokens : Int32
 }
 
 ///|
 /// Excluded files retain only metadata; their contents are absent.
 pub struct PackResult {
+  document : Document
   text : String
   bytes : Int32
   tokens : Int32
@@ -72,8 +79,23 @@ pub struct PackResult {
 /// Validated options for one directory, with the selected format and scanning enabled.
 ///
 /// Use `options("/absolute/project", style=Json)` to select JSON and its default filename.
-pub fn options(directory : String, style~ : Style = Xml) -> Options raise {
+pub fn options(
+  directory : String,
+  style~ : Style = Xml,
+  compress~ : Bool = false,
+  include_diffs~ : Bool = false,
+  include_logs~ : Bool = false,
+  include_logs_count~ : Int32 = 50,
+  remote~ : String? = None,
+  remote_branch~ : String? = None,
+) -> Options raise {
   let cli = @config.parse_cli([directory])
   cli.patch.style = Some(style)
+  cli.patch.compress = Some(compress)
+  cli.patch.include_diffs = Some(include_diffs)
+  cli.patch.include_logs = Some(include_logs)
+  cli.patch.include_logs_count = Some(include_logs_count)
+  cli.patch.remote = remote
+  cli.patch.remote_branch = remote_branch
   @config.resolve(cli, None)
 }

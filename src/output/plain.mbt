@@ -19,6 +19,25 @@ pub fn plain(document : @document.Document) -> String {
       out.write_string("\n")
     }
   }
+  if document.metadata != Json::null() {
+    out.write_string("\n" + section + "\nContext Metadata\n" + section + "\n")
+    out.write_string(document.metadata.stringify(indent=2) + "\n")
+  }
+  for extra in document.sections {
+    out.write_string(
+      "\n" +
+      section +
+      "\n" +
+      Json(extra.title).stringify() +
+      "\n" +
+      section +
+      "\n",
+    )
+    out.write_string(extra.text)
+    if !extra.text.has_suffix("\n") {
+      out.write_string("\n")
+    }
+  }
   out.write_string("\n" + section + "\nEnd of Codebase\n" + section + "\n")
   out.to_string()
 }

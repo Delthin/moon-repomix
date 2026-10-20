@@ -159,7 +159,7 @@ test "strict rejection of invalid configuration and CLI" {
         #|{"security":{"unrecognized":false}}
       ),
       (
-        #|{"output":{"compress":true}}
+        #|{"output":{"compress":1}}
       ),
       (
         #|{"include":[false]}
@@ -177,6 +177,9 @@ test "strict rejection of invalid configuration and CLI" {
   for
     args in [
       ["--remote"],
+      ["--include-logs-count=0"],
+      ["--include-logs-count=10001"],
+      ["--max-git-bytes=0"],
       ["--quiet", "--verbose"],
       ["--stdout", "-o", "out.xml"],
       ["--output"],

@@ -48,10 +48,8 @@ to a managed MoonBit byte array, then frees the mask. `compress.mbt` owns source
 encoding, output assembly, line ranges, and fallback policy. These local adapters
 are project code, not upstream patches.
 
-The older `tonyfettes/moonbit-tree-sitter` binding was not imported: this package
-uses a minimal native C boundary directly, avoiding that binding's historical
-Python-based prebuild path and unverified Windows integration. No root module
-or third-party MoonBit dependency was added.
+The package uses a small native C boundary directly. Grammar resources are
+compiled with the application rather than installed or generated at runtime.
 
 ## Resource size
 

@@ -10,7 +10,7 @@ license = "MIT"
 
 keywords = [ "repomix", "cli", "context", "native" ]
 
-description = "Pack local repositories into AI-ready XML and Markdown with secret filtering and o200k token counts."
+description = "Generate AI-ready repository context with native AST compression, Git diffs/history, HTTPS inputs and exact o200k token counts."
 
 source = "src"
 

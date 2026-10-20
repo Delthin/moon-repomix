@@ -11,13 +11,20 @@ fn diff_arguments(staged : Bool) -> Array[String] {
 }
 
 ///|
-async fn collect_diffs(directory : String, budget : Budget) -> Array[Diff] {
+async fn collect_diffs(
+  directory : String,
+  budget : Budget,
+  accept_diff : (async (Array[String]) -> Bool)?,
+) -> Array[Diff] {
   let result = []
   for staged in [true, false] {
     let args = diff_arguments(staged)
     args.append(["--name-status", "-z", "--", "."])
     let groups = changed_paths(git(directory, args, budget))
     for paths in groups {
+      if accept_diff is Some(accept) && !accept(paths) {
+        continue
+      }
       let patch_args = diff_arguments(staged)
       patch_args.append(["--patch", "--src-prefix=a/", "--dst-prefix=b/", "--"])
       patch_args.append(paths)
@@ -104,12 +111,14 @@ async fn collect_commits(
 /// patch headers) are relative to directory, not necessarily repository_root.
 /// max_bytes limits cumulative captured Git output; exceeding it raises rather
 /// than returning truncated patches. An unborn HEAD has revision=None and no log.
+/// accept_diff filters each rename-aware path group before reading its patch.
 /// Call only when Git context is explicitly enabled by the caller.
 pub async fn collect(
   directory : String,
   diffs~ : Bool = false,
   logs~ : Int32 = 0,
   max_bytes~ : Int32 = 8388608,
+  accept_diff? : async (Array[String]) -> Bool,
 ) -> Snapshot {
   if logs < 0 || max_bytes <= 0 {
     raise InvalidInput("logs must be nonnegative and max_bytes positive")
@@ -168,7 +177,11 @@ pub async fn collect(
       budget.filters.append(["-c", key + "="])
     }
   }
-  let changes = if diffs { collect_diffs(directory, budget) } else { [] }
+  let changes = if diffs {
+    collect_diffs(directory, budget, accept_diff)
+  } else {
+    []
+  }
   let commits = if logs > 0 && revision is Some(_) {
     collect_commits(directory, logs, budget)
   } else {

@@ -1,5 +1,5 @@
 {
   "ignore": {
-    "customPatterns": ["assets/**"]
+    "customPatterns": ["assets/**", "src/compression/vendor/**"]
   }
 }

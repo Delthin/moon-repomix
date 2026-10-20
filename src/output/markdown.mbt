@@ -76,5 +76,29 @@ pub fn markdown(document : @document.Document) -> String {
     }
     out.write_string(delimiter + "\n")
   }
+  if document.metadata != Json::null() {
+    let text = document.metadata.stringify(indent=2)
+    let delimiter = fence(text)
+    out.write_string(
+      "\n## Context metadata\n\n" +
+      delimiter +
+      "json\n" +
+      text +
+      "\n" +
+      delimiter +
+      "\n",
+    )
+  }
+  for section in document.sections {
+    let delimiter = fence(section.text)
+    out.write_string(
+      "\n## " + heading(section.title) + "\n\n" + delimiter + "text\n",
+    )
+    out.write_string(section.text)
+    if !section.text.has_suffix("\n") {
+      out.write_string("\n")
+    }
+    out.write_string(delimiter + "\n")
+  }
   out.to_string()
 }

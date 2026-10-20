@@ -89,5 +89,4 @@ smaller output, unsupported paths, invalid syntax, and unchanged non-smaller
 fallbacks. A separate development ASan/UBSan harness exercised the actual C FFI
 adapter and grammars, repeated cleanup, parse errors, timeout and size-limit
 paths using a byte-array allocator shim with `moonbit.h`'s layout. This checks
-C-side lifetimes, not MoonBit GC instrumentation. No CLI/format integration or
-whole-project regression is part of this package delivery.
+C-side lifetimes rather than MoonBit GC instrumentation.
