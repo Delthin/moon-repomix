@@ -1,0 +1,45 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Delthin/moon_repomix/git"
+
+// Values
+pub async fn collect(String, diffs? : Bool, logs? : Int, max_bytes? : Int) -> Snapshot
+
+// Errors
+pub(all) suberror GitError {
+  InvalidInput(String)
+  NotRepository
+  CommandFailed(String, Int)
+  InvalidOutput
+  OutputLimit
+}
+
+// Types and methods
+pub(all) struct Checkout {
+  directory : String
+  url : String
+  revision : String
+}
+
+pub(all) struct Commit {
+  id : String
+  date : String
+  message : String
+  files : Array[String]
+}
+
+pub(all) struct Diff {
+  kind : String
+  paths : Array[String]
+  text : String
+}
+
+pub(all) struct Snapshot {
+  repository_root : String
+  revision : String?
+  diffs : Array[Diff]
+  commits : Array[Commit]
+}
+
+// Type aliases
+
+// Traits
