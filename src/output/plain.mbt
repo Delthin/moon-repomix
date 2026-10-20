@@ -21,7 +21,7 @@ pub fn plain(document : @document.Document) -> String {
   }
   if document.metadata != Json::null() {
     out.write_string("\n" + section + "\nContext Metadata\n" + section + "\n")
-    out.write_string(document.metadata.stringify(indent=2) + "\n")
+    out.write_string(document.metadata.stringify() + "\n")
   }
   for extra in document.sections {
     out.write_string(

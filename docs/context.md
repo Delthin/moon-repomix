@@ -49,7 +49,7 @@ moon-repomix --remote https://github.com/octocat/Hello-World.git --remote-branch
 - `metadata.git`：接受的 diff 路径、提交标识与文件列表。
 - `sections`：`kind` 为 `git_diff` 或 `git_log`，并含 `title`、`text`。
 
-XML 将来源和记录放在 `metadata`，Git 内容放在 `sections/section`；Markdown 与 plain 用对应章节展示。原有未开启这些功能的输出结构保持原样。
+XML 将来源和记录放在 `metadata`，Git 内容放在 `sections/section`；Markdown 与 plain 用对应章节展示，并以紧凑 JSON 写入元数据，减少缩进和换行占用的 token，字段与行区间完整保留。原有未开启这些功能的输出结构保持原样。
 
 ```moonbit
 let options = @repomix.options(

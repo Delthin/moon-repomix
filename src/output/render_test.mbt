@@ -33,12 +33,19 @@ test "document paths use UTF-8 lexical order and keep directory children togethe
 
 ///|
 test "Markdown uses a longer fence and a single escaped path heading" {
-  let doc = @document.create([
-    { path: "#a\n<script>.mbt", text: "````\n# injected\n```", },
-  ])
+  let metadata : Json = {
+    "source": { "kind": "local" },
+    "compression": [{ "path": "中文.ts", "ranges": [[1, 3], [8, 8]] }],
+  }
+  let doc = @document.create(
+    [{ path: "#a\n<script>.mbt", text: "````\n# injected\n```", }],
+    metadata~,
+  )
   let md = @output.markdown(doc)
   assert_true(md.contains("## File: \\#a&#10;&lt;script&gt;.mbt"))
   assert_true(md.contains("`````moonbit\n````\n# injected\n```\n`````\n"))
+  assert_true(md.contains("```json\n" + metadata.stringify() + "\n```"))
+  assert_true(@output.plain(doc).contains(metadata.stringify() + "\n"))
   assert_true(@output.xml(@document.create([])).contains("<files>\n  </files>"))
 }
 

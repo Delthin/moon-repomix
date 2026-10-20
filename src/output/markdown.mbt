@@ -77,7 +77,7 @@ pub fn markdown(document : @document.Document) -> String {
     out.write_string(delimiter + "\n")
   }
   if document.metadata != Json::null() {
-    let text = document.metadata.stringify(indent=2)
+    let text = document.metadata.stringify()
     let delimiter = fence(text)
     out.write_string(
       "\n## Context metadata\n\n" +
