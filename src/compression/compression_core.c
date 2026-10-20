@@ -85,13 +85,50 @@ static int structural(TSNode node) {
 
 static void walk(Selection *, TSNode, unsigned, int);
 static void statements(Selection *, TSNode, unsigned, int);
+static int signature_binding(Selection *, TSNode, unsigned);
+
+static int js_assignment(TSNode node) {
+  return is(node, "assignment_expression");
+}
+
+/* Member assignments describe JS APIs even when installed inside a callback.
+ * Plain identifier assignments remain implementation unless directly callable. */
+static int text_is(Selection *s, TSNode node, const char *text) {
+  uint32_t start = ts_node_start_byte(node), end = ts_node_end_byte(node);
+  return !ts_node_is_null(node) && end - start == strlen(text) &&
+    memcmp(s->source + start, text, end - start) == 0;
+}
+
+static int member_assignment(Selection *s, TSNode node) {
+  if (!js_assignment(node)) return 0;
+  TSNode left = field(node, "left"), right = field(node, "right");
+  if (!(is(left, "member_expression") || is(left, "subscript_expression"))) return 0;
+  TSNode base = left;
+  while (is(base, "member_expression") || is(base, "subscript_expression")) {
+    TSNode object = field(base, "object");
+    TSNode property = field(base, is(base, "member_expression") ? "property" : "index");
+    if (text_is(s, object, "module") &&
+        (text_is(s, property, "exports") || text_is(s, property, "'exports'") ||
+         text_is(s, property, "\"exports\""))) return 1;
+    base = object;
+  }
+  if (text_is(s, base, "exports")) return 1;
+  return callable(right) || classlike(right) || is(right, "identifier") ||
+    is(right, "member_expression") || is(right, "subscript_expression") ||
+    js_assignment(right);
+}
 
 /* Keep enclosing conditions only when they contain an outline declaration.
  * Comments are restored separately, including their physical line breaks. */
 static int contains_outline(Selection *s, TSNode node, unsigned depth) {
   if (s->plan.status || ts_node_is_null(node)) return 0;
   if (depth > 512) { s->plan.status = 3; return 0; }
-  if (callable(node) || classlike(node) || type_declaration(node) || importlike(node)) return 1;
+  if (classlike(node) || type_declaration(node) || importlike(node) ||
+      is(node, "function_declaration") || is(node, "generator_function_declaration") ||
+      is(node, "function_definition") || is(node, "method_definition") ||
+      member_assignment(s, node)) return 1;
+  if ((is(node, "lexical_declaration") || is(node, "variable_declaration") ||
+       is(node, "expression_statement")) && signature_binding(s, node, depth + 1)) return 1;
   if (s->python && is(node, "expression_statement") &&
       is(ts_node_named_child(node, 0), "string")) return 1;
   uint32_t n = ts_node_named_child_count(node);
@@ -111,10 +148,106 @@ static int implementation_statement(TSNode node) {
   return length >= 10 && strcmp(type + length - 10, "_statement") == 0;
 }
 
+/* Only explicitly widened, non-exported TS scalar tables may lose their keys.
+ * Literal/inferred types, assertions, computed keys and behavior stay intact. */
+static int scalar_table(Selection *s, TSNode node) {
+  if (!is(node, "variable_declarator") || !is(field(node, "name"), "identifier")) return 0;
+  TSNode annotation = field(node, "type");
+  if (ts_node_is_null(annotation)) return 0;
+  TSNode type = ts_node_named_child(annotation, 0);
+  if (!is(type, "generic_type") || ts_node_named_child_count(type) != 2 ||
+      !text_is(s, ts_node_named_child(type, 0), "Record")) return 0;
+  TSNode args = ts_node_named_child(type, 1);
+  if (!is(args, "type_arguments") || ts_node_named_child_count(args) != 2) return 0;
+  TSNode key = ts_node_named_child(args, 0), value_type = ts_node_named_child(args, 1);
+  if (!(text_is(s, key, "string") || text_is(s, key, "number")) ||
+      !(text_is(s, value_type, "string") || text_is(s, value_type, "number") ||
+        text_is(s, value_type, "boolean"))) return 0;
+  TSNode value = field(node, "value");
+  if (!is(value, "object")) return 0;
+  unsigned pairs = 0;
+  for (uint32_t i = 0; i < ts_node_named_child_count(value); ++i) {
+    TSNode pair = ts_node_named_child(value, i);
+    if (is(pair, "comment")) continue;
+    TSNode k = field(pair, "key"), v = field(pair, "value");
+    if (!is(pair, "pair") ||
+        !(is(k, "property_identifier") || is(k, "string") || is(k, "number")) ||
+        !(is(v, "string") || is(v, "number") || is(v, "true") || is(v, "false"))) return 0;
+    ++pairs;
+  }
+  return pairs >= 2;
+}
+
+static int contract_reference(Selection *s, TSNode node, TSNode name,
+                              unsigned depth, int contract) {
+  if (depth > 512) { s->plan.status = 3; return 1; }
+  if (ts_node_is_null(node)) return 0;
+  if (contract && (is(node, "identifier") || is(node, "shorthand_property_identifier")) &&
+      ts_node_end_byte(node) - ts_node_start_byte(node) ==
+      ts_node_end_byte(name) - ts_node_start_byte(name) &&
+      memcmp(s->source + ts_node_start_byte(node), s->source + ts_node_start_byte(name),
+             ts_node_end_byte(name) - ts_node_start_byte(name)) == 0) return 1;
+  contract = contract || is(node, "export_clause") || is(node, "type_query");
+  /* Keep keys when a table is aliased, including aliases exported later. */
+  if (is(node, "variable_declarator")) {
+    TSNode value = field(node, "value");
+    if ((is(value, "identifier") || is(value, "object")) &&
+        contract_reference(s, value, name, depth + 1, 1)) return 1;
+  }
+  if (member_assignment(s, node) &&
+      contract_reference(s, field(node, "right"), name, depth + 1, 1)) return 1;
+  uint32_t n = ts_node_named_child_count(node);
+  for (uint32_t i = 0; i < n; ++i) {
+    TSNode child = ts_node_named_child(node, i);
+    /* Default expressions and exported bindings are contracts, unlike the
+     * implementation of an exported function/class declaration. */
+    int exported_value = is(node, "export_statement") &&
+      !callable(child) && !classlike(child) && !type_declaration(child);
+    if (contract_reference(s, child, name, depth + 1, contract || exported_value)) return 1;
+  }
+  return 0;
+}
+
+static int private_scalar_table(Selection *s, TSNode node, unsigned depth) {
+  if (!scalar_table(s, node)) return 0;
+  TSNode root = node;
+  while (!ts_node_is_null(ts_node_parent(root))) {
+    root = ts_node_parent(root);
+    if (is(root, "export_statement")) return 0;
+  }
+  return !contract_reference(s, root, field(node, "name"), depth + 1, 0);
+}
+
+static void literal_outline(Selection *s, TSNode node, unsigned depth) {
+  if (s->plan.status) return;
+  if (depth > 512) { s->plan.status = 3; return; }
+  if (callable(node) || classlike(node)) {
+    walk(s, node, depth + 1, 0);
+    return;
+  }
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    literal_outline(s, ts_node_named_child(node, i), depth + 1);
+}
+
 static void initializer(Selection *s, TSNode node, unsigned depth) {
   if (s->plan.status || ts_node_is_null(node)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   if (callable(node) || classlike(node) || is(node, "object")) {
+    walk(s, node, depth + 1, 0);
+  } else if (is(node, "as_expression") || is(node, "satisfies_expression")) {
+    /* Literal assertions may define public unions through typeof/keyof. */
+    literal_outline(s, node, depth + 1);
+  } else if (is(node, "identifier") || is(node, "member_expression") ||
+             is(node, "subscript_expression")) {
+    /* Binding aliases, especially CommonJS exports, are part of the outline. */
+    return;
+  } else if (is(node, "call_expression") &&
+             text_is(s, field(node, "function"), "require") &&
+             ts_node_named_child_count(field(node, "arguments")) == 1 &&
+             is(ts_node_named_child(field(node, "arguments"), 0), "string")) {
+    /* Static CommonJS imports/re-exports are binding aliases, not bodies. */
+    return;
+  } else if (js_assignment(node) || contains_outline(s, node, depth + 1)) {
     walk(s, node, depth + 1, 0);
   } else if (is(node, "parenthesized_expression")) {
     uint32_t n = ts_node_named_child_count(node);
@@ -154,10 +287,11 @@ static void walk(Selection *s, TSNode node, unsigned depth, int local) {
   if (is(node, "variable_declarator") || is(node, "public_field_definition") ||
       is(node, "field_definition") || is(node, "pair")) {
     TSNode value = field(node, "value");
-    if (!ts_node_is_null(value)) initializer(s, value, depth + 1);
+    if (private_scalar_table(s, node, depth + 1)) select_node(s, value, 0);
+    else if (!ts_node_is_null(value)) initializer(s, value, depth + 1);
     return;
   }
-  if (is(node, "assignment") || is(node, "augmented_assignment")) {
+  if (is(node, "assignment") || is(node, "augmented_assignment") || js_assignment(node)) {
     TSNode right = field(node, "right");
     /* Conventional Python type aliases are ordinary name assignments. Preserve
      * non-local bindings, as the upstream Python type-alias query does; inline
@@ -183,19 +317,20 @@ static void walk(Selection *s, TSNode node, unsigned depth, int local) {
 
 /* Local data statements are implementation, but locally named functions and
  * classes still belong to the outline (including arrow/lambda bindings). */
-static int signature_binding(TSNode node, unsigned depth) {
+static int signature_binding(Selection *s, TSNode node, unsigned depth) {
   if (depth > 512 || ts_node_is_null(node)) return 0;
   if (callable(node) || classlike(node)) return 1;
   if (is(node, "variable_declarator") || is(node, "pair"))
-    return signature_binding(field(node, "value"), depth + 1);
-  if (is(node, "assignment"))
-    return signature_binding(field(node, "right"), depth + 1);
+    return signature_binding(s, field(node, "value"), depth + 1);
+  if (member_assignment(s, node)) return 1;
+  if (is(node, "assignment") || js_assignment(node))
+    return signature_binding(s, field(node, "right"), depth + 1);
   if (!(is(node, "lexical_declaration") || is(node, "variable_declaration") ||
         is(node, "expression_statement") || is(node, "parenthesized_expression") ||
         is(node, "object"))) return 0;
   uint32_t n = ts_node_named_child_count(node);
   for (uint32_t i = 0; i < n; ++i)
-    if (signature_binding(ts_node_named_child(node, i), depth + 1)) return 1;
+    if (signature_binding(s, ts_node_named_child(node, i), depth + 1)) return 1;
   return 0;
 }
 
@@ -215,7 +350,7 @@ static void statements(Selection *s, TSNode node, unsigned depth, int local) {
         is(child, "export_statement") || structural(child) ||
         is(child, "class_static_block")) {
       walk(s, child, depth + 1, local);
-    } else if (local && signature_binding(child, depth + 1)) {
+    } else if (contains_outline(s, child, depth + 1)) {
       walk(s, child, depth + 1, local);
     } else if (!local && (is(child, "lexical_declaration") ||
                is(child, "variable_declaration") || is(child, "public_field_definition") ||
@@ -237,6 +372,11 @@ static void statements(Selection *s, TSNode node, unsigned depth, int local) {
 static void comments(Selection *s, TSNode node, unsigned depth) {
   if (s->plan.status) return;
   if (depth > 512) { s->plan.status = 3; return; }
+  /* A folded table owns its implementation-category comments. Its binding
+   * remains selected; ordinary discarded statements still restore comments. */
+  if (is(node, "object") && is(ts_node_parent(node), "variable_declarator") &&
+      s->plan.keep[ts_node_start_byte(ts_node_parent(node))] &&
+      !s->plan.keep[ts_node_start_byte(node)]) return;
   if (is(node, "comment")) {
     select_node(s, node, 1);
     /* A removed statement may have owned the following newline. Without it,
@@ -249,6 +389,56 @@ static void comments(Selection *s, TSNode node, unsigned depth) {
   uint32_t n = ts_node_named_child_count(node);
   for (uint32_t i = 0; i < n; ++i)
     comments(s, ts_node_named_child(node, i), depth + 1);
+}
+
+static int whitespace(char c) {
+  return c == ' ' || c == '\t' || c == '\r' || c == '\n';
+}
+
+/* Compact only whitespace between AST children of statement/type containers.
+ * Never inspect literal/comment contents or Python indentation as source lines. */
+static void presentation(Selection *s, TSNode node, unsigned depth) {
+  if (s->plan.status) return;
+  if (depth > 512) { s->plan.status = 3; return; }
+  int container = is(node, "program") || is(node, "module") ||
+    is(node, "statement_block") || is(node, "block") || is(node, "class_body") ||
+    is(node, "interface_body") || is(node, "enum_body") || is(node, "object");
+  uint32_t n = ts_node_child_count(node), previous = ts_node_start_byte(node);
+  for (uint32_t i = 0; i < n; ++i) {
+    TSNode child = ts_node_child(node, i);
+    uint32_t start = ts_node_start_byte(child), first = start, last = start;
+    int only_space = 1;
+    if (container) {
+      for (uint32_t j = previous; j < start; ++j) {
+        if (!whitespace(s->source[j])) { only_space = 0; break; }
+        if (s->source[j] == '\n') {
+          if (first == start) first = j;
+          last = j;
+        }
+      }
+      if (only_space && first < last)
+        memset(s->plan.keep + first + 1, 0, last - first);
+    }
+    /* These nodes can contain raw text, including physical blank lines. */
+    if (!(is(child, "string") || is(child, "template_string") ||
+          is(child, "comment") || is(child, "regex")))
+      presentation(s, child, depth + 1);
+    previous = ts_node_end_byte(child);
+  }
+}
+
+static void merge_omissions(Selection *s) {
+  for (uint32_t i = 0; i < s->plan.length;) {
+    if (!s->plan.keep[i]) { ++i; continue; }
+    uint32_t start = i;
+    int only_space = 1;
+    while (i < s->plan.length && s->plan.keep[i]) {
+      if (!whitespace(s->source[i])) only_space = 0;
+      ++i;
+    }
+    if (only_space && start > 0 && i < s->plan.length)
+      memset(s->plan.keep + start, 0, i - start);
+  }
 }
 
 SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
@@ -284,6 +474,8 @@ SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
       memset(s.plan.keep, 1, length);
       walk(&s, ts_tree_root_node(tree), 0, 0);
       comments(&s, ts_tree_root_node(tree), 0);
+      presentation(&s, ts_tree_root_node(tree), 0);
+      merge_omissions(&s);
     }
   }
   if (tree) ts_tree_delete(tree);

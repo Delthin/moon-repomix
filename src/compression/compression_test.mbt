@@ -57,7 +57,11 @@ test "Python decorators, docstrings, imports, nested declarations and class meth
   }
   assert_false(out.text.contains("value.strip()"))
   assert_false(out.text.contains("self.storage.fetch"))
-  assert_eq(out.ranges, [{ start_line: 1, end_line: 11, }])
+  // The removed presentation-only blank line is not a retained source range.
+  assert_eq(out.ranges, [
+    { start_line: 1, end_line: 3, },
+    { start_line: 5, end_line: 11, },
+  ])
 }
 
 ///|
@@ -70,6 +74,13 @@ test "JS, JSX, TSX and inline implementations use AST byte spans" {
     #|  if (keep) {
     #|    function helper(value) { return value.repeat(100) + 'long implementation'; }
     #|  }
+    #|  if (items.length > 10) {
+    #|    const total = items.reduce((sum, item) => sum + item.count, 0);
+    #|    console.log(total);
+    #|  }
+    #|  if (keepArrow) { const helperArrow = (value) => value.repeat(100); }
+    #|  if (keepClass) { class Inner { run() { return 'long implementation'; } } }
+    #|  items.forEach(item => console.log('long implementation', item));
     #|  for (let i = 0; i < items.length; i++) {
     #|    function step(value) { return value.repeat(100) + 'long implementation'; }
     #|  }
@@ -135,6 +146,13 @@ test "JS, JSX, TSX and inline implementations use AST byte spans" {
       assert_false(out.text.contains("work("))
       assert_false(out.text.contains("if (plain)"))
       assert_true(out.text.contains("if (keep)"))
+      assert_false(out.text.contains("if (items.length > 10)"))
+      assert_false(out.text.contains("reduce("))
+      assert_false(out.text.contains("forEach("))
+      assert_true(out.text.contains("if (keepArrow)"))
+      assert_true(out.text.contains("const helperArrow = (value) =>"))
+      assert_true(out.text.contains("if (keepClass)"))
+      assert_true(out.text.contains("class Inner"))
       assert_true(out.text.contains("function step(value)"))
       assert_true(out.text.contains("let i = 0; i < items.length; i++"))
       assert_true(out.text.contains("code: 'js'"))

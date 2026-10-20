@@ -18,6 +18,20 @@ fn omission(
   end : Int32,
   marker : String,
 ) -> Unit {
+  // AST-selected presentation whitespace needs no synthetic omission marker.
+  let mut only_space = true
+  for i in start..<end {
+    if source[i] != b' ' &&
+      source[i] != b'\t' &&
+      source[i] != b'\r' &&
+      source[i] != b'\n' {
+      only_space = false
+      break
+    }
+  }
+  if only_space {
+    return
+  }
   if start == 0 || source[start - 1] == b'\n' {
     let mut indent_end = start
     while indent_end < end &&
@@ -28,7 +42,13 @@ fn omission(
   }
   builder.write_string(marker)
   if end > start && source[end - 1] == b'\n' {
-    builder.write_string("\n")
+    builder.write_string(
+      if end > start + 1 && source[end - 2] == b'\r' {
+        "\r\n"
+      } else {
+        "\n"
+      },
+    )
   }
 }
 
