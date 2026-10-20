@@ -209,10 +209,12 @@ async fn main {
   let config = temp + "/context.json"
   @fs.write_file(
     config,
-    "{\"output\":{\"compress\":true,\"git\":{\"includeDiffs\":true,\"includeLogs\":true,\"includeLogsCount\":2}}}",
+    "{\"output\":{\"compress\":true,\"fullMetadata\":true,\"git\":{\"includeDiffs\":true,\"includeLogs\":true,\"includeLogsCount\":2}}}",
     create_mode=CreateNew,
   )
-  let common = [root, "--tokenizer-path", vocabulary, "--config", config]
+  let common = [
+    root, "--tokenizer-path", vocabulary, "--config", config, "--no-full-metadata",
+  ]
   let (code, text, report) = run(
     binary,
     common + ["--style=json", "--stdout"],
@@ -244,9 +246,33 @@ async fn main {
     files.get("notes.txt"),
     Some(Json("plain context remains exact\r\n")),
   )
-  guard metadata.get("compression") is Some(Array(changes)) else {
-    fail("Missing compression records")
+  guard metadata.get("compression")
+    is Some(
+      { "files": Number(file_count, ..), "applied": Number(applied, ..), .. }
+    ) else {
+    fail("Missing compression overview")
   }
+  assert_eq(file_count, files.length().to_double())
+  assert_true(applied >= 2)
+  let (full_ok, detailed, full_report) = run(
+    binary,
+    common + ["--style=json", "--stdout", "--full-metadata"],
+    temp,
+  )
+  assert_eq(full_ok, 0)
+  assert_false(detailed.contains(secret))
+  assert_true(tokens(full_report) > tokens(report))
+  guard @json.parse(detailed)
+    is {
+      "files": Object(detailed_files),
+      "metadata": { "compression": Array(changes), .. },
+      "sections": Array(detailed_sections),
+      ..
+    } else {
+    fail("Missing complete compression records")
+  }
+  assert_eq(detailed_files, files)
+  assert_eq(detailed_sections, sections)
   let mut compressed = 0
   for change in changes {
     if change
@@ -333,19 +359,17 @@ async fn main {
     assert_false(err.contains(secret))
     assert_true(rendered.contains("Git commit"))
     assert_true(rendered.contains("Git staged diff:"))
-    if style == "markdown" || style == "plain" {
-      assert_true(rendered.contains("\"files\":"))
-      assert_false(rendered.contains("\"ranges\":"))
-      let (full_ok, detailed, full_report) = run(
-        binary,
-        common + ["--style=" + style, "--stdout", "--full-metadata"],
-        temp,
-      )
-      assert_eq(full_ok, 0)
-      assert_true(detailed.contains("\"ranges\":"))
-      assert_false(detailed.contains(secret))
-      assert_true(tokens(full_report) > tokens(err))
-    }
+    assert_true(rendered.contains("\"files\":"))
+    assert_false(rendered.contains("\"ranges\":"))
+    let (full_ok, detailed, full_report) = run(
+      binary,
+      common + ["--style=" + style, "--stdout", "--full-metadata"],
+      temp,
+    )
+    assert_eq(full_ok, 0)
+    assert_true(detailed.contains("\"ranges\":"))
+    assert_false(detailed.contains(secret))
+    assert_true(tokens(full_report) > tokens(err))
     if style == "xml" && args.contains("--xml-oracle") {
       let path = temp + "/packed.xml"
       @fs.write_file(path, rendered, create_mode=CreateNew)

@@ -82,7 +82,7 @@ moon-repomix ./project --init
 
 - 读取 `.gitignore`、`.ignore`、`.repomixignore`（含嵌套规则），支持 include/ignore glob；按相对路径稳定排序。include 不会绕过忽略规则。
 - 打包有效 UTF-8 普通文件；去掉 UTF-8 BOM，保留原始换行。默认单文件上限为 **50 MiB**；链接、二进制、不可读或超限文件跳过。
-- `--compress` 支持 JavaScript/TypeScript（含 JSX/TSX）和 Python，在原始快照扫描通过后提取语法骨架；其他语言或压缩无收益时保留原文。Markdown/plain 默认只带来源和压缩概览，`--full-metadata` 展示逐文件状态与原始行区间；JSON/XML 及库模型保留完整记录。正文排名统计实际输出正文，同时记录原始正文计数。
+- `--compress` 支持 JavaScript/TypeScript（含 JSX/TSX）和 Python，在原始快照扫描通过后提取语法骨架；其他语言或压缩无收益时保留原文。四种格式默认只带来源和压缩概览，`--full-metadata` 展示逐文件状态与原始行区间；库模型始终保留完整记录。正文排名统计实际输出正文，同时记录原始正文计数。
 - `--include-diffs`、`--include-logs` 导出经过路径筛选的 Git 章节；提交消息和包含删除行的补丁也扫描，命中时排除对应整个补丁或提交。远程输入支持公开 HTTPS 仓库的默认分支及指定 branch/tag/full commit，获取后复用同一处理流程，并清理临时目录。
 - 默认扫描密钥，排除命中的**整个文件**。诊断给出规则、路径、行号和磁盘字节区间，不打印匹配值。
 - 用完整 `o200k_base` 词表计算最终文档的 token 数，默认显示正文 token 数最多的 5 个文件。`--top-files-len` 调整排名数量，`--token-count-tree [N]` 显示带阈值的文件/目录统计；目录值为文件正文计数之和。超预算不截断：仍输出完整文档，CLI 返回 **1**；正常完成且未超预算返回 **0**。配置、资源、扫描或写入错误也返回 **1**，需结合诊断区分。

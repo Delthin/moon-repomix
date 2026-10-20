@@ -7,7 +7,7 @@ let help : String =
   #|      --stdout                   Write only the document to stdout
   #|      --style FORMAT             xml|markdown|json|plain (default: xml)
   #|      --compress / --no-compress  Syntax-tree code skeletons with source lines
-  #|      --full-metadata            Full file/source maps in Markdown or plain
+  #|      --full-metadata            Full per-file records and source maps in any format
   #|      --include-diffs            Export staged and unstaged Git patches
   #|      --include-logs             Export recent Git commit messages and paths
   #|      --include-logs-count N     Commit limit (default: 50; max: 10000)
@@ -39,6 +39,6 @@ let help : String =
   #|Token reports use stderr and are hidden by --quiet.
   #|Place directory before --token-count-tree, or separate it with --.
   #|Directory token sums are not the final document count used for budgets.
-  #|Markdown/plain use a metadata overview by default; JSON/XML keep full records.
+  #|All formats use a metadata overview by default; --full-metadata keeps per-file records.
   #|With --stdout, redirect outside the input root or explicitly ignore the target.
   #|

@@ -25,7 +25,7 @@ pub fn plain(
   if document.metadata != Json::null() {
     out.write_string("\n" + section + "\nContext Metadata\n" + section + "\n")
     out.write_string(
-      text_metadata(document.metadata, full_metadata).stringify() + "\n",
+      render_metadata(document.metadata, full_metadata).stringify() + "\n",
     )
   }
   for extra in document.sections {

@@ -1,7 +1,7 @@
 ///|
-// Text contexts carry an overview. The complete model remains available from
-// Document, JSON/XML output, or the explicit full_metadata rendering option.
-fn text_metadata(metadata : Json, full_metadata : Bool) -> Json {
+// Render an overview by default without changing the complete Document model.
+// All formats expose the original records with full_metadata.
+fn render_metadata(metadata : Json, full_metadata : Bool) -> Json {
   if full_metadata {
     return metadata
   }

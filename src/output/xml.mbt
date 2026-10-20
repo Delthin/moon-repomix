@@ -34,7 +34,11 @@ fn xml_escape(text : String, attribute : Bool) -> String {
 }
 
 ///|
-pub fn xml(document : @document.Document) -> String {
+/// Metadata uses an overview unless full_metadata is requested.
+pub fn xml(
+  document : @document.Document,
+  full_metadata~ : Bool = false,
+) -> String {
   let out = StringBuilder()
   out.write_string("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<repository>\n")
   out.write_string(
@@ -54,7 +58,10 @@ pub fn xml(document : @document.Document) -> String {
   if document.metadata != Json::null() {
     out.write_string(
       "  <metadata>" +
-      xml_escape(document.metadata.stringify(), false) +
+      xml_escape(
+        render_metadata(document.metadata, full_metadata).stringify(),
+        false,
+      ) +
       "</metadata>\n",
     )
   }

@@ -32,7 +32,7 @@ test "document paths use UTF-8 lexical order and keep directory children togethe
 }
 
 ///|
-test "text renderers use safe fences and summarize metadata while keeping the complete model" {
+test "all renderers summarize metadata and expose complete records on request" {
   let metadata : Json = {
     "source": { "kind": "local" },
     "compression": [
@@ -86,10 +86,40 @@ test "text renderers use safe fences and summarize metadata while keeping the co
   )
   assert_false(@output.plain(doc).contains("\"ranges\""))
   assert_eq(doc.metadata, metadata)
-  guard @json.parse(@output.json(doc)) is { "metadata": full, .. } else {
+  guard @json.parse(@output.json(doc))
+    is { "metadata": overview, "files": overview_files, .. } else {
+    fail("Expected a structured metadata overview")
+  }
+  guard overview
+    is {
+      "source": { "kind": String("local"), .. },
+      "compression": {
+        "files": Number(2, ..),
+        "applied": Number(1, ..),
+        "originalTokens": Number(37, ..),
+        "outputTokens": Number(19, ..),
+        "fallbacks": { "unsupported": Number(1, ..), .. },
+        ..
+      },
+      "git": { "diffs": Number(1, ..), "commits": Number(0, ..), .. },
+      "custom": String("retained"),
+      ..
+    } else {
+    fail("Expected source, aggregate counts and custom metadata")
+  }
+  assert_false(overview.stringify().contains("\"ranges\""))
+  guard @json.parse(@output.json(doc, full_metadata=true))
+    is { "metadata": full, "files": full_files, .. } else {
     fail("Expected complete structured metadata")
   }
   assert_eq(full, metadata)
+  assert_eq(full_files, overview_files)
+  assert_true(@output.xml(doc).contains(overview.stringify()))
+  assert_false(@output.xml(doc).contains("\"ranges\""))
+  assert_true(
+    @output.xml(doc, full_metadata=true).contains(metadata.stringify()),
+  )
+  assert_eq(doc.metadata, metadata)
   assert_true(@output.xml(@document.create([])).contains("<files>\n  </files>"))
 }
 

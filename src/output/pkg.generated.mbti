@@ -6,13 +6,13 @@ import {
 }
 
 // Values
-pub fn json(@document.Document) -> String
+pub fn json(@document.Document, full_metadata? : Bool) -> String
 
 pub fn markdown(@document.Document, full_metadata? : Bool) -> String
 
 pub fn plain(@document.Document, full_metadata? : Bool) -> String
 
-pub fn xml(@document.Document) -> String
+pub fn xml(@document.Document, full_metadata? : Bool) -> String
 
 pub fn xml_representable(String) -> Bool
 

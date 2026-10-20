@@ -81,7 +81,7 @@ pub fn markdown(
     out.write_string(delimiter + "\n")
   }
   if document.metadata != Json::null() {
-    let text = text_metadata(document.metadata, full_metadata).stringify()
+    let text = render_metadata(document.metadata, full_metadata).stringify()
     let delimiter = fence(text)
     out.write_string(
       "\n## Context metadata\n\n" +

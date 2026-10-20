@@ -44,16 +44,16 @@ moon-repomix --remote https://github.com/octocat/Hello-World.git --remote-branch
 
 ## 结构化输出与库调用
 
-`Document` 包含 `files`、`sections`、`metadata`；`PackResult.document` 暴露同一份模型。JSON 保留路径到输出正文的 `files` 对象，按需增加：
+`Document` 包含 `files`、`sections`、`metadata`；`PackResult.document` 暴露同一份模型，元数据始终完整。完整记录的结构为：
 
 - `metadata.source`：`kind`、可选 URL 和实际 revision；普通本地压缩未请求 Git 时 revision 为 null。
 - `metadata.compression`：逐文件骨架与回退记录。
 - `metadata.git`：接受的 diff 路径、提交标识与文件列表。
 - `sections`：`kind` 为 `git_diff` 或 `git_log`，并含 `title`、`text`。
 
-JSON、XML 和 `Document.metadata` 保留完整逐文件元数据；XML 的 Git 内容位于 `sections/section`。Markdown/plain 默认展示简短概览：保留来源及 revision，压缩部分汇总文件数、应用数、原始/输出正文 token、语言和回退原因计数，Git 部分汇总接受的补丁与提交数。Git 章节正文保持完整。
+四种输出格式默认展示简短概览：保留来源及 revision；`metadata.compression` 为对象，含 `files`、`applied`、`originalTokens`、`outputTokens`、`languages`、`fallbacks`；`metadata.git` 汇总接受的补丁与提交数。JSON 的 `files` 仍为路径到正文的对象，`sections` 与文件正文保持完整；XML 的 Git 内容位于 `sections/section`。概览只改变渲染后的元数据，原有未开启压缩、Git 或远程来源的输出结构保持原样。
 
-需要逐文件状态和原始行区间时，使用 `--full-metadata`，或 JSON 配置 `output.fullMetadata: true`；库入口 `options(..., full_metadata=true)` 和渲染函数 `markdown(document, full_metadata=true)`、`plain(document, full_metadata=true)` 提供同样的选择。完整记录使用紧凑 JSON。原有未开启压缩、Git 或远程来源的输出结构保持原样。
+需要逐文件状态和原始行区间时，使用 `--full-metadata`，或 JSON 配置 `output.fullMetadata: true`。此时 `metadata.compression` 恢复为逐文件数组，`metadata.git` 保留逐项记录。库入口 `options(..., full_metadata=true)` 和四种渲染函数的 `full_metadata=true` 参数提供同样的选择，也可直接读取完整的 `Document.metadata`。JSON 按其格式缩进，其他格式中的元数据使用紧凑 JSON。最终预算针对所选模式的实际完整输出计算。
 
 ```moonbit
 let options = @repomix.options(

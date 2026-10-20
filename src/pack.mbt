@@ -217,9 +217,9 @@ async fn pack_directory(
   }
   let document = @document.create(accepted, sections=git.sections, metadata~)
   let text = match options.style {
-    Xml => @output.xml(document)
+    Xml => @output.xml(document, full_metadata=options.full_metadata)
     Markdown => @output.markdown(document, full_metadata=options.full_metadata)
-    Json => @output.json(document)
+    Json => @output.json(document, full_metadata=options.full_metadata)
     Plain => @output.plain(document, full_metadata=options.full_metadata)
   }
   @async.sleep(0)
