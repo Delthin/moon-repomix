@@ -1,0 +1,21 @@
+import {
+  "moonbitlang/core/encoding/utf8",
+}
+
+supported_targets = "native"
+
+options(
+  "native-stub": [
+    "runtime.c",
+    "javascript_parser.c",
+    "javascript_scanner.c",
+    "typescript_parser.c",
+    "typescript_scanner.c",
+    "tsx_parser.c",
+    "tsx_scanner.c",
+    "python_parser.c",
+    "python_scanner.c",
+    "compression_core.c",
+    "ffi.c",
+  ],
+)

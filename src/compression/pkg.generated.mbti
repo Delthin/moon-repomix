@@ -1,0 +1,35 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Delthin/moon_repomix/compression"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn compress(String, String) -> Outcome
+
+// Errors
+
+// Types and methods
+pub(all) struct LineRange {
+  start_line : Int
+  end_line : Int
+} derive(Eq, @debug.Debug)
+pub fn LineRange::equal(Self, Self) -> Bool
+pub fn LineRange::not_equal(Self, Self) -> Bool
+pub fn LineRange::to_repr(Self) -> @debug.Repr
+
+pub(all) struct Outcome {
+  text : String
+  language : String?
+  applied : Bool
+  reason : String?
+  ranges : Array[LineRange]
+} derive(Eq, @debug.Debug)
+pub fn Outcome::equal(Self, Self) -> Bool
+pub fn Outcome::not_equal(Self, Self) -> Bool
+pub fn Outcome::to_repr(Self) -> @debug.Repr
+
+// Type aliases
+
+// Traits
