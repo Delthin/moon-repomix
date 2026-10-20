@@ -15,6 +15,9 @@ filtering before rendering any returned content.
 All Git calls use argument arrays, a restricted environment, no inherited/global
 Git configuration, disabled hooks/fsmonitor/signature display/external diff/
 textconv/credential helpers/submodules/replace objects/automatic maintenance.
+Only PATH and OS runtime variables (SystemRoot, WINDIR, TEMP, TMP, TMPDIR,
+PATHEXT) are copied from the host; injected GIT_* and shell/helper variables are
+not inherited. Null devices use `NUL` on Windows and `/dev/null` elsewhere.
 Worktree diffs also disable every configured clean/process attribute filter,
 including filters from included repository configuration. Git metadata is read,
 not rewritten. Concurrent malicious modification of repository/config files is
@@ -27,3 +30,39 @@ budget (`max_bytes=8388608`). Exceeding limits raises, never truncates. Git erro
 contain the operation and exit code, not child diagnostics, URLs or source text.
 `NotRepository` is explicit; filesystem, timeout and cancellation errors propagate.
 The caller must not reinterpret cancellation/errors as empty successful context.
+
+## HTTPS checkout
+
+`checkout(url, revision~, history=10)` accepts an optional revision (omit the label
+for default branch HEAD), returning `{ directory, url, revision }` with the actual
+resolved HEAD. Branch/tag names and full commit IDs are supported; revisions are
+restricted to ASCII letters/digits, `.`, `_`, `-`, `/` and valid ref components,
+not refspecs, options or revision expressions. Public HTTPS URLs must use a DNS
+hostname (not IP literals or local-only hostnames), an optional valid port, no
+userinfo/credentials, query, fragment, whitespace/control characters or backslash.
+Valid percent escapes in paths are accepted except encoded controls/backslashes.
+DNS resolution, Git installation and system CA trust remain host responsibilities;
+this is not a DNS-rebinding/SSRF firewall. TLS verification is required, redirects
+are disabled, and credentials/private repositories/submodules are unsupported.
+
+A fresh empty-template Git repository is initialized in a private temporary
+directory, then fetch/checkout run through the same hardened runner. No Git hooks
+or filters are installed from the host. Default `history=0` fetches depth 1;
+`history>0` fetches full ancestry of the selected ref, not merely that many commits,
+so path-limited history has sufficient ancestry. `.git` remains available for
+`collect`. The complete checkout operation shares an 8 MiB captured-output budget;
+each command has the same 30-second deadline. This is not a disk/network quota.
+
+Always `defer cleanup(checkout)` after success. Failure/cancellation before return
+removes the temporary directory. Both paths protect deletion in already-cancelled
+tasks and subsequently resume cancellation. Cleanup only accepts directories
+allocated by this package in the same process; public struct fields do not grant
+permission to delete arbitrary paths. Successful cleanup invalidates the handle
+(do not call concurrently or twice). Deletion errors propagate and retain ownership
+so the caller can retry explicitly. Repository symlinks are removed, not followed.
+
+Package tests use one synthetic real repository for scoped diff/log and dangerous
+extension markers (POSIX marker execution, Windows uses failing extension config),
+plus URL validation and local lifecycle failure/cancellation/foreign-path/symlink
+checks. They make no network requests. End-to-end public HTTPS success and CLI
+integration are deliberately left to the integrating caller's single remote test.

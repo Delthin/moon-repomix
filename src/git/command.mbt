@@ -5,20 +5,69 @@ priv struct Budget {
 }
 
 ///|
+fn null_device() -> String {
+  if @platform.is_windows() {
+    "NUL"
+  } else {
+    "/dev/null"
+  }
+}
+
+///|
 fn safe_arguments(
   directory : String,
   args : Array[String],
   budget : Budget,
 ) -> Array[String] {
+  let null = null_device()
   let result = [
-    "--no-pager", "--no-optional-locks", "--literal-pathspecs", "-c", "core.fsmonitor=false",
-    "-c", "core.hooksPath=/dev/null", "-c", "core.askPass=", "-c", "credential.helper=",
-    "-c", "credential.interactive=false", "-c", "log.showSignature=false", "-c",
-    "diff.external=", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
-    "-c", "http.followRedirects=false", "-c", "http.sslVerify=true", "-c", "http.extraHeader=",
-    "-c", "fetch.recurseSubmodules=false", "-c", "submodule.recurse=false", "-c",
-    "maintenance.auto=false", "-c", "gc.auto=0", "-c", "core.attributesFile=/dev/null",
-    "-c", "core.excludesFile=/dev/null", "-c", "core.quotePath=true", "-C", directory,
+    "--no-pager",
+    "--no-optional-locks",
+    "--literal-pathspecs",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.protectHFS=true",
+    "-c",
+    "core.protectNTFS=true",
+    "-c",
+    "core.hooksPath=" + null,
+    "-c",
+    "core.askPass=",
+    "-c",
+    "credential.helper=",
+    "-c",
+    "credential.interactive=false",
+    "-c",
+    "log.showSignature=false",
+    "-c",
+    "diff.external=",
+    "-c",
+    "protocol.allow=never",
+    "-c",
+    "protocol.https.allow=always",
+    "-c",
+    "http.followRedirects=false",
+    "-c",
+    "http.sslVerify=true",
+    "-c",
+    "http.extraHeader=",
+    "-c",
+    "fetch.recurseSubmodules=false",
+    "-c",
+    "submodule.recurse=false",
+    "-c",
+    "maintenance.auto=false",
+    "-c",
+    "gc.auto=0",
+    "-c",
+    "core.attributesFile=" + null,
+    "-c",
+    "core.excludesFile=" + null,
+    "-c",
+    "core.quotePath=true",
+    "-C",
+    directory,
   ]
   result.append(budget.filters)
   result.append(args)
@@ -27,20 +76,30 @@ fn safe_arguments(
 
 ///|
 fn safe_environment() -> Map[String, String] {
-  {
-    "PATH": "/usr/bin:/bin:/usr/local/bin",
-    "HOME": "/dev/null",
-    "XDG_CONFIG_HOME": "/dev/null",
+  let null = null_device()
+  let environment = {
+    "HOME": null,
+    "XDG_CONFIG_HOME": null,
     "GIT_CONFIG_NOSYSTEM": "1",
-    "GIT_CONFIG_GLOBAL": "/dev/null",
-    "GIT_CONFIG_SYSTEM": "/dev/null",
+    "GIT_CONFIG_GLOBAL": null,
+    "GIT_CONFIG_SYSTEM": null,
     "GIT_TERMINAL_PROMPT": "0",
     "GCM_INTERACTIVE": "never",
     "GIT_NO_REPLACE_OBJECTS": "1",
+    "GIT_NO_LAZY_FETCH": "1",
     "GIT_ATTR_NOSYSTEM": "1",
     "GIT_LFS_SKIP_SMUDGE": "1",
     "LC_ALL": "C",
   }
+  // Preserve executable discovery and OS runtime requirements, not arbitrary
+  // GIT_*, proxy, shell, credential, preload or Git helper environment variables.
+  for
+    key in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR", "PATHEXT"] {
+    if @env.get_env_var(key) is Some(value) {
+      environment[key] = value
+    }
+  }
+  environment
 }
 
 ///|
@@ -77,7 +136,7 @@ async fn git_raw(
     defer stdout.close()
     let (stderr, err_pipe) = @process.read_from_process()
     defer stderr.close()
-    let input = @process.redirect_from_file("/dev/null")
+    let input = @process.redirect_from_file(null_device())
     @async.with_task_group(group => {
       let child = group.spawn(() => {
         @process.run(

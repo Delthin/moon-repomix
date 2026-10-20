@@ -1,15 +1,32 @@
 ///|
 async fn fixture_git(directory : String, args : Array[String]) -> Unit {
+  let null = if @platform.is_windows() { "NUL" } else { "/dev/null" }
   let argv = [
-    "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c",
-    "commit.gpgSign=false", "-c", "core.hooksPath=/dev/null", "-C", directory,
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.invalid",
+    "-c",
+    "commit.gpgSign=false",
+    "-c",
+    "core.hooksPath=" + null,
+    "-C",
+    directory,
   ]
   argv.append(args)
-  let (code, _, _) = @process.collect_output("git", argv, inherit_env=false, extra_env={
-    "PATH": "/usr/bin:/bin",
-    "GIT_CONFIG_NOSYSTEM": "1",
-    "GIT_CONFIG_GLOBAL": "/dev/null",
-  })
+  let environment = { "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": null }
+  for
+    key in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR", "PATHEXT"] {
+    if @env.get_env_var(key) is Some(value) {
+      environment[key] = value
+    }
+  }
+  let (code, _, _) = @process.collect_output(
+    "git",
+    argv,
+    inherit_env=false,
+    extra_env=environment,
+  )
   assert_eq(code, 0)
 }
 
@@ -19,7 +36,11 @@ async test "real repository: unborn, scoped patches, NUL names, logs and unsafe 
   defer @async.protect_from_cancel(() => @fs.rmdir(dir, recursive=true))
   fixture_git(dir, ["init", "--template=", "--initial-branch=main"])
   @fs.mkdir(dir + "/scope")
-  let odd = "- odd\t\n文件 | [x]*.txt"
+  let odd = if @platform.is_windows() {
+    "- odd 文件 [x].txt"
+  } else {
+    "- odd\t\n文件 | [x]*.txt"
+  }
   for name in ["keep", "delete", "old", "cross", odd] {
     @fs.write_file(
       dir + "/scope/" + name,
@@ -47,11 +68,17 @@ async test "real repository: unborn, scoped patches, NUL names, logs and unsafe 
   let marker = dir + "/extension-ran"
   // Deliberately executable repository configuration. The trailing comment
   // ignores Git's extension arguments. This is fixture data, never a runner.
-  let attack = "/usr/bin/touch '" + marker + "' #"
+  let attack = if @platform.is_windows() {
+    "cmd.exe /d /c exit 99"
+  } else {
+    "/usr/bin/touch '" + marker + "' #"
+  }
   fixture_git(dir, ["config", "core.fsmonitor", attack])
-  fixture_git(dir, ["status", "--porcelain"])
-  assert_true(@fs.exists(marker))
-  @fs.remove(marker)
+  if !@platform.is_windows() {
+    fixture_git(dir, ["status", "--porcelain"])
+    assert_true(@fs.exists(marker))
+    @fs.remove(marker)
+  }
   fixture_git(dir, ["config", "diff.external", attack])
   fixture_git(dir, ["config", "diff.hostile.textconv", attack])
   fixture_git(dir, ["config", "filter.hostile.clean", attack])
@@ -65,7 +92,7 @@ async test "real repository: unborn, scoped patches, NUL names, logs and unsafe 
   )
   let snapshot = @git.collect(dir + "/scope", diffs=true, logs=2)
   assert_false(@fs.exists(marker))
-  assert_eq(snapshot.repository_root, @fs.realpath(dir))
+  assert_eq(snapshot.repository_root, @platform.separators(@fs.realpath(dir)))
   assert_true(snapshot.revision is Some(_))
   assert_eq(snapshot.diffs.length(), 6)
   let staged = snapshot.diffs.filter(d => d.kind == "staged")
