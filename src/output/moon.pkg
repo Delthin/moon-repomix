@@ -2,4 +2,8 @@ import {
   "Delthin/moon_repomix/document",
 }
 
+import {
+  "moonbitlang/core/json",
+} for "test"
+
 supported_targets = "native"

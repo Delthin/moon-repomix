@@ -1,0 +1,267 @@
+///|
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/string",
+}
+
+///|
+async fn cli(
+  binary : String,
+  args : Array[String],
+  cwd : String,
+) -> (Int32, String, String) {
+  let (code, out, err) = @process.collect_output(binary, args, cwd~)
+  (code, out.text(), err.text())
+}
+
+///|
+fn reported_count(report : String, label : String) -> Int32 raise {
+  for word in report.split(" "); previous = "" {
+    if word == label {
+      break @string.parse_int(previous)
+    }
+    continue word.to_owned()
+  } nobreak {
+    fail("Missing full-document " + label)
+  }
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() >= 3 else {
+    fail(
+      "Usage: moon run --target native scripts/output-formats-test.mbtx BINARY VOCABULARY [--json-oracle]",
+    )
+  }
+  let binary = @fs.realpath(args[1])
+  let vocabulary = @fs.realpath(args[2])
+  let temp = @fs.tmpdir(prefix="moon-repomix-output-formats-")
+  defer @fs.rmdir(temp, recursive=true)
+  let root = temp + "/input"
+  @fs.mkdir(root + "/src", recursive=true)
+  @fs.mkdir(root + "/组 合")
+  let entries = [
+    ("10", "ten"),
+    ("2", "two"),
+    ("__proto__", "prototype is a path"),
+    ("controls.txt", "A\u{1}\u{fffe}B"),
+    ("empty.txt", ""),
+    (
+      "src/hello.txt", "  \"quote\" \\\\ <&>\r\n================\nFile: pretend\n\t😀\r  ",
+    ),
+    ("组 合/😀.txt", " no terminal newline 😀 "),
+  ]
+  let unusual = "odd\"\n\t.txt"
+  let windows = @env.get_env_var("OS") == Some("Windows_NT")
+  if !windows {
+    entries.push((unusual, "quoted path with LF and TAB"))
+  }
+  for (name, text) in entries {
+    @fs.write_file(root + "/" + name, text, create_mode=CreateNew)
+  }
+  @fs.write_file(root + "/bad.txt", b"a\x00b", create_mode=CreateNew)
+  @fs.write_file(root + "/ignored.txt", "ignored-body", create_mode=CreateNew)
+  @fs.write_file(root + "/.gitignore", "ignored.txt\n", create_mode=CreateNew)
+  let secret = "ghp_" + "Ab9Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
+  @fs.write_file(root + "/secret.txt", secret, create_mode=CreateNew)
+  let common = [
+    root,
+    "--tokenizer-path",
+    vocabulary,
+    "--include",
+    "*.txt,src/**,组 合/**,10,2,__proto__" +
+    (if windows { "" } else { "," + unusual }),
+  ]
+  let mut json_text = ""
+  let mut plain_text = ""
+  for
+    (style, suffix) in [
+      ("xml", "xml"),
+      ("markdown", "md"),
+      ("json", "json"),
+      ("plain", "txt"),
+    ] {
+    let cwd = temp + "/" + style
+    @fs.mkdir(cwd)
+    let selected = common + ["--style=" + style]
+    let (code, out, report) = cli(binary, selected, cwd)
+    assert_eq(code, 0)
+    assert_eq(out, "")
+    let path = cwd + "/repomix-output." + suffix
+    let text = @fs.read_file(path).text()
+    assert_false(text.contains(secret))
+    assert_false(report.contains(secret))
+    assert_false(text.contains("ignored-body"))
+    assert_true(report.contains("SecurityFinding"))
+    assert_true(report.contains("Binary"))
+    let expected_files = entries.length() - (if style == "xml" { 1 } else { 0 })
+    assert_true(
+      report.contains("Packed " + expected_files.to_string() + " files,"),
+    )
+    let bytes = reported_count(report, "bytes,")
+    let tokens = reported_count(report, "tokens")
+    assert_eq(bytes, @utf8.encode(text).length())
+    assert_true(tokens > 0)
+    let (streamed, stream, quiet) = cli(
+      binary,
+      selected + ["--stdout", "--quiet"],
+      cwd,
+    )
+    assert_eq(streamed, 0)
+    assert_eq(stream, text)
+    assert_eq(quiet, "")
+    let (equal, _, _) = cli(
+      binary,
+      selected + ["--token-budget=" + tokens.to_string()],
+      cwd,
+    )
+    assert_eq(equal, 0)
+    assert_eq(@fs.read_file(path).text(), text)
+    let (over, over_out, over_report) = cli(
+      binary,
+      selected + ["--token-budget=" + (tokens - 1).to_string()],
+      cwd,
+    )
+    assert_eq(over, 1)
+    assert_eq(over_out, "")
+    assert_true(over_report.contains("complete output retained"))
+    assert_eq(@fs.read_file(path).text(), text)
+    let blocked = cwd + "/blocked"
+    @fs.mkdir(blocked)
+    @fs.write_file(
+      blocked + "/keep.txt",
+      "directory stays",
+      create_mode=CreateNew,
+    )
+    let (write_error, write_out, write_report) = cli(
+      binary,
+      selected + ["-o", blocked],
+      cwd,
+    )
+    assert_eq(write_error, 1)
+    assert_eq(write_out, "")
+    assert_true(write_report.contains("OutputError"))
+    assert_eq(@fs.read_file(blocked + "/keep.txt").text(), "directory stays")
+    assert_eq(@fs.read_file(path).text(), text)
+    @fs.write_file(path, "previous output", create_mode=CreateOrTruncate)
+    let (resource_error, error_out, _) = cli(
+      binary,
+      selected + ["--tokenizer-path=" + cwd + "/missing"],
+      cwd,
+    )
+    assert_eq(resource_error, 1)
+    assert_eq(error_out, "")
+    assert_eq(@fs.read_file(path).text(), "previous output")
+    @fs.write_file(path, text, create_mode=CreateOrTruncate)
+    if style == "json" {
+      json_text = text
+      guard @json.parse(text)
+        is {
+          "notice": String(notice),
+          "directoryStructure": String(tree),
+          "files": Object(files),
+          ..
+        } else {
+        fail("Expected parseable JSON repository")
+      }
+      assert_true(notice.contains("untrusted data"))
+      assert_true(tree.contains("src/"))
+      assert_eq(files.length(), entries.length())
+      for (name, body) in entries {
+        assert_eq(files.get(name), Some(Json(body)))
+      }
+      let (parsable, unchanged, _) = cli(
+        binary,
+        selected + ["--stdout", "--quiet", "--parsable-style"],
+        cwd,
+      )
+      assert_eq(parsable, 0)
+      assert_eq(unchanged, text)
+      if args.contains("--json-oracle") {
+        let (parsed, _, parse_error) = cli(
+          "jq",
+          ["--exit-status", ".files | type == \"object\"", path],
+          cwd,
+        )
+        assert_eq(parsed, 0)
+        assert_eq(parse_error, "")
+        for (name, body) in entries {
+          let (restored, raw, err) = cli(
+            "jq",
+            [
+              "--exit-status", "--join-output", "--arg", "path", name, ".files[$path]",
+              path,
+            ],
+            cwd,
+          )
+          assert_eq(restored, 0)
+          assert_eq(raw, body)
+          assert_eq(err, "")
+        }
+        println("PASS: independent jq parser restores every JSON path and body")
+      }
+    }
+    if style == "plain" {
+      plain_text = text
+      for (name, body) in entries {
+        assert_true(
+          text.contains(
+            "File: " + Json(name).stringify() + "\n================\n" + body,
+          ),
+        )
+      }
+    }
+    let self_root = temp + "/self-" + style
+    @fs.mkdir(self_root)
+    @fs.write_file(self_root + "/a.txt", "hello", create_mode=CreateNew)
+    let self_args = [
+      self_root,
+      "--tokenizer-path",
+      vocabulary,
+      "--style=" + style,
+      "--no-default-patterns",
+      "--quiet",
+    ]
+    let self_path = self_root + "/repomix-output." + suffix
+    let (first, _, _) = cli(binary, self_args, self_root)
+    assert_eq(first, 0)
+    let original = @fs.read_file(self_path).text()
+    let (second, _, _) = cli(binary, self_args, self_root)
+    assert_eq(second, 0)
+    assert_eq(@fs.read_file(self_path).text(), original)
+    println(
+      "PASS: " +
+      style +
+      " default name, stdout, bytes, budget boundary, failures and self-output exclusion (" +
+      tokens.to_string() +
+      " full-document tokens)",
+    )
+  }
+  let config = temp + "/formats.json"
+  @fs.write_file(
+    config,
+    "{\"output\":{\"style\":\"json\"}}",
+    create_mode=CreateNew,
+  )
+  let (configured, json, _) = cli(
+    binary,
+    common + ["--config", config, "--stdout", "--quiet"],
+    temp,
+  )
+  assert_eq(configured, 0)
+  assert_eq(json, json_text)
+  let (overridden, plain, _) = cli(
+    binary,
+    common + ["--config", config, "--style=plain", "--stdout", "--quiet"],
+    temp,
+  )
+  assert_eq(overridden, 0)
+  assert_eq(plain, plain_text)
+  println("PASS: JSON configuration and explicit CLI style precedence")
+}

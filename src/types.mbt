@@ -69,7 +69,11 @@ pub struct PackResult {
 }
 
 ///|
-/// Default validated options for one directory, with XML and scanning enabled.
-pub fn options(directory : String) -> Options raise {
-  @config.resolve(@config.parse_cli([directory]), None)
+/// Validated options for one directory, with the selected format and scanning enabled.
+///
+/// Use `options("/absolute/project", style=Json)` to select JSON and its default filename.
+pub fn options(directory : String, style~ : Style = Xml) -> Options raise {
+  let cli = @config.parse_cli([directory])
+  cli.patch.style = Some(style)
+  @config.resolve(cli, None)
 }

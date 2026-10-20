@@ -5,7 +5,7 @@ let help : String =
   #|
   #|  -o, --output PATH              Output file (relative to working directory)
   #|      --stdout                   Write only the document to stdout
-  #|      --style xml|markdown       Document format (default: xml)
+  #|      --style FORMAT             xml|markdown|json|plain (default: xml)
   #|      --include GLOBS            Comma-separated positive filters
   #|  -i, --ignore GLOBS             Comma-separated exclusion filters
   #|      --no-gitignore             Disable .gitignore and Git exclude rules
@@ -25,7 +25,7 @@ let help : String =
   #|  -v, --version                  Show version without loading resources
   #|
   #|Default config: <directory>/repomix.config.json.
-  #|Default output: repomix-output.xml or repomix-output.md.
+  #|Default output: repomix-output.xml, .md, .json or .txt for the chosen format.
   #|Token reports use stderr and are hidden by --quiet.
   #|Place directory before --token-count-tree, or separate it with --.
   #|Directory token sums are not the final document count used for budgets.

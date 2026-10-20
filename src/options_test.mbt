@@ -1,0 +1,16 @@
+///|
+test "library options select formats and their matching output filenames" {
+  assert_eq(@moon_repomix.options(".").style, @moon_repomix.Style::Xml)
+  for
+    (style, suffix) in [
+      (@moon_repomix.Style::Xml, "xml"),
+      (@moon_repomix.Style::Markdown, "md"),
+      (@moon_repomix.Style::Json, "json"),
+      (@moon_repomix.Style::Plain, "txt"),
+    ] {
+    let options = @moon_repomix.options(".", style~)
+    assert_eq(options.style, style)
+    assert_eq(options.output, "repomix-output." + suffix)
+    assert_true(options.security_check)
+  }
+}

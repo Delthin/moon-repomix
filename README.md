@@ -1,6 +1,6 @@
 # moon-repomix
 
-把本地代码目录整理成一份 XML 或 Markdown，方便交给 AI 阅读或留作代码上下文。使用 MoonBit native 实现，提供 CLI 和库 API，运行时不需要 Node.js。代码处理在本地完成，分词资源随安装包提供。
+把本地代码目录整理成一份 XML、Markdown、JSON 或纯文本，方便交给 AI 阅读或留作代码上下文。使用 MoonBit native 实现，提供 CLI 和库 API，运行时不需要 Node.js。代码处理在本地完成，分词资源随安装包提供。
 
 ## 最快上手
 
@@ -55,13 +55,15 @@ moon run --target native scripts/install.mbtx "$env:LOCALAPPDATA\moon-repomix"
 
 将前缀下的 `bin` 加入 `PATH`。安装版从程序所在位置寻找 `../share/moon-repomix/`，不依赖当前工作目录。移动安装目录时，请一起保留 `bin`、`share` 及其相对位置；仅复制可执行文件不构成完整安装。
 
-通过 `moon run` 执行 CLI 时须显式指定词表。[三平台 CI](https://github.com/Delthin/moon-repomix/actions/workflows/ci.yml) 已验证 macOS arm64、Linux x64 和 Windows x64 的检查、构建、功能测试、安装及归档。各平台构建须使用相应的 native C 工具链。
+通过 `moon run` 执行 CLI 时须显式指定词表。[三平台 CI](https://github.com/Delthin/moon-repomix/actions/workflows/ci.yml) 覆盖 macOS arm64、Linux x64 和 Windows x64 的检查、构建、功能测试、安装及归档。各平台构建须使用相应的 native C 工具链。
 
 ## CLI 用法
 
 ```sh
 moon-repomix ./project
 moon-repomix ./project --style markdown -o context.md
+moon-repomix ./project --style json -o context.json
+moon-repomix ./project --style plain --stdout
 moon-repomix ./project --include 'src/**,README.md' --ignore '**/*_test.mbt'
 moon-repomix ./project --stdout > context.xml
 moon-repomix ./project --token-budget 100000
@@ -69,7 +71,7 @@ moon-repomix ./project --token-count-tree 100 --top-files-len 10
 moon-repomix ./project --init
 ```
 
-默认输出 `repomix-output.xml`；Markdown 默认输出 `repomix-output.md`。`-o` 会替换已有同名输出，使用时请选好路径。相对输出路径和显式配置路径以当前工作目录为准；自动发现的 `repomix.config.json` 位于所选目录内。`--init` 创建配置，不覆盖已有配置。全部选项见 `--help` 和 [配置文档](docs/configuration.md)。
+四种格式的默认输出分别为 `repomix-output.xml`、`repomix-output.md`、`repomix-output.json`、`repomix-output.txt`，默认格式为 XML。JSON 的 `files` 是相对路径到完整正文的对象映射；plain 使用章节和文件分隔线，适合直接阅读或粘贴。`-o` 会替换已有同名输出，使用时请选好路径。相对输出路径和显式配置路径以当前工作目录为准；自动发现的 `repomix.config.json` 位于所选目录内。`--init` 创建配置，不覆盖已有配置。全部选项见 `--help` 和 [配置文档](docs/configuration.md)。
 
 本仓库的 `repomix.config.json` 默认忽略 `assets/**`，让自打包文档聚焦代码、脚本和说明，避免词表与黄金数据占用大量 token。需要打包这些资源时，使用 `--config` 指向内容为 `{}` 的配置文件，再用 `--include` 选择目标文件。
 
@@ -102,14 +104,14 @@ import {
 在 `async fn` 中先加载资源，再打包：
 
 ```moonbit
-let options = @repomix.options("/absolute/project")
+let options = @repomix.options("/absolute/project", style=@repomix.Style::Json)
 let runtime = @repomix.Runtime::load("/absolute/share/moon-repomix/o200k_base.tiktoken")
 let result = @repomix.pack(options, runtime)
 // result.text 是完整文档；result.tokens 是完整文档的 token 数。
 // result.files / skipped / findings / security / budget 提供统计及状态。
 ```
 
-`pack` 返回结果，不写文件；由调用者决定如何处理输出和预算超限。词表同目录还须有 `tokenizer-unicode-16.0.0.txt`，两份资源均校验 SHA-256。一个 `Runtime` 可复用于多次顺序打包。接口见 [`src/pkg.generated.mbti`](src/pkg.generated.mbti)。
+`options` 默认使用 XML；可通过 `style` 选择 `Xml`、`Markdown`、`Json`、`Plain`，同时选择对应的默认文件名。`pack` 返回结果，不写文件；由调用者决定如何处理输出和预算超限。词表同目录还须有 `tokenizer-unicode-16.0.0.txt`，两份资源均校验 SHA-256。一个 `Runtime` 可复用于多次顺序打包。接口见 [`src/pkg.generated.mbti`](src/pkg.generated.mbti)。
 
 ## 开发与打包
 
@@ -131,12 +133,15 @@ moon run --target native scripts/package.mbtx dist macos-arm64
 moon run --target native scripts/scenarios.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
 moon run --target native scripts/functional.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
 moon run --target native scripts/token-reports-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
+moon run --target native scripts/output-formats-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
 moon run --target native scripts/self-pack-test.mbtx ../moon-repomix-self-check
 ```
 
+格式功能测试覆盖四种格式的文件输出、stdout、预算边界和失败保留；安装了 `jq` 时可追加 `--json-oracle`，独立解析 JSON 并还原每个文件的正文。
+
 自打包检查会新建输出目录，保留 XML、Markdown 和日志；已有目录会报错。安装了 `xmllint` 时可追加 `--xml-oracle`，独立核对黄金数据从 XML 还原后的正文。
 
-测试覆盖编码和大小边界、配置合并、密钥排除、输出格式、预算、错误保护及路径处理；Linux CI 还用独立 XML 解析器核对输出，并验证 `moon package` 生成的源码包解压后能运行 demo。源码包位于 `_build/publish/Delthin-moon_repomix-0.1.0.zip`。
+测试覆盖编码和大小边界、配置合并、密钥排除、输出格式、预算、错误保护及路径处理；Linux CI 包含独立 XML/JSON 解析与正文还原检查，并验证 `moon package` 生成的源码包解压后能运行 demo。源码包位于 `_build/publish/Delthin-moon_repomix-0.1.0.zip`。
 
 ## 来源与许可
 

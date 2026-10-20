@@ -9,7 +9,7 @@ import {
 }
 
 // Values
-pub fn options(String) -> @config.Options raise
+pub fn options(String, style? : @config.Style) -> @config.Options raise
 
 pub async fn pack(@config.Options, Runtime) -> PackResult
 

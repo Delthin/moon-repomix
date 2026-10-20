@@ -11,7 +11,7 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `[directory]` | 单个输入目录，默认 `.` |
 | `-o, --output PATH` | 输出文件路径 |
 | `--stdout` | 正文写入 stdout，诊断写入 stderr |
-| `--style xml\|markdown` | 默认 XML；默认文件名分别为 `repomix-output.xml`、`repomix-output.md` |
+| `--style xml\|markdown\|json\|plain` | 默认 XML；默认文件名为 `repomix-output` 加对应的 `.xml`、`.md`、`.json`、`.txt` 扩展名 |
 | `--include GLOBS` | 追加逗号分隔的正向选择模式 |
 | `-i, --ignore GLOBS` | 追加逗号分隔的自定义排除模式 |
 | `--no-gitignore` | 关闭 Git 规则 |
@@ -25,7 +25,7 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--tokenizer-path PATH` | 显式指定词表文件；加载时校验资源 |
 | `-c, --config PATH` | 显式选择 JSON 配置 |
 | `--init` | 创建配置文件；已有文件不覆盖 |
-| `--parsable-style` | 兼容参数；两种格式始终按可解析规则生成 |
+| `--parsable-style` | 兼容参数，不改变输出；JSON 始终生成合法 JSON，XML 始终遵循 XML 1.0 字符和转义规则 |
 | `--quiet`, `--verbose` | 互斥的诊断模式 |
 | `-h, --help` | 显示帮助 |
 | `-v, --version` | 显示版本；`-v` 不是 verbose |
@@ -60,7 +60,7 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 }
 ```
 
-以上字段均可省略。所有层级都拒绝未知字段；根节点必须为对象，字段类型须与示例一致，`null` 不等于省略。列表元素必须是字符串。预算和单文件字节上限须为 `1..2147483647` 的整数；CLI 预算只接受十进制数字。路径必须非空且不含 NUL。默认输出文件名在样式合并完成后选择。
+以上字段均可省略。所有层级都拒绝未知字段；根节点必须为对象，字段类型须与示例一致，`null` 不等于省略。列表元素必须是字符串。预算和单文件字节上限须为 `1..2147483647` 的整数；CLI 预算只接受十进制数字。路径必须非空且不含 NUL。默认输出文件名在样式合并完成后选择；显式 `output.filePath` 或 CLI `--output` 保持用户指定名称。格式结构见 [文件读取与输出](output.md)。
 
 `output.topFilesLength` 为 `0..2147483647` 的整数，默认 5。`output.tokenCountTree` 默认为 `false`；`true` 开启完整树，非负整数或只含十进制数字的字符串表示阈值。阈值范围为 `0..2147483647`，0 也会显示空文件。CLI 的排名数量和阈值均只接受十进制数字。
 
@@ -88,7 +88,7 @@ pub fn Patch::empty() -> Patch
 | `directory` | `String`，`.` |
 | `output` | `String`，由样式决定 |
 | `stdout` | `Bool`，false |
-| `style` | `Style`，`Xml`；另一值为 `Markdown` |
+| `style` | `Style`，默认 `Xml`；可选 `Markdown`、`Json`、`Plain` |
 | `include_patterns`, `ignore` | `Array[String]`，空 |
 | `use_gitignore`, `use_dot_ignore`, `use_default_patterns` | `Bool`，true |
 | `security_check` | `Bool`，true |

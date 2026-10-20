@@ -92,6 +92,8 @@ pub fn Patch::to_repr(Self) -> @debug.Repr
 pub(all) enum Style {
   Xml
   Markdown
+  Json
+  Plain
 } derive(Eq, @debug.Debug)
 pub fn Style::equal(Self, Self) -> Bool
 pub fn Style::not_equal(Self, Self) -> Bool

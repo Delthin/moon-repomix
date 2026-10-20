@@ -89,6 +89,8 @@ pub async fn pack(options : Options, runtime : Runtime) -> PackResult {
   let text = match options.style {
     Xml => @output.xml(document)
     Markdown => @output.markdown(document)
+    Json => @output.json(document)
+    Plain => @output.plain(document)
   }
   @async.sleep(0)
   let tokens = runtime.encoder.count(text)

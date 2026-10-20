@@ -46,6 +46,39 @@ test "defaults and presence-aware configuration precedence" {
 }
 
 ///|
+test "all output styles resolve from CLI and JSON with matching default names" {
+  for
+    (name, style, suffix) in [
+      ("xml", @config.Style::Xml, "xml"),
+      ("markdown", @config.Style::Markdown, "md"),
+      ("json", @config.Style::Json, "json"),
+      ("plain", @config.Style::Plain, "txt"),
+    ] {
+    let cli = @config.resolve(@config.parse_cli(["--style=" + name]), None)
+    assert_eq(cli.style, style)
+    assert_eq(cli.output, "repomix-output." + suffix)
+    let file = @config.parse_json("{\"output\":{\"style\":\"" + name + "\"}}")
+    let configured = @config.resolve(@config.parse_cli([]), Some(file))
+    assert_eq(configured.style, style)
+    assert_eq(configured.output, cli.output)
+    let explicit = @config.resolve(
+      @config.parse_cli(["--style=" + name, "-o", "custom.data"]),
+      Some(file),
+    )
+    assert_eq(explicit.output, "custom.data")
+  }
+  let file = @config.parse_json(
+    "{\"output\":{\"style\":\"json\",\"filePath\":\"configured.data\"}}",
+  )
+  let overridden = @config.resolve(
+    @config.parse_cli(["--style=plain"]),
+    Some(file),
+  )
+  assert_eq(overridden.style, @config.Style::Plain)
+  assert_eq(overridden.output, "configured.data")
+}
+
+///|
 test "CLI surface and action queries are pure" {
   let cli = @config.parse_cli([
     "--style=markdown", "--stdout", "--no-gitignore", "--no-dot-ignore", "--no-default-patterns",
@@ -99,7 +132,7 @@ test "strict rejection of invalid configuration and CLI" {
         #|{"output":{"filePath":null}}
       ),
       (
-        #|{"output":{"style":"plain"}}
+        #|{"output":{"style":"html"}}
       ),
       (
         #|{"output":{"tokenBudget":0}}
@@ -147,7 +180,7 @@ test "strict rejection of invalid configuration and CLI" {
       ["--quiet", "--verbose"],
       ["--stdout", "-o", "out.xml"],
       ["--output"],
-      ["--style=json"],
+      ["--style=html"],
       ["one", "two"],
       ["--token-budget=0"],
       ["--token-budget=-2"],

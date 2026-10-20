@@ -42,17 +42,23 @@ jobs:
       - name: CLI functional tests
         if: runner.os != 'Linux'
         run: moon run --target native scripts/functional.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
-      - name: Independent XML parser
+      - name: Independent XML and JSON parsers
         if: runner.os == 'Linux'
         run: sudo apt-get update
       - if: runner.os == 'Linux'
-        run: sudo apt-get install -y libxml2-utils
+        run: sudo apt-get install -y libxml2-utils jq
       - if: runner.os == 'Linux'
         run: moon run --target native scripts/functional.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken --xml-oracle
       - name: Common input and configuration scenarios
         run: moon run --target native scripts/scenarios.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
       - name: Token report functional tests
         run: moon run --target native scripts/token-reports-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
+      - name: Output format functional tests
+        if: runner.os != 'Linux'
+        run: moon run --target native scripts/output-formats-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
+      - name: Output formats with independent JSON readback
+        if: runner.os == 'Linux'
+        run: moon run --target native scripts/output-formats-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken --json-oracle
       - name: Reproducible demo
         run: moon run --target native scripts/demo.mbtx
       - name: Real repository self-pack

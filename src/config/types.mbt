@@ -2,6 +2,8 @@
 pub(all) enum Style {
   Xml
   Markdown
+  Json
+  Plain
 } derive(Eq, Debug)
 
 ///|
@@ -142,6 +144,8 @@ fn parse_style(value : String) -> Style raise ConfigError {
   match value {
     "xml" => Xml
     "markdown" => Markdown
+    "json" => Json
+    "plain" => Plain
     _ => raise InvalidValue("output.style")
   }
 }
@@ -246,6 +250,8 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
         match style {
           Xml => "repomix-output.xml"
           Markdown => "repomix-output.md"
+          Json => "repomix-output.json"
+          Plain => "repomix-output.txt"
         },
       ),
     ),
