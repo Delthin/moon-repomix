@@ -6,7 +6,7 @@
 moon-repomix ./project --compress --style json -o structure.json
 ```
 
-`--compress` 在原始文件通过安全扫描后提取语法骨架。支持 `.js/.jsx/.mjs/.cjs`、`.ts/.mts/.cts/.tsx`、`.py/.pyi`，提取导入、类型、类及函数签名和从属结构，省略实现正文；解析器版本见 [第三方来源](../LICENSES/tree-sitter-sources.md)。运行时使用编译进程序的原生解析器。
+`--compress` 在原始文件通过安全扫描后提取语法骨架。支持 `.js/.jsx/.mjs/.cjs`、`.ts/.mts/.cts/.tsx`、`.py/.pyi`，提取导入、类型、类及函数签名和从属结构，省略实现正文；解析器版本见 [第三方来源](../LICENSES/tree-sitter-sources.md)。运行时使用编译进程序的原生解析器。仅含实现的分支和循环整体省略，围住嵌套声明的控制结构保留；较短的初始化片段保留原文，避免替换成更长的省略标记。
 
 每份压缩记录包含 `path`、`language`、`applied`、`reason`、`ranges`、`originalTokens` 和 `outputTokens`。`ranges` 是 `[startLine,endLine]` 数组，从 1 开始、包含两端，回指原文件而非输出行号。相邻或重叠的行区间合并，区间表示保留片段覆盖到的行，不表示整行均被保留；压缩包 API 仍提供逐片段范围。不支持、解析失败或正文 token 数没有减少时保留原文，并记录原因。骨架适合先了解结构；需要实现细节时可用 `--include` 选定路径，再关闭压缩。
 

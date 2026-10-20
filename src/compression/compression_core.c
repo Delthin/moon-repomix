@@ -86,6 +86,31 @@ static int structural(TSNode node) {
 static void walk(Selection *, TSNode, unsigned, int);
 static void statements(Selection *, TSNode, unsigned, int);
 
+/* Keep enclosing conditions only when they contain an outline declaration.
+ * Comments are restored separately, including their physical line breaks. */
+static int contains_outline(Selection *s, TSNode node, unsigned depth) {
+  if (s->plan.status || ts_node_is_null(node)) return 0;
+  if (depth > 512) { s->plan.status = 3; return 0; }
+  if (callable(node) || classlike(node) || type_declaration(node) || importlike(node)) return 1;
+  if (s->python && is(node, "expression_statement") &&
+      is(ts_node_named_child(node, 0), "string")) return 1;
+  uint32_t n = ts_node_named_child_count(node);
+  for (uint32_t i = 0; i < n; ++i)
+    if (contains_outline(s, ts_node_named_child(node, i), depth + 1)) return 1;
+  return 0;
+}
+
+static int implementation_statement(TSNode node) {
+  if (is(node, "lexical_declaration") || is(node, "variable_declaration")) {
+    /* A loop header is not its single-statement body. Keep its binding. */
+    TSNode parent = ts_node_parent(node);
+    return !is(parent, "for_statement") && !is(parent, "for_in_statement");
+  }
+  const char *type = ts_node_type(node);
+  size_t length = strlen(type);
+  return length >= 10 && strcmp(type + length - 10, "_statement") == 0;
+}
+
 static void initializer(Selection *s, TSNode node, unsigned depth) {
   if (s->plan.status || ts_node_is_null(node)) return;
   if (depth > 512) { s->plan.status = 3; return; }
@@ -95,7 +120,10 @@ static void initializer(Selection *s, TSNode node, unsigned depth) {
     uint32_t n = ts_node_named_child_count(node);
     if (n == 1) initializer(s, ts_node_named_child(node, 0), depth + 1);
     else select_node(s, node, 0);
-  } else {
+  } else if (ts_node_end_byte(node) - ts_node_start_byte(node) >
+             (uint32_t)(s->python ? 3 : 9)) {
+    /* Replacing a short scalar/reference with a longer omission marker loses
+     * information and increases size. Keep the original fragment instead. */
     select_node(s, node, 0);
   }
 }
@@ -118,6 +146,11 @@ static void walk(Selection *s, TSNode node, unsigned depth, int local) {
     return;
   }
   if (type_declaration(node) || importlike(node) || is(node, "comment")) return;
+  if (local && (structural(node) || implementation_statement(node)) &&
+      !contains_outline(s, node, depth + 1)) {
+    remove_statement(s, node);
+    return;
+  }
   if (is(node, "variable_declarator") || is(node, "public_field_definition") ||
       is(node, "field_definition") || is(node, "pair")) {
     TSNode value = field(node, "value");
@@ -204,7 +237,15 @@ static void statements(Selection *s, TSNode node, unsigned depth, int local) {
 static void comments(Selection *s, TSNode node, unsigned depth) {
   if (s->plan.status) return;
   if (depth > 512) { s->plan.status = 3; return; }
-  if (is(node, "comment")) { select_node(s, node, 1); return; }
+  if (is(node, "comment")) {
+    select_node(s, node, 1);
+    /* A removed statement may have owned the following newline. Without it,
+     * adjacent // comments become one line and swallow the next fragment. */
+    uint32_t end = ts_node_end_byte(node);
+    if (end < s->plan.length && s->source[end] == '\r') s->plan.keep[end++] = 1;
+    if (end < s->plan.length && s->source[end] == '\n') s->plan.keep[end] = 1;
+    return;
+  }
   uint32_t n = ts_node_named_child_count(node);
   for (uint32_t i = 0; i < n; ++i)
     comments(s, ts_node_named_child(node, i), depth + 1);

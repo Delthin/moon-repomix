@@ -37,8 +37,11 @@ kinds and fields select original source fragments; no regular-expression body
 stripping is involved. Imports, type declarations, class/function/method
 signatures, decorators, nested declarations (including direct arrow/lambda
 bindings), enclosing control-flow structure, comments, and Python docstrings are
-retained in source order. Implementations and data initializers are omitted.
-All AST comments are conservatively retained, not just a heuristic subset.
+retained in source order. Implementation-only branches and loops are omitted;
+conditions enclosing nested declarations remain. Data initializers are omitted
+when the removed fragment is longer than the omission marker; short values stay
+unchanged. All AST comments and their original line terminators are
+conservatively retained, not just a heuristic subset.
 Omissions use synthetic `/* … */` or Python `...` markers, with indentation for
 whole-line omissions. The result is context text, **not executable source**.
 

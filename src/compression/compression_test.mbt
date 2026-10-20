@@ -62,7 +62,39 @@ test "Python decorators, docstrings, imports, nested declarations and class meth
 
 ///|
 test "JS, JSX, TSX and inline implementations use AST byte spans" {
+  let control_source =
+    #|const choices = { code: 'js', yes: true, count: 1 };
+    #|export function outer(plain, keep, items) {
+    #|  if (plain) work('long implementation without a block');
+    #|  if (plain) { work('long implementation inside a block'); }
+    #|  if (keep) {
+    #|    function helper(value) { return value.repeat(100) + 'long implementation'; }
+    #|  }
+    #|  for (let i = 0; i < items.length; i++) {
+    #|    function step(value) { return value.repeat(100) + 'long implementation'; }
+    #|  }
+    #|  work('long implementation with first comment'); // first note
+    #|  work('long implementation with second comment'); // second note
+    #|}
+    #|
+  let python_control =
+    #|def outer(plain, keep):
+    #|    if plain: work('long implementation without a block')
+    #|    if keep:
+    #|        def normalize(value: str) -> str:
+    #|            return value.strip().lower() + 'long implementation'
+    #|
   let fixtures = [
+    (
+      "outline-control.js",
+      control_source.replace_all(old="\n", new="\r\n"),
+      "function helper(value)",
+      "javascript",
+    ),
+    (
+      "outline-control.py", python_control, "def normalize(value: str) -> str:",
+      "python",
+    ),
     (
       "a.mjs", "export class Greeter { greet(name) { return name.repeat(100) + 'long implementation'; } }",
       "greet(name)", "javascript",
@@ -99,6 +131,22 @@ test "JS, JSX, TSX and inline implementations use AST byte spans" {
     assert_false(out.text.contains("long caller details"))
     assert_false(out.text.contains("long implementation"))
     assert_false(out.text.contains("long initializer details"))
+    if path == "outline-control.js" {
+      assert_false(out.text.contains("work("))
+      assert_false(out.text.contains("if (plain)"))
+      assert_true(out.text.contains("if (keep)"))
+      assert_true(out.text.contains("function step(value)"))
+      assert_true(out.text.contains("let i = 0; i < items.length; i++"))
+      assert_true(out.text.contains("code: 'js'"))
+      assert_true(out.text.contains("yes: true"))
+      assert_true(out.text.contains("count: 1"))
+      assert_true(out.text.contains("// first note\r\n"))
+      assert_true(out.text.contains("// second note\r\n"))
+    } else if path == "outline-control.py" {
+      assert_false(out.text.contains("work("))
+      assert_false(out.text.contains("if plain:"))
+      assert_true(out.text.contains("if keep:"))
+    }
     assert_false(out.ranges.is_empty())
     for range in out.ranges {
       assert_true(range.start_line >= 1)
