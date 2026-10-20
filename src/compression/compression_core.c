@@ -125,7 +125,13 @@ static void walk(Selection *s, TSNode node, unsigned depth, int local) {
     return;
   }
   if (is(node, "assignment") || is(node, "augmented_assignment")) {
-    initializer(s, field(node, "right"), depth + 1);
+    TSNode right = field(node, "right");
+    /* Conventional Python type aliases are ordinary name assignments. Preserve
+     * non-local bindings, as the upstream Python type-alias query does; inline
+     * lambdas still need their implementation expression removed. */
+    if (s->python && !local && is(node, "assignment") &&
+        is(field(node, "left"), "identifier") && !callable(right)) return;
+    initializer(s, right, depth + 1);
     return;
   }
   if (is(node, "class_static_block")) {

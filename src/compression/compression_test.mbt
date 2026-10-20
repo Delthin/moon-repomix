@@ -29,7 +29,9 @@ test "TypeScript outline retains source fragments, signatures and original lines
 ///|
 test "Python decorators, docstrings, imports, nested declarations and class methods" {
   let source =
-    #|from typing import Optional
+    #|from typing import Optional, Union
+    #|UserId = int
+    #|Result = Union[Success, Error]
     #|
     #|@decorate
     #|class Service(Base):
@@ -47,14 +49,15 @@ test "Python decorators, docstrings, imports, nested declarations and class meth
   assert_eq(out.language, Some("python"))
   for
     signature in [
-      "from typing import Optional", "@decorate", "class Service(Base):", "def fetch(self, key: str) -> Optional[str]:",
+      "from typing import Optional", "UserId = int", "Result = Union[Success, Error]",
+      "@decorate", "class Service(Base):", "def fetch(self, key: str) -> Optional[str]:",
       "def normalize(value: str) -> str:", "\"\"\"Look up a key.\"\"\"", "# important: caller owns the result",
     ] {
     assert_true(out.text.contains(signature))
   }
   assert_false(out.text.contains("value.strip()"))
   assert_false(out.text.contains("self.storage.fetch"))
-  assert_eq(out.ranges, [{ start_line: 1, end_line: 9, }])
+  assert_eq(out.ranges, [{ start_line: 1, end_line: 11, }])
 }
 
 ///|
