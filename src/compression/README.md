@@ -38,18 +38,25 @@ stripping is involved. Imports, type declarations, class/function/method
 signatures, decorators, nested declarations (including direct arrow/lambda
 bindings), enclosing control-flow structure, comments, and Python docstrings are
 retained in source order. Implementation-only branches and loops are omitted;
-conditions enclosing nested declarations remain. Data initializers are omitted
+conditions enclosing nested declarations remain. CommonJS static `require`
+bindings, export aliases, and member APIs installed inside callbacks are retained.
+Private scalar tables with an explicit wide `Record` annotation can fold as one
+initializer; exports, literal/inferred types, aliases, type queries, methods,
+computed keys and spreads protect their structure. Other initializers are omitted
 when the removed fragment is longer than the omission marker; short values stay
-unchanged. All AST comments and their original line terminators are
-conservatively retained, not just a heuristic subset.
+unchanged. Comments and their line terminators remain, except category comments
+inside a table whose values were folded.
 Omissions use synthetic `/* … */` or Python `...` markers, with indentation for
-whole-line omissions. The result is context text, **not executable source**.
+whole-line omissions. Adjacent deleted regions merge; presentation-only blank
+lines between AST children compact, while literal and comment interiors stay
+unchanged. The result is context text, **not executable source**.
 
 `ranges` has one entry per retained contiguous original fragment, in the same
 order as the output. Bounds are **1-based inclusive original lines**, not output
 lines. Inline fragments can share line numbers; a range need not contain the
 entire boundary lines. Synthetic omission markers have no range. CRLF and UTF-8
-source fragments are copied unchanged; synthetic marker line breaks use LF.
+source fragments are copied unchanged; synthetic marker line breaks follow the
+removed fragment's CRLF or LF terminator.
 
 `applied = true` requires retained original content and a strictly smaller UTF-8
 result. Otherwise `text` is the exact original input, `ranges = []`, and `reason`
@@ -86,10 +93,10 @@ moon fmt src/compression
 moon info src/compression --target native
 ```
 
-Four aggregate functional tests cover all four grammars, signature and Unicode
-comment preservation, nested bindings, exact original-line ranges, genuinely
-smaller output, unsupported paths, invalid syntax, and unchanged non-smaller
-fallbacks. A separate development ASan/UBSan harness exercised the actual C FFI
+Seven grouped tests cover all four grammars, signature and Unicode comment
+preservation, nested bindings, exact original-line ranges, genuinely smaller
+output, unsupported paths, invalid syntax, unchanged non-smaller fallbacks,
+private tables versus public types, CommonJS APIs, and whitespace/literal boundaries. A separate development ASan/UBSan harness exercised the actual C FFI
 adapter and grammars, repeated cleanup, parse errors, timeout and size-limit
 paths using a byte-array allocator shim with `moonbit.h`'s layout. This checks
 C-side lifetimes rather than MoonBit GC instrumentation.

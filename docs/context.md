@@ -6,7 +6,9 @@
 moon-repomix ./project --compress --style json -o structure.json
 ```
 
-`--compress` 在原始文件通过安全扫描后提取语法骨架。支持 `.js/.jsx/.mjs/.cjs`、`.ts/.mts/.cts/.tsx`、`.py/.pyi`，提取导入、类型、类及函数签名和从属结构，省略实现正文；解析器版本见 [第三方来源](../LICENSES/tree-sitter-sources.md)。运行时使用编译进程序的原生解析器。仅含实现的分支和循环整体省略，围住嵌套声明的控制结构保留；较短的初始化片段保留原文，避免替换成更长的省略标记。
+`--compress` 在原始文件通过安全扫描后提取语法骨架。支持 `.js/.jsx/.mjs/.cjs`、`.ts/.mts/.cts/.tsx`、`.py/.pyi`，提取导入、类型、类及函数签名和从属结构，省略实现正文；解析器版本见 [第三方来源](../LICENSES/tree-sitter-sources.md)。运行时使用编译进程序的原生解析器。仅含实现的分支和循环整体省略，围住嵌套声明或成员 API 的控制结构保留；CommonJS 的静态 `require`、导出别名及回调中安装的方法也保留。私有且显式标为宽泛 `Record` 类型的标量表可整表折叠，导出、别名、类型查询、方法、计算键和 spread 会保护相应结构。较短的初始化片段保留原文，避免替换成更长的省略标记。
+
+相邻删除区合并，AST 容器子节点之间的展示空白压缩；字面量、模板字符串和保留注释的内部换行保持原样。整表折叠时，其内部分类注释随表省略。
 
 每份压缩记录包含 `path`、`language`、`applied`、`reason`、`ranges`、`originalTokens` 和 `outputTokens`。`ranges` 是 `[startLine,endLine]` 数组，从 1 开始、包含两端，回指原文件而非输出行号。相邻或重叠的行区间合并，区间表示保留片段覆盖到的行，不表示整行均被保留；压缩包 API 仍提供逐片段范围。不支持、解析失败或正文 token 数没有减少时保留原文，并记录原因。骨架适合先了解结构；需要实现细节时可用 `--include` 选定路径，再关闭压缩。
 
