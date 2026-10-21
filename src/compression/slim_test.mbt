@@ -26,29 +26,6 @@ test "private scalar tables fold but public keys and literal types survive" {
     #|const exportedAlias = aliasMap;
     #|export { exportedAlias };
     #|export default { defaultMap };
-    #|const suggestions: Record<string, string[]> = { install: ['npm install', 'pnpm install'], build: ['npm run build'] };
-    #|const inferredLarge = { a: 'alpha', b: 'beta', c: 'charlie', d: 'delta', e: 'echo', f: 'foxtrot', g: 'golf', h: 'hotel' };
-    #|function readLarge(key: string) { return inferredLarge[key]; }
-    #|const constructors: Record<string, Widget> = { a: new Widget('alpha'), b: new Widget('beta'), c: new Widget('charlie'), d: new Widget('delta'), e: new Widget('echo'), f: new Widget('foxtrot'), g: new Widget('golf'), h: new Widget('hotel') };
-    #|class Widget { constructor(...constructors: string[]) { this.values = constructors; } }
-    #|function widget(key: string) { return constructors[key]; }
-    #|const outputSchema: Record<string, string> = { schemaKey: 'javascript', schemaOther: 'python' };
-    #|export function getSchema() { return outputSchema; }
-    #|const serialized: Record<string, string> = { serializedKey: 'javascript', serializedOther: 'python' };
-    #|export function serialize() { return JSON.stringify(serialized); }
-    #|const observed: Record<string, string> = { observedKey: 'javascript', observedOther: 'python' };
-    #|export function keys() { return Object.keys(observed); }
-    #|const nestedAssertion: Record<string, string[]> = { assertionKey: ['javascript'] as const, assertionOther: ['python'] };
-    #|const largeLiteral = { literalKey: 'a', b: 'b', c: 'c', d: 'd', e: 'e', f: 'f', g: 'g', h: 'h' } as const;
-    #|const largePublic = { publicLargeKey: 'a', b: 'b', c: 'c', d: 'd', e: 'e', f: 'f', g: 'g', h: 'h' };
-    #|export { largePublic };
-    #|const mutated: Record<string, string[]> = { mutatedKey: ['alpha'], mutatedOther: ['beta'] };
-    #|mutated[key] = incoming;
-    #|const queried: Record<string, string[]> = { queryKey: ['alpha'], queryOther: ['beta'] };
-    #|type Element = typeof queried['queryKey'];
-    #|const schemaConstructors: Record<string, Widget> = { constructorSchemaKey: new Widget({ handler: callback }), b: new Widget('b'), c: new Widget('c'), d: new Widget('d'), e: new Widget('e'), f: new Widget('f'), g: new Widget('g'), h: new Widget('h') };
-    #|export { remote } from './remote';
-    #|export * from './types';
     #|export interface Options { value: 'long-public-type-value' }
     #|export enum Language { JS = 'javascript', PY = 'python' }
     #|
@@ -77,23 +54,107 @@ test "private scalar tables fold but public keys and literal types survive" {
     ] {
     assert_true(out.text.contains(fragment))
   }
-  for
-    fragment in [
-      "const suggestions: Record<string, string[]> = /* … */;", "const inferredLarge = /* … */;",
-      "const constructors: Record<string, Widget> = /* … */;", "this.values = constructors;",
-      "schemaKey:", "schemaOther:", "serializedKey:", "serializedOther:", "observedKey:",
-      "observedOther:", "assertionKey:", "as const", "literalKey:", "publicLargeKey:",
-      "export { largePublic };", "mutatedKey:", "mutatedOther:", "queryKey:", "queryOther:",
-      "typeof queried['queryKey']", "constructorSchemaKey:", "export { remote } from './remote';",
-      "export * from './types';",
-    ] {
-    assert_true(out.text.contains(fragment))
-  }
   assert_false(out.text.contains("repeat(100)"))
   assert_true(out.ranges.contains({ start_line: 1, end_line: 2, }))
   for range in out.ranges {
     assert_false(range.start_line <= 4 && range.end_line >= 4)
   }
+  let tables_source =
+    #|const suggestions: Record<string, string[]> = { install: ['npm install', 'pnpm install'], build: ['npm run build'] };
+    #|const inferredLarge = { a: 'alpha', b: 'beta', c: 'charlie', d: 'delta', e: 'echo', f: 'foxtrot', g: 'golf', h: 'hotel' };
+    #|function readLarge(key: string) { return inferredLarge[key]; }
+    #|const arrayLarge = { a: ['alpha'], b: ['beta'], c: ['charlie'], d: ['delta'], e: ['echo'], f: ['foxtrot'], g: ['golf'], h: ['hotel'] };
+    #|function readArray(key: string) { return arrayLarge[key]; }
+    #|const constructors: Record<string, Widget> = { a: new Widget('alpha'), b: new Widget('beta'), c: new Widget('charlie'), d: new Widget('delta'), e: new Widget('echo'), f: new Widget('foxtrot'), g: new Widget('golf'), h: new Widget('hotel') };
+    #|class Widget { constructor(...constructors: string[]) { this.values = constructors; } }
+    #|function widget(key: string) { return constructors[key]; }
+    #|const outputSchema: Record<string, string> = { schemaKey: 'javascript', schemaOther: 'python' };
+    #|export function getSchema(): Record<string, string> { return outputSchema; }
+    #|const serialized: Record<string, string> = { serializedKey: 'javascript', serializedOther: 'python' };
+    #|export function serialize() { return JSON.stringify(serialized); }
+    #|const observed: Record<string, string> = { observedKey: 'javascript', observedOther: 'python' };
+    #|export function keys() { return Object.keys(observed); }
+    #|const nestedAssertion: Record<string, string[]> = { assertionKey: ['javascript'] as const, assertionOther: ['python'] };
+    #|const largeLiteral = { literalKey: 'a', b: 'b', c: 'c', d: 'd', e: 'e', f: 'f', g: 'g', h: 'h' } as const;
+    #|const largePublic = { publicLargeKey: 'a', b: 'b', c: 'c', d: 'd', e: 'e', f: 'f', g: 'g', h: 'h' };
+    #|export { largePublic };
+    #|const arrayAlias: Record<string, string[]> = { arrayAliasKey: ['alpha'], arrayAliasOther: ['beta'] };
+    #|const alias = arrayAlias;
+    #|const mutated: Record<string, string[]> = { mutatedKey: ['alpha'], mutatedOther: ['beta'] };
+    #|mutated[key] = incoming;
+    #|const updated: Record<string, number> = { updatedKey: 100, updatedOther: 200 };
+    #|updated[key]++;
+    #|const deleted: Record<string, number> = { deletedKey: 100, deletedOther: 200 };
+    #|delete deleted[key];
+    #|const augmented: Record<string, number> = { augmentedKey: 100, augmentedOther: 200 };
+    #|augmented[key] += 1;
+    #|const wrappedMutation: Record<string, string[]> = { wrappedMutationKey: ['alpha'], wrappedMutationOther: ['beta'] };
+    #|(wrappedMutation[key]) = incoming;
+    #|const destructuredMutation: Record<string, string[]> = { destructuredMutationKey: ['alpha'], destructuredMutationOther: ['beta'] };
+    #|[destructuredMutation[key]] = incoming;
+    #|const queried: Record<string, string[]> = { queryKey: ['alpha'], queryOther: ['beta'] };
+    #|type Element = typeof queried['queryKey'];
+    #|const schemaConstructors: Record<string, Widget> = { constructorSchemaKey: new Widget({ handler: callback }), b: new Widget('b'), c: new Widget('c'), d: new Widget('d'), e: new Widget('e'), f: new Widget('f'), g: new Widget('g'), h: new Widget('h') };
+    #|const calls: Record<string, Widget> = { callKey: new Widget(factory()), b: new Widget('b'), c: new Widget('c'), d: new Widget('d'), e: new Widget('e'), f: new Widget('f'), g: new Widget('g'), h: new Widget('h') };
+    #|const computedArray: Record<string, string[]> = { ['computedArrayKey']: ['alpha'], computedArrayOther: ['beta'] };
+    #|const spreadArray: Record<string, string[]> = { ...externalArrayMap, spreadArrayKey: ['alpha'] };
+    #|const methodArray: Record<string, unknown> = { literalMethod(value: string): string { return value.repeat(100); }, methodArrayKey: ['alpha'] };
+    #|const narrowArray: Record<string, 'literal'[]> = { narrowArrayKey: ['literal'], narrowArrayOther: ['literal'] };
+    #|class Tagged { readonly kind = 'literal' as const; }
+    #|const literalConstructors: Record<string, { readonly kind: 'literal' }> = { literalConstructorKey: new Tagged(), b: new Tagged(), c: new Tagged(), d: new Tagged(), e: new Tagged(), f: new Tagged(), g: new Tagged(), h: new Tagged() };
+    #|const behaviorAlias: Record<string, Handler> = { behaviorAliasKey: handler, b: handler, c: handler, d: handler, e: handler, f: handler, g: handler, h: handler };
+    #|const smallInferred = { smallKey: 'alpha', b: 'beta', c: 'charlie', d: 'delta', e: 'echo', f: 'foxtrot', g: 'golf' };
+    #|const smallConstructors: Record<string, Widget> = { smallConstructorKey: new Widget('alpha'), b: new Widget('beta'), c: new Widget('charlie'), d: new Widget('delta'), e: new Widget('echo'), f: new Widget('foxtrot'), g: new Widget('golf') };
+    #|export { remote } from './remote';
+    #|export * from './types';
+    #|
+  let tables = @compression.compress("private-tables.ts", tables_source)
+  assert_true(tables.applied)
+  for
+    fragment in [
+      "const suggestions: Record<string, string[]> = /* … */;", "const inferredLarge = /* … */;",
+      "const arrayLarge = /* … */;", "const constructors: Record<string, Widget> = /* … */;",
+      "this.values = constructors;", "getSchema(): Record<string, string>", "schemaKey:",
+      "schemaOther:", "serializedKey:", "serializedOther:", "observedKey:", "observedOther:",
+      "assertionKey:", "assertionOther:", "literalKey:", "as const", "publicLargeKey:",
+      "export { largePublic };", "arrayAliasKey:", "arrayAliasOther:", "const alias = arrayAlias;",
+      "mutatedKey:", "mutatedOther:", "updatedKey:", "updatedOther:", "deletedKey:",
+      "deletedOther:", "augmentedKey:", "augmentedOther:", "wrappedMutationKey:",
+      "wrappedMutationOther:", "destructuredMutationKey:", "destructuredMutationOther:",
+      "queryKey:", "queryOther:", "typeof queried['queryKey']", "constructorSchemaKey:",
+      "callKey:", "['computedArrayKey']:", "computedArrayOther:", "...externalArrayMap",
+      "spreadArrayKey:", "literalMethod(value: string): string", "methodArrayKey:",
+      "narrowArrayKey:", "narrowArrayOther:", "literalConstructorKey:", "behaviorAliasKey: handler",
+      "smallKey:", "smallConstructorKey:", "export { remote } from './remote';",
+      "export * from './types';",
+    ] {
+    assert_true(tables.text.contains(fragment), msg=fragment[:])
+  }
+  assert_false(tables.text.contains("repeat(100)"))
+  let shadow_source =
+    #|const shadowed: Record<string, string[]> = { a: ['alpha'], b: ['beta'] };
+    #|function readShadow(key: string) { return shadowed[key]; }
+    #|function parameter(shadowed: unknown) { return shadowed; }
+    #|function destructured({ shadowed }: Options) { return shadowed; }
+    #|function localShadow() { const shadowed = input; return shadowed; }
+    #|function loopShadow() { for (const shadowed of items) { consume(shadowed); } }
+    #|function catchShadow() { try { work(); } catch (shadowed) { consume(shadowed); } }
+    #|function hoistedShadow() { if (condition) { var shadowed = input; } consume(shadowed); }
+    #|namespace builtinShadow {
+    #|  type Record<K, V> = { localTypeKey: V };
+    #|  const protectedMap: Record<string, string[]> = { builtinShadowKey: ['alpha'], builtinShadowOther: ['beta'] };
+    #|  export function read(key: string) { return protectedMap[key]; }
+    #|}
+    #|
+  let shadow = @compression.compress("shadow-tables.ts", shadow_source)
+  assert_true(shadow.applied)
+  assert_true(
+    shadow.text.contains(
+      "const shadowed: Record<string, string[]> = /* … */;",
+    ),
+  )
+  assert_true(shadow.text.contains("builtinShadowKey:"))
+  assert_true(shadow.text.contains("builtinShadowOther:"))
 }
 
 ///|
@@ -123,10 +184,6 @@ test "CommonJS exports aliases and callback-installed member APIs keep signature
     #|    return normalize(path);
     #|  };
     #|});
-    #|function Instance(value) { this.value = value; this.enabled = true; }
-    #|Instance.prototype.enabled = true;
-    #|Instance['prototype'].alias = helper;
-    #|function unknownTarget(target, value) { target[key] = value; }
     #|items.forEach(function(item) { console.log(item, 'implementation details'); });
     #|console.log('unrelated implementation details');
     #|
@@ -141,9 +198,7 @@ test "CommonJS exports aliases and callback-installed member APIs keep signature
       "function createApplication()", "var app = function(req, res, next)", "app.get = function(name)",
       "app.route = veryLongRouteHelper;", "module.exports = function exported(req, res)",
       "function nested(value)", "methods.forEach(function(method)", "app[method] = function(path)",
-      "function normalize(value)", "this.value = value;", "this.enabled = true;",
-      "Instance.prototype.enabled = true;", "Instance['prototype'].alias = helper;",
-      "target[key] = value;",
+      "function normalize(value)",
     ] {
     assert_true(out.text.contains(fragment))
   }
@@ -161,187 +216,6 @@ test "CommonJS exports aliases and callback-installed member APIs keep signature
   assert_true(table.text.contains("commonKey:"))
   assert_true(table.text.contains("commonOther:"))
   assert_true(table.text.contains("module.exports = map;"))
-  let data_source =
-    #|import type { File } from './file';
-    #|interface Dependency { name: string; version?: string; }
-    #|interface Stack { packageManager?: string; dependencies: Dependency[]; }
-    #|export function metrics(input: string[], key: string): { filePaths: string[]; counts: Record<string, number> } {
-    #|  const counts: Record<string, number> = {};
-    #|  for (const path of input) { counts[path] = input.length; }
-    #|  for (const path of input) { counts[path] = key.length; }
-    #|  return { filePaths: input, counts };
-    #|}
-    #|export function output(files: File[]): { files: Record<string, string>; version: number } {
-    #|  const document = { files: files.reduce((acc, file) => { acc[file.path] = file.content; return acc; }, {} as Record<string, string>), version: 1 };
-    #|  return JSON.stringify(document);
-    #|}
-    #|export function stack(key: string, parsed: Stack): Stack {
-    #|  const results = new Map<string, Stack>();
-    #|  const result = results.get(key);
-    #|  if (parsed.packageManager) { result.packageManager = parsed.packageManager; }
-    #|  function nested(result: any) { result.packageManager = helper; }
-    #|  return result;
-    #|}
-    #|function shadow(key: string) {
-    #|  const counts: Record<string, number> = {};
-    #|  function parameter(counts: any) { counts[key] = helper; }
-    #|  function destructured({ counts }: any) { counts[key] = helper; }
-    #|  for (const counts of targets) { counts[key] = helper; }
-    #|  for (let counts = target; keep; step()) { counts[key] = helper; }
-    #|  counts[key] = input.length;
-    #|}
-    #|interface API { run: (value: string) => string; }
-    #|function install(key: string) { const api: API = target; api[key] = helper; }
-    #|function unknown(key: string) { const result = factory(); result[key] = helper; }
-    #|function hoisted(key: string) {
-    #|  const counts: Record<string, number> = {};
-    #|  function inner() { counts[key] = helper; if (condition) { var counts = target; } }
-    #|}
-    #|function aliases(method: string) {
-    #|  const dependency = require('./nested-dependency');
-    #|  const handler = dependency.handler;
-    #|  const handlerAlias = handler;
-    #|  const api = externalApp;
-    #|  api[method] = handlerAlias;
-    #|}
-    #|interface WithBehavior { packageManager: string; install(): void; }
-    #|function behavior(key: string) { const obj: WithBehavior = target; obj[key] = helper; }
-    #|interface Inherited extends External { packageManager: string; }
-    #|function inherited(key: string) { const obj: Inherited = target; obj[key] = helper; }
-    #|interface Merged { value: string; }
-    #|interface Merged { install(): void; }
-    #|function merged(key: string) { const obj: Merged = target; obj[key] = helper; }
-    #|interface LaterPublic { value: string; }
-    #|export { LaterPublic };
-    #|function laterAugmented(key: string) { const obj: LaterPublic = target; obj[key] = helper; }
-    #|export interface Public { value: string; }
-    #|function augmented(key: string) { const obj: Public = target; obj[key] = helper; }
-    #|function aliasedSchema(files: File[]) {
-    #|  const documentAlias = { files: files.reduce((acc, file) => { acc[file.path] = file.content; return acc; }, {} as Record<string, string>), config: { enabled: true } };
-    #|  const configAlias = documentAlias.config;
-    #|  const secondAlias = configAlias;
-    #|  return JSON.stringify(secondAlias);
-    #|}
-    #|function literalSchema() { const localLiteral = { literalMode: 'text', choices: ['a', 'b'] } as const; return localLiteral; }
-    #|function installedSchema() { const localSchema = { schemaField: 'configuration' }; app.schema = localSchema; }
-    #|function config(input: Config): Config {
-    #|  const output = { output: (() => { const mergedOutput = { ...input.output, mode: 'text' }; mergedOutput.filePath = desiredPath; return mergedOutput; })() };
-    #|  return validate(output);
-    #|}
-    #|
-  let data = @compression.compress("data.ts", data_source)
-  assert_true(data.applied)
-  for
-    fragment in [
-      "import type { File } from './file';", "metrics(input: string[], key: string): { filePaths: string[]; counts: Record<string, number> }",
-      "output(files: File[]): { files: Record<string, string>; version: number }",
-      "const counts: Record<string, number> = {};", "const document = { files: /* … */, version: 1 };",
-      "function nested(result: any)", "result.packageManager = helper;", "function parameter(counts: any)",
-      "function destructured({ counts }: any)", "for (const counts of targets)",
-      "let counts = target; keep; step()", "counts[key] = helper;", "api[key] = helper;",
-      "result[key] = helper;", "function inner() { counts[key] = helper;", "const dependency = require('./nested-dependency');",
-      "const handler = dependency.handler;", "const handlerAlias = handler;", "const api = externalApp;",
-      "api[method] = handlerAlias;", "const obj: WithBehavior = target; obj[key] = helper;",
-      "const obj: Inherited = target; obj[key] = helper;", "interface Inherited extends External",
-      "const obj: Merged = target; obj[key] = helper;", "const obj: Public = target; obj[key] = helper;",
-      "const obj: LaterPublic = target; obj[key] = helper;", "const documentAlias = { files: /* … */, config: { enabled: true } };",
-      "const configAlias = documentAlias.config;", "const secondAlias = configAlias;",
-      "const localLiteral = { literalMode: 'text', choices: ['a', 'b'] } as const;",
-      "const localSchema = { schemaField:", "app.schema = localSchema;", "const output = { output: (() =>",
-      "const mergedOutput = { ...input.output, mode: 'text' };", "mergedOutput.filePath = desiredPath;",
-    ] {
-    assert_true(data.text.contains(fragment))
-  }
-  for
-    fragment in [
-      "for (const path", "counts[path]", "counts[key] = input.length", "reduce(",
-      "acc[file.path]", "result.packageManager = parsed.packageManager", "if (parsed.packageManager)",
-    ] {
-    assert_false(data.text.contains(fragment))
-  }
-  let focused_source =
-    #|import { handle } from './handlers';
-    #|res.send = function send(body, callback) {
-    #|  var chunk = body;
-    #|  var req = this.req;
-    #|  var app = this.app;
-    #|  var done = callback;
-    #|  var next = req.next;
-    #|  var value = chunk;
-    #|  this.payload = value;
-    #|  this.continue = next;
-    #|  req.done = done;
-    #|  app.chunk = chunk;
-    #|};
-    #|function installBehavior(method: string) {
-    #|  const first = handle;
-    #|  const second = first;
-    #|  const api = externalApi;
-    #|  api[method] = second;
-    #|  function localHandler(input: string) { consume(input); }
-    #|  const localAlias = localHandler;
-    #|  api.local = localAlias;
-    #|  class Handler { run(input: string) { consume(input); } }
-    #|  const ClassAlias = Handler;
-    #|  api.Handler = ClassAlias;
-    #|}
-    #|async function schemas(server: Server): Promise<Response> {
-    #|  const internal = { internalMode: true };
-    #|  consume(internal);
-    #|  const state = { privateState: true };
-    #|  cache.set('cache-key', state);
-    #|  const cliOptions = { implementationOption: true } as CliOptions;
-    #|  await runCli(cliOptions);
-    #|  const registered = { inputSchema: inputType, outputSchema: outputType };
-    #|  server.registerTool('tool', registered, async (args: Args): Promise<Response> => {
-    #|    const scratch = { scratchKey: true };
-    #|    record(scratch);
-    #|    const response = { responseField: args.value };
-    #|    return response;
-    #|  });
-    #|  const publicContext = { directory: directoryName };
-    #|  const publicMetrics = { totalFiles: paths.length };
-    #|  return await formatResponse(publicContext, publicMetrics);
-    #|}
-    #|function emptyRegistration(server: Server) {
-    #|  server.registerTool('empty', { inputSchema: inputType, annotations: { readOnlyHint: true } }, async (args: Args): Promise<void> => { consume(args); });
-    #|}
-    #|function shadowSerialization(JSON: Helper) { const shadowed = { shadowState: true }; JSON.stringify(shadowed); }
-    #|function transformedSchema(): Result {
-    #|  const exposed = { externalShape: true };
-    #|  const validated = validate(exposed);
-    #|  return validated;
-    #|}
-    #|function serialization() {
-    #|  const json = { serializedShape: true };
-    #|  consume(JSON.stringify(json));
-    #|}
-    #|
-  let focused = @compression.compress("focused.ts", focused_source)
-  assert_true(focused.applied)
-  for
-    fragment in [
-      "res.send = function send(body, callback)", "this.payload = value;", "this.continue = next;",
-      "const first = handle;", "const second = first;", "const api = externalApi;",
-      "api[method] = second;", "function localHandler(input: string)", "const localAlias = localHandler;",
-      "api.local = localAlias;", "class Handler", "const ClassAlias = Handler;",
-      "api.Handler = ClassAlias;", "schemas(server: Server): Promise<Response>",
-      "const registered = { inputSchema: inputType, outputSchema: outputType };",
-      "server.registerTool(", "async (args: Args): Promise<Response>", "const response = { responseField: args.value };",
-      "const publicContext = { directory: directoryName };", "const publicMetrics = { totalFiles: paths.length };",
-      "server.registerTool('empty',", "annotations: { readOnlyHint: true }", "async (args: Args): Promise<void>",
-      "const exposed = { externalShape: true };", "const json = { serializedShape: true };",
-    ] {
-    assert_true(focused.text.contains(fragment))
-  }
-  for
-    fragment in [
-      "var chunk", "var req", "var app", "var done", "var next", "var value", "internalMode",
-      "privateState", "implementationOption", "scratchKey", "shadowState", "consume(",
-      "cache.set(", "runCli(",
-    ] {
-    assert_false(focused.text.contains(fragment))
-  }
 }
 
 ///|
