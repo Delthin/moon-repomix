@@ -40,10 +40,30 @@ bindings), enclosing control-flow structure, comments, and Python docstrings are
 retained in source order. Implementation-only branches and loops are omitted;
 conditions enclosing nested declarations remain. CommonJS static `require`
 bindings, export aliases, and member APIs installed inside callbacks are retained.
-Private scalar tables with an explicit wide `Record` annotation can fold as one
-initializer; exports, literal/inferred types, aliases, type queries, methods,
-computed keys and spreads protect their structure. Other initializers are omitted
-when the removed fragment is longer than the omission marker; short values stay
+Member writes to provable local TS data are omitted, allowing empty loops and
+reducers to disappear. Evidence is a `const` with a structural data type, a local
+`Map<K, Data>.get()` result, or a reducer accumulator with an explicitly typed
+object seed. Local interfaces must be module-private, unmerged and have no
+inheritance or callable fields (global/exported interfaces can be augmented
+externally). Parameters, destructuring, loops, catches and hoisted `var` bindings
+shadow outer data bindings. Unknown receivers/types stay conservative;
+`exports`, `module.exports`, `prototype`, `this`, and callable/class installations
+remain API members. Local static `require` bindings and alias chains used by
+retained member APIs stay visible. Returned/serialized/API local object schemas,
+including property aliases and literal assertions, are retained independently
+of assignments inside their values.
+
+Private scalar/array tables with a wide `Record<string, ...>` or
+`Record<number, ...>` annotation can fold as one initializer (at least two
+entries). Inferred scalar/array tables and explicitly annotated wide-key
+constructor tables require at least eight
+entries. Every table reference must be an indexed lookup read; exports, aliases,
+type queries, whole-object returns/arguments, key enumeration and mutations
+protect the table. Assertions/literal types, methods, computed keys and spreads
+also protect structure; constructor entries containing object schemas, callbacks
+or calls are not folded. Unknown factories and untyped object writes, including
+configuration IIFEs with spread-derived types, are intentionally retained.
+Other initializers are omitted when the removed fragment is longer than the omission marker; short values stay
 unchanged. Comments and their line terminators remain, except category comments
 inside a table whose values were folded.
 Omissions use synthetic `/* … */` or Python `...` markers, with indentation for
@@ -87,7 +107,7 @@ MoonBit grammar support is intentionally not included.
 With the project toolchain selected:
 
 ```
-moon check src/compression --target native
+moon check src/compression --target native --deny-warn
 moon test src/compression --target native
 moon fmt src/compression
 moon info src/compression --target native
@@ -96,7 +116,9 @@ moon info src/compression --target native
 Seven grouped tests cover all four grammars, signature and Unicode comment
 preservation, nested bindings, exact original-line ranges, genuinely smaller
 output, unsupported paths, invalid syntax, unchanged non-smaller fallbacks,
-private tables versus public types, CommonJS APIs, and whitespace/literal boundaries. A separate development ASan/UBSan harness exercised the actual C FFI
-adapter and grammars, repeated cleanup, parse errors, timeout and size-limit
+private tables versus public types/schemas, CommonJS APIs and local alias chains,
+local data writes/reducers versus shadowed or behavioral receivers, and
+whitespace/literal boundaries. A separate development ASan/UBSan harness exercised
+the actual C FFI adapter and grammars, repeated cleanup, parse errors, timeout and size-limit
 paths using a byte-array allocator shim with `moonbit.h`'s layout. This checks
 C-side lifetimes rather than MoonBit GC instrumentation.

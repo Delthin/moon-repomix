@@ -19,6 +19,7 @@ static int is(TSNode node, const char *type) {
 }
 
 static TSNode field(TSNode node, const char *name) {
+  if (ts_node_is_null(node)) return (TSNode){0};
   return ts_node_child_by_field_name(node, name, (uint32_t)strlen(name));
 }
 
@@ -99,6 +100,214 @@ static int text_is(Selection *s, TSNode node, const char *text) {
     memcmp(s->source + start, text, end - start) == 0;
 }
 
+static int same_name(Selection *s, TSNode a, TSNode b) {
+  return !ts_node_is_null(a) && !ts_node_is_null(b) &&
+    ts_node_end_byte(a) - ts_node_start_byte(a) == ts_node_end_byte(b) - ts_node_start_byte(b) &&
+    memcmp(s->source + ts_node_start_byte(a), s->source + ts_node_start_byte(b),
+           ts_node_end_byte(a) - ts_node_start_byte(a)) == 0;
+}
+
+/* Search only one lexical environment. A shadowing parameter/import/pattern is
+ * returned too, but never mistaken for a provable const data binding. */
+static TSNode scope_binding(Selection *s, TSNode node, TSNode name, unsigned depth) {
+  if (depth > 512) { s->plan.status = 3; return (TSNode){0}; }
+  if (ts_node_is_null(node)) return (TSNode){0};
+  TSNode declared = field(node, "name");
+  if (same_name(s, declared, name)) return node;
+  if ((is(node, "identifier") || is(node, "shorthand_property_identifier_pattern")) &&
+      same_name(s, node, name)) return node;
+  if (callable(node) || classlike(node) || type_declaration(node)) return (TSNode){0};
+  if (!(is(node, "lexical_declaration") || is(node, "variable_declaration") ||
+        is(node, "export_statement") || is(node, "formal_parameters") ||
+        is(node, "required_parameter") || is(node, "optional_parameter") ||
+        is(node, "object_pattern") || is(node, "array_pattern") ||
+        is(node, "pair_pattern") || is(node, "assignment_pattern") ||
+        is(node, "rest_pattern") || is(node, "import_statement") ||
+        is(node, "import_clause") || is(node, "named_imports") ||
+        is(node, "import_specifier") || is(node, "namespace_import") ||
+        is(node, "variable_declarator"))) return (TSNode){0};
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i) {
+    TSNode child = ts_node_named_child(node, i);
+    /* Initializers/types are not declarations in this environment. */
+    if (ts_node_eq(child, field(node, "value")) || ts_node_eq(child, field(node, "type"))) continue;
+    TSNode found = scope_binding(s, child, name, depth + 1);
+    if (!ts_node_is_null(found)) return found;
+  }
+  return (TSNode){0};
+}
+
+/* var declarations can shadow an outer const even when nested in a branch.
+ * Block functions are also treated as shadowing, including Annex B cases. */
+static TSNode hoisted_binding(Selection *s, TSNode node, TSNode name, unsigned depth) {
+  if (depth > 512) { s->plan.status = 3; return (TSNode){0}; }
+  if (ts_node_is_null(node)) return (TSNode){0};
+  if (is(node, "variable_declaration") || callable(node) || classlike(node))
+    return scope_binding(s, node, name, depth + 1);
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i) {
+    TSNode found = hoisted_binding(s, ts_node_named_child(node, i), name, depth + 1);
+    if (!ts_node_is_null(found)) return found;
+  }
+  return (TSNode){0};
+}
+
+static TSNode binding(Selection *s, TSNode from, TSNode name) {
+  if (ts_node_is_null(from) || ts_node_is_null(name)) return (TSNode){0};
+  for (TSNode scope = ts_node_parent(from); !ts_node_is_null(scope); scope = ts_node_parent(scope)) {
+    if (callable(scope)) {
+      TSNode found = scope_binding(s, field(scope, "parameters"), name, 0);
+      if (!ts_node_is_null(found)) return found;
+      if (same_name(s, field(scope, "parameter"), name)) return scope;
+      found = hoisted_binding(s, field(scope, "body"), name, 0);
+      if (!ts_node_is_null(found)) return found;
+    } else if (is(scope, "for_in_statement") || is(scope, "for_statement") || is(scope, "catch_clause")) {
+      TSNode pattern = field(scope, is(scope, "catch_clause") ? "parameter" :
+                                   is(scope, "for_statement") ? "initializer" : "left");
+      TSNode found = scope_binding(s, pattern, name, 0);
+      if (!ts_node_is_null(found)) return found;
+    } else if (is(scope, "statement_block") || is(scope, "program")) {
+      for (uint32_t i = 0; i < ts_node_named_child_count(scope); ++i) {
+        TSNode found = scope_binding(s, ts_node_named_child(scope, i), name, 0);
+        if (!ts_node_is_null(found)) return found;
+      }
+    }
+  }
+  return (TSNode){0};
+}
+
+static unsigned type_declarations(Selection *s, TSNode node, TSNode name, unsigned depth) {
+  if (depth > 512) { s->plan.status = 3; return 2; }
+  unsigned count = (type_declaration(node) || classlike(node)) && same_name(s, field(node, "name"), name);
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && count < 2; ++i)
+    count += type_declarations(s, ts_node_named_child(node, i), name, depth + 1);
+  return count;
+}
+
+static int exported_type_reference(Selection *s, TSNode node, TSNode name, unsigned depth, int clause) {
+  if (depth > 512) { s->plan.status = 3; return 1; }
+  if (clause && same_name(s, node, name)) return 1;
+  clause = clause || is(node, "export_clause");
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    if (exported_type_reference(s, ts_node_named_child(node, i), name, depth + 1, clause)) return 1;
+  return 0;
+}
+
+static int private_interface(Selection *s, TSNode declaration) {
+  TSNode root = declaration;
+  while (!ts_node_is_null(ts_node_parent(root))) {
+    root = ts_node_parent(root);
+    if (is(root, "export_statement")) return 0;
+  }
+  int module = 0;
+  for (uint32_t i = 0; i < ts_node_named_child_count(root); ++i) {
+    TSNode child = ts_node_named_child(root, i);
+    if (importlike(child) || is(child, "export_statement")) module = 1;
+  }
+  /* Script-global/exported interfaces can be augmented outside this file. */
+  TSNode name = field(declaration, "name");
+  return module && type_declarations(s, root, name, 0) == 1 &&
+    !exported_type_reference(s, root, name, 0, 0);
+}
+
+/* Structural TS data types only: unknown/imported types, callable properties,
+ * inheritance, literal assertions and recursive types are deliberately opaque. */
+static int data_type(Selection *s, TSNode type, unsigned depth) {
+  if (depth > 32 || ts_node_is_null(type)) return 0;
+  if (text_is(s, type, "string") || text_is(s, type, "number") ||
+      text_is(s, type, "boolean") || text_is(s, type, "undefined") || text_is(s, type, "null")) return 1;
+  if (is(type, "type_identifier")) {
+    TSNode declaration = binding(s, type, type);
+    if (is(declaration, "interface_declaration")) {
+      if (!private_interface(s, declaration)) return 0;
+      /* Any extends clause can add behavior not visible in this body. */
+      for (uint32_t i = 0; i < ts_node_named_child_count(declaration); ++i)
+        if (is(ts_node_named_child(declaration, i), "extends_type_clause")) return 0;
+      return data_type(s, field(declaration, "body"), depth + 1);
+    }
+    if (is(declaration, "type_alias_declaration"))
+      return data_type(s, field(declaration, "value"), depth + 1);
+    return 0;
+  }
+  if (is(type, "generic_type")) {
+    TSNode name = ts_node_named_child(type, 0), args = ts_node_named_child(type, 1);
+    if (!ts_node_is_null(binding(s, type, name))) return 0;
+    if (text_is(s, name, "Record") && ts_node_named_child_count(args) == 2 &&
+        (text_is(s, ts_node_named_child(args, 0), "string") ||
+         text_is(s, ts_node_named_child(args, 0), "number")))
+      return data_type(s, ts_node_named_child(args, 1), depth + 1);
+    if ((text_is(s, name, "Array") || text_is(s, name, "ReadonlyArray")) &&
+        ts_node_named_child_count(args) == 1)
+      return data_type(s, ts_node_named_child(args, 0), depth + 1);
+    return 0;
+  }
+  if (is(type, "property_signature")) {
+    if (is(field(type, "name"), "computed_property_name")) return 0;
+    return data_type(s, field(type, "type"), depth + 1);
+  }
+  if (!(is(type, "type_annotation") || is(type, "array_type") ||
+        is(type, "union_type") || is(type, "parenthesized_type") ||
+        is(type, "object_type") || is(type, "interface_body"))) return 0;
+  unsigned count = 0;
+  for (uint32_t i = 0; i < ts_node_named_child_count(type); ++i) {
+    TSNode child = ts_node_named_child(type, i);
+    if (is(child, "comment")) continue;
+    if (!data_type(s, child, depth + 1)) return 0;
+    ++count;
+  }
+  return count > 0;
+}
+
+static int const_binding(TSNode node) {
+  if (ts_node_is_null(node)) return 0;
+  TSNode declaration = ts_node_parent(node);
+  return is(node, "variable_declarator") && is(declaration, "lexical_declaration") &&
+    is(ts_node_child(declaration, 0), "const");
+}
+
+static int data_receiver(Selection *s, TSNode from, TSNode name, unsigned depth) {
+  if (depth > 16 || !is(name, "identifier")) return 0;
+  TSNode declared = binding(s, from, name);
+  if (ts_node_is_null(declared)) return 0;
+  if (const_binding(declared)) {
+    if (data_type(s, field(declared, "type"), 0)) return 1;
+    TSNode value = field(declared, "value");
+    if (is(value, "identifier")) return data_receiver(s, declared, value, depth + 1);
+    /* A local Map<K, Data>.get() yields data, not an API object. */
+    if (is(value, "call_expression")) {
+      TSNode fn = field(value, "function"), object = field(fn, "object");
+      TSNode map = binding(s, declared, object);
+      TSNode init = field(map, "value"), args = field(init, "type_arguments");
+      if (is(fn, "member_expression") && text_is(s, field(fn, "property"), "get") &&
+          const_binding(map) && is(init, "new_expression") &&
+          text_is(s, field(init, "constructor"), "Map") &&
+          ts_node_is_null(binding(s, init, field(init, "constructor"))) &&
+          ts_node_named_child_count(args) == 2)
+        return data_type(s, ts_node_named_child(args, 1), 0);
+    }
+  }
+  /* The accumulator of a reduce with an explicitly widened data seed. Do not
+   * infer data from an untyped {}, or from other callback parameters. */
+  TSNode fn = ts_node_parent(declared);
+  while (is(fn, "formal_parameters") || is(fn, "required_parameter") || is(fn, "optional_parameter")) {
+    TSNode annotation = field(fn, "type");
+    if (!ts_node_is_null(annotation) && !data_type(s, annotation, 0)) return 0;
+    fn = ts_node_parent(fn);
+  }
+  if (callable(fn)) {
+    TSNode params = field(fn, "parameters"), args = ts_node_parent(fn);
+    if (!is(args, "arguments")) return 0;
+    TSNode call = ts_node_parent(args);
+    TSNode first = ts_node_named_child(params, 0), callee = field(call, "function");
+    TSNode seed = ts_node_named_child(args, 1);
+    if ((ts_node_eq(first, declared) || same_name(s, field(first, "pattern"), name)) &&
+        is(args, "arguments") && is(call, "call_expression") &&
+        ts_node_eq(ts_node_named_child(args, 0), fn) && is(callee, "member_expression") &&
+        text_is(s, field(callee, "property"), "reduce") && is(seed, "as_expression") &&
+        is(ts_node_named_child(seed, 0), "object") &&
+        data_type(s, ts_node_named_child(seed, 1), 0)) return 1;
+  }
+  return 0;
+}
+
 static int member_assignment(Selection *s, TSNode node) {
   if (!js_assignment(node)) return 0;
   TSNode left = field(node, "left"), right = field(node, "right");
@@ -107,13 +316,17 @@ static int member_assignment(Selection *s, TSNode node) {
   while (is(base, "member_expression") || is(base, "subscript_expression")) {
     TSNode object = field(base, "object");
     TSNode property = field(base, is(base, "member_expression") ? "property" : "index");
+    if (text_is(s, property, "prototype") || text_is(s, property, "'prototype'") ||
+        text_is(s, property, "\"prototype\"")) return 1;
     if (text_is(s, object, "module") &&
         (text_is(s, property, "exports") || text_is(s, property, "'exports'") ||
          text_is(s, property, "\"exports\""))) return 1;
     base = object;
   }
-  if (text_is(s, base, "exports")) return 1;
-  return callable(right) || classlike(right) || is(right, "identifier") ||
+  if (text_is(s, base, "exports") || is(base, "this")) return 1;
+  if (callable(right) || classlike(right)) return 1;
+  if (data_receiver(s, node, base, 0)) return 0;
+  return is(right, "identifier") ||
     is(right, "member_expression") || is(right, "subscript_expression") ||
     js_assignment(right);
 }
@@ -148,64 +361,95 @@ static int implementation_statement(TSNode node) {
   return length >= 10 && strcmp(type + length - 10, "_statement") == 0;
 }
 
-/* Only explicitly widened, non-exported TS scalar tables may lose their keys.
- * Literal/inferred types, assertions, computed keys and behavior stay intact. */
+static int scalar_type(Selection *s, TSNode node) {
+  for (unsigned depth = 0; depth < 32; ++depth) {
+    if (text_is(s, node, "string") || text_is(s, node, "number") || text_is(s, node, "boolean")) return 1;
+    if (!is(node, "array_type")) return 0;
+    node = ts_node_named_child(node, 0);
+  }
+  return 0;
+}
+
+static int scalar_value(TSNode node, unsigned depth) {
+  if (depth > 32) return 0;
+  if (is(node, "string") || is(node, "number") || is(node, "true") || is(node, "false")) return 1;
+  if (!is(node, "array")) return 0;
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i) {
+    TSNode child = ts_node_named_child(node, i);
+    if (!is(child, "comment") && !scalar_value(child, depth + 1)) return 0;
+  }
+  return 1;
+}
+
+static int opaque_value(TSNode node, unsigned depth) {
+  if (depth > 32) return 0;
+  if (callable(node) || classlike(node) || is(node, "as_expression") ||
+      is(node, "satisfies_expression") || is(node, "spread_element") ||
+      is(node, "computed_property_name") || is(node, "object") ||
+      is(node, "call_expression")) return 0;
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    if (!opaque_value(ts_node_named_child(node, i), depth + 1)) return 0;
+  return 1;
+}
+
+/* Widened scalar/array maps need two entries; inferred scalar and widened
+ * constructor tables need eight. All require private index-only consumers. */
 static int scalar_table(Selection *s, TSNode node) {
   if (!is(node, "variable_declarator") || !is(field(node, "name"), "identifier")) return 0;
-  TSNode annotation = field(node, "type");
-  if (ts_node_is_null(annotation)) return 0;
-  TSNode type = ts_node_named_child(annotation, 0);
-  if (!is(type, "generic_type") || ts_node_named_child_count(type) != 2 ||
-      !text_is(s, ts_node_named_child(type, 0), "Record")) return 0;
-  TSNode args = ts_node_named_child(type, 1);
-  if (!is(args, "type_arguments") || ts_node_named_child_count(args) != 2) return 0;
-  TSNode key = ts_node_named_child(args, 0), value_type = ts_node_named_child(args, 1);
-  if (!(text_is(s, key, "string") || text_is(s, key, "number")) ||
-      !(text_is(s, value_type, "string") || text_is(s, value_type, "number") ||
-        text_is(s, value_type, "boolean"))) return 0;
+  TSNode annotation = field(node, "type"), value_type = {0};
+  int widened = 0;
+  if (!ts_node_is_null(annotation)) {
+    TSNode type = ts_node_named_child(annotation, 0);
+    if (!is(type, "generic_type") || ts_node_named_child_count(type) != 2 ||
+        !text_is(s, ts_node_named_child(type, 0), "Record") ||
+        !ts_node_is_null(binding(s, type, ts_node_named_child(type, 0)))) return 0;
+    TSNode args = ts_node_named_child(type, 1);
+    if (!is(args, "type_arguments") || ts_node_named_child_count(args) != 2) return 0;
+    TSNode key = ts_node_named_child(args, 0);
+    if (!(text_is(s, key, "string") || text_is(s, key, "number"))) return 0;
+    value_type = ts_node_named_child(args, 1);
+    widened = scalar_type(s, value_type);
+  }
   TSNode value = field(node, "value");
   if (!is(value, "object")) return 0;
   unsigned pairs = 0;
+  int scalars = 1, constructors = !ts_node_is_null(value_type);
   for (uint32_t i = 0; i < ts_node_named_child_count(value); ++i) {
     TSNode pair = ts_node_named_child(value, i);
     if (is(pair, "comment")) continue;
     TSNode k = field(pair, "key"), v = field(pair, "value");
     if (!is(pair, "pair") ||
-        !(is(k, "property_identifier") || is(k, "string") || is(k, "number")) ||
-        !(is(v, "string") || is(v, "number") || is(v, "true") || is(v, "false"))) return 0;
+        !(is(k, "property_identifier") || is(k, "string") || is(k, "number"))) return 0;
+    scalars = scalars && scalar_value(v, 0);
+    constructors = constructors && is(v, "new_expression") && opaque_value(v, 0);
     ++pairs;
   }
-  return pairs >= 2;
+  if (widened && scalars && pairs >= 2) return 1;
+  /* Do not widen literal/union/object annotations on the strength of values. */
+  if (pairs >= 8 && ((ts_node_is_null(annotation) && scalars) || constructors)) return 1;
+  return 0;
 }
 
-static int contract_reference(Selection *s, TSNode node, TSNode name,
-                              unsigned depth, int contract) {
-  if (depth > 512) { s->plan.status = 3; return 1; }
-  if (ts_node_is_null(node)) return 0;
-  if (contract && (is(node, "identifier") || is(node, "shorthand_property_identifier")) &&
-      ts_node_end_byte(node) - ts_node_start_byte(node) ==
-      ts_node_end_byte(name) - ts_node_start_byte(name) &&
-      memcmp(s->source + ts_node_start_byte(node), s->source + ts_node_start_byte(name),
-             ts_node_end_byte(name) - ts_node_start_byte(name)) == 0) return 1;
-  contract = contract || is(node, "export_clause") || is(node, "type_query");
-  /* Keep keys when a table is aliased, including aliases exported later. */
-  if (is(node, "variable_declarator")) {
-    TSNode value = field(node, "value");
-    if ((is(value, "identifier") || is(value, "object")) &&
-        contract_reference(s, value, name, depth + 1, 1)) return 1;
+/* A bare/aliased/serialized table exposes its keys as a schema. Only lookup
+ * reads are private implementation; same-spelled shadowed locals do not count. */
+static int index_only(Selection *s, TSNode node, TSNode declaration, unsigned depth) {
+  if (depth > 512) { s->plan.status = 3; return 0; }
+  TSNode name = field(declaration, "name");
+  if ((is(node, "identifier") || is(node, "shorthand_property_identifier")) &&
+      same_name(s, node, name) && !ts_node_eq(node, name) &&
+      ts_node_eq(binding(s, node, node), declaration)) {
+    TSNode parent = ts_node_parent(node);
+    for (TSNode ancestor = parent; !ts_node_is_null(ancestor); ancestor = ts_node_parent(ancestor))
+      if (is(ancestor, "type_query")) return 0;
+    if (!is(parent, "subscript_expression") || !ts_node_eq(field(parent, "object"), node)) return 0;
+    TSNode use = ts_node_parent(parent);
+    if ((js_assignment(use) && ts_node_eq(field(use, "left"), parent)) ||
+        is(use, "augmented_assignment_expression") || is(use, "update_expression") ||
+        is(use, "unary_expression")) return 0;
   }
-  if (member_assignment(s, node) &&
-      contract_reference(s, field(node, "right"), name, depth + 1, 1)) return 1;
-  uint32_t n = ts_node_named_child_count(node);
-  for (uint32_t i = 0; i < n; ++i) {
-    TSNode child = ts_node_named_child(node, i);
-    /* Default expressions and exported bindings are contracts, unlike the
-     * implementation of an exported function/class declaration. */
-    int exported_value = is(node, "export_statement") &&
-      !callable(child) && !classlike(child) && !type_declaration(child);
-    if (contract_reference(s, child, name, depth + 1, contract || exported_value)) return 1;
-  }
-  return 0;
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    if (!index_only(s, ts_node_named_child(node, i), declaration, depth + 1)) return 0;
+  return 1;
 }
 
 static int private_scalar_table(Selection *s, TSNode node, unsigned depth) {
@@ -215,7 +459,13 @@ static int private_scalar_table(Selection *s, TSNode node, unsigned depth) {
     root = ts_node_parent(root);
     if (is(root, "export_statement")) return 0;
   }
-  return !contract_reference(s, root, field(node, "name"), depth + 1, 0);
+  return index_only(s, root, node, depth + 1);
+}
+
+static int static_require(Selection *s, TSNode node) {
+  return is(node, "call_expression") && text_is(s, field(node, "function"), "require") &&
+    ts_node_named_child_count(field(node, "arguments")) == 1 &&
+    is(ts_node_named_child(field(node, "arguments"), 0), "string");
 }
 
 static void literal_outline(Selection *s, TSNode node, unsigned depth) {
@@ -241,10 +491,7 @@ static void initializer(Selection *s, TSNode node, unsigned depth) {
              is(node, "subscript_expression")) {
     /* Binding aliases, especially CommonJS exports, are part of the outline. */
     return;
-  } else if (is(node, "call_expression") &&
-             text_is(s, field(node, "function"), "require") &&
-             ts_node_named_child_count(field(node, "arguments")) == 1 &&
-             is(ts_node_named_child(field(node, "arguments"), 0), "string")) {
+  } else if (static_require(s, node)) {
     /* Static CommonJS imports/re-exports are binding aliases, not bodies. */
     return;
   } else if (js_assignment(node) || contains_outline(s, node, depth + 1)) {
@@ -315,11 +562,97 @@ static void walk(Selection *s, TSNode node, unsigned depth, int local) {
     walk(s, ts_node_named_child(node, i), depth + 1, local);
 }
 
+static int escapes(Selection *s, TSNode node, TSNode declaration, unsigned depth) {
+  if (s->plan.status) return 1;
+  if (depth > 512) { s->plan.status = 3; return 1; }
+  if ((is(node, "identifier") || is(node, "shorthand_property_identifier")) &&
+      same_name(s, node, field(declaration, "name")) &&
+      ts_node_eq(binding(s, node, node), declaration)) {
+    TSNode reference = node, parent = ts_node_parent(node);
+    while (is(parent, "object") || is(parent, "pair") || is(parent, "spread_element") ||
+           is(parent, "parenthesized_expression") || is(parent, "as_expression") ||
+           is(parent, "satisfies_expression") ||
+           ((is(parent, "member_expression") || is(parent, "subscript_expression")) &&
+            ts_node_eq(field(parent, "object"), reference))) {
+      reference = parent;
+      parent = ts_node_parent(parent);
+    }
+    if (is(parent, "return_statement") || is(parent, "arguments") ||
+        (member_assignment(s, parent) && ts_node_eq(field(parent, "right"), reference))) return 1;
+    if (is(parent, "variable_declarator") && ts_node_eq(field(parent, "value"), reference) &&
+        is(field(parent, "name"), "identifier")) {
+      TSNode root = parent;
+      while (!ts_node_is_null(ts_node_parent(root))) root = ts_node_parent(root);
+      if (escapes(s, root, parent, depth + 1)) return 1;
+    }
+  }
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    if (escapes(s, ts_node_named_child(node, i), declaration, depth + 1)) return 1;
+  return 0;
+}
+
+static int schema_source(Selection *s, TSNode node, unsigned depth) {
+  if (s->plan.status) return 1;
+  if (depth > 512) { s->plan.status = 3; return 1; }
+  if (!is(node, "variable_declarator")) return 0;
+  TSNode value = field(node, "value");
+  for (unsigned i = 0; i < 32; ++i) {
+    if (is(value, "as_expression") || is(value, "satisfies_expression") ||
+        is(value, "parenthesized_expression")) value = ts_node_named_child(value, 0);
+    else if (is(value, "member_expression") || is(value, "subscript_expression"))
+      value = field(value, "object");
+    else break;
+  }
+  if (is(value, "object")) return 1;
+  return is(value, "identifier") && schema_source(s, binding(s, node, value), depth + 1);
+}
+
+/* Keep returned/serialized/API object schemas and their aliases independently
+ * of implementation assignments in their values (notably reduce callbacks). */
+static int object_schema(Selection *s, TSNode node, unsigned depth) {
+  if (!is(node, "variable_declarator") || !is(field(node, "name"), "identifier") ||
+      !schema_source(s, node, depth + 1)) return 0;
+  TSNode scope = ts_node_parent(node);
+  while (!ts_node_is_null(ts_node_parent(scope)) && !callable(scope)) scope = ts_node_parent(scope);
+  return callable(scope) && escapes(s, field(scope, "body"), node, depth + 1);
+}
+
+static int api_alias_reference(Selection *s, TSNode node, TSNode declaration,
+                               unsigned depth, int api) {
+  if (depth > 512) { s->plan.status = 3; return 1; }
+  if (api && is(node, "identifier")) {
+    TSNode bound = binding(s, node, node);
+    if (same_name(s, node, field(declaration, "name")) && ts_node_eq(bound, declaration)) return 1;
+    TSNode value = field(bound, "value");
+    if (is(bound, "variable_declarator") && (is(value, "identifier") ||
+        is(value, "member_expression") || is(value, "subscript_expression")) &&
+        api_alias_reference(s, value, declaration, depth + 1, 1)) return 1;
+  }
+  if (member_assignment(s, node))
+    return api_alias_reference(s, field(node, "left"), declaration, depth + 1, 1) ||
+      api_alias_reference(s, field(node, "right"), declaration, depth + 1, 1);
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    if (api_alias_reference(s, ts_node_named_child(node, i), declaration, depth + 1, api)) return 1;
+  return 0;
+}
+
+static int api_alias(Selection *s, TSNode node, unsigned depth) {
+  if (!is(node, "variable_declarator")) return 0;
+  TSNode value = field(node, "value");
+  if (static_require(s, value)) return 1;
+  if (!(is(value, "identifier") || is(value, "member_expression") ||
+        is(value, "subscript_expression"))) return 0;
+  TSNode root = node;
+  while (!ts_node_is_null(ts_node_parent(root))) root = ts_node_parent(root);
+  return api_alias_reference(s, root, node, depth + 1, 0);
+}
+
 /* Local data statements are implementation, but locally named functions and
  * classes still belong to the outline (including arrow/lambda bindings). */
 static int signature_binding(Selection *s, TSNode node, unsigned depth) {
   if (depth > 512 || ts_node_is_null(node)) return 0;
-  if (callable(node) || classlike(node)) return 1;
+  if (callable(node) || classlike(node) || object_schema(s, node, depth + 1) ||
+      api_alias(s, node, depth + 1)) return 1;
   if (is(node, "variable_declarator") || is(node, "pair"))
     return signature_binding(s, field(node, "value"), depth + 1);
   if (member_assignment(s, node)) return 1;
