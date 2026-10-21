@@ -33,7 +33,7 @@ moon run --target native scripts/demo.mbtx
 
 ### 使用平台归档
 
-解压对应平台的构建归档，保留 `bin`、`share` 和 `LICENSES` 目录。在解压目录中直接运行：
+从 [v0.2.0 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.2.0) 下载对应平台归档，并用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 目录。在解压目录中直接运行：
 
 ```sh
 ./bin/moon-repomix /path/to/project -o context.xml
@@ -106,7 +106,7 @@ moon-repomix ./project --init
 
 ## 库 API
 
-本地引用源码时，用 `moon.work` 将调用项目与本仓库列为 `members`，在调用项目的 `moon.mod` 声明 `Delthin/moon_repomix@0.1.0` 依赖，并在 `moon.pkg` 导入：
+Mooncakes 模块为 [`Delthin/moon_repomix@0.2.0`](https://mooncakes.io/docs/Delthin/moon_repomix@0.2.0)，在调用项目的 `moon.mod` 依赖表声明该版本。本地联调可用 `moon.work` 将调用项目与本仓库列为 `members`。在 `moon.pkg` 导入：
 
 ```moonbit
 import {
@@ -159,7 +159,7 @@ moon run --target native scripts/self-pack-test.mbtx ../moon-repomix-self-check
 
 自打包检查会新建输出目录，保留 XML、Markdown 和日志；已有目录会报错。安装了 `xmllint` 时可追加 `--xml-oracle`，独立核对黄金数据从 XML 还原后的正文。
 
-测试覆盖编码和大小边界、配置合并、密钥排除、输出格式、预算、错误保护及路径处理；Linux CI 包含独立 XML/JSON 解析与正文还原检查，并验证 `moon package` 生成的源码包解压后能运行 demo。源码包位于 `_build/publish/Delthin-moon_repomix-0.1.0.zip`。
+测试覆盖编码和大小边界、配置合并、密钥排除、输出格式、预算、错误保护及路径处理；Linux CI 包含独立 XML/JSON 解析与正文还原检查，并验证 `moon package` 生成的源码包解压后能运行 demo。源码包位于 `_build/publish/Delthin-moon_repomix-0.2.0.zip`。
 
 ## 来源与许可
 
