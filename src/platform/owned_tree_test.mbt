@@ -6,7 +6,7 @@ async fn readonly_fixture(path : String) -> Unit {
 
 ///|
 #cfg(platform="windows")
-async fn readonly_fixture(_path : String) -> Unit {
+fn readonly_fixture(_path : String) -> Unit {
   ()
 }
 
