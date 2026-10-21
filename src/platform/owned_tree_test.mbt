@@ -1,4 +1,16 @@
 ///|
+#cfg(not(platform="windows"))
+async fn readonly_fixture(path : String) -> Unit {
+  @fs.chmod(path, 0o444)
+}
+
+///|
+#cfg(platform="windows")
+async fn readonly_fixture(_path : String) -> Unit {
+  ()
+}
+
+///|
 async test "owned tree removal: hidden files, read-only files and no-follow boundaries" {
   let outer = @fs.tmpdir(prefix="moon-owned-tree-test-")
   defer @platform.remove_owned_tree(outer)
@@ -13,8 +25,8 @@ async test "owned tree removal: hidden files, read-only files and no-follow boun
     create_mode=CreateNew,
   )
   if !@platform.is_windows() {
-    @fs.chmod(tree + "/.hidden/nested/readonly", 0o444)
-    @fs.chmod(foreign + "/keep", 0o444)
+    readonly_fixture(tree + "/.hidden/nested/readonly")
+    readonly_fixture(foreign + "/keep")
     @fs.symlink(target=foreign, tree + "/directory-link")
     @fs.symlink(target=foreign + "/keep", tree + "/file-link")
     @fs.symlink(target=foreign + "/absent", tree + "/dangling-link")

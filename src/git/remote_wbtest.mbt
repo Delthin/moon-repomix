@@ -1,4 +1,17 @@
 ///|
+#cfg(not(platform="windows"))
+async fn readonly_fixture(path : String) -> Unit {
+  @fs.chmod(path, 0o444)
+}
+
+///|
+#cfg(platform="windows")
+async fn readonly_fixture(_path : String) -> Unit {
+  // Windows read-only coverage uses the real Git objects created below.
+  ()
+}
+
+///|
 test "remote URLs and revisions reject credentials, protocols and parameters" {
   // Keep complete hostile inputs at runtime, not credential-shaped source text.
   let synthetic = "credential-secret"
@@ -147,7 +160,7 @@ async test "remote lifecycle: Git failure, cancellation, protected cleanup and f
     if !@platform.is_windows() {
       @fs.symlink(target=foreign, directory + "/outside-link")
       @fs.symlink(target=foreign + "/keep", directory + "/outside-file")
-      @fs.chmod(foreign + "/keep", 0o444)
+      readonly_fixture(foreign + "/keep")
     }
     "0123456789abcdef0123456789abcdef01234567"
   })
