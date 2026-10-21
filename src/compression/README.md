@@ -48,24 +48,33 @@ inheritance or callable fields (global/exported interfaces can be augmented
 externally). Parameters, destructuring, loops, catches and hoisted `var` bindings
 shadow outer data bindings. Unknown receivers/types stay conservative;
 `exports`, `module.exports`, `prototype`, `this`, and callable/class installations
-remain API members. Local static `require` bindings and alias chains used by
-retained member APIs stay visible. Returned/serialized/API local object schemas,
-including property aliases and literal assertions, are retained independently
-of assignments inside their values.
+remain API members. Local static `require` bindings stay visible. Installation
+aliases require a function/class, import/require origin, or callable annotation;
+opaque explicit receiver types are also preserved. Alias scanning follows the
+installation expression, not the installed function's implementation body.
+Ordinary untyped state aliases are not promoted by unrelated member writes.
+
+Returned, JSON-serialized and API-installed local object schemas, including
+property aliases and literal assertions, remain independent of implementation
+assignments inside their values. An ordinary helper/cache call does not expose
+its arguments as schemas unless its result is itself returned or otherwise
+exposed. `JSON.stringify` must refer to the unshadowed builtin. Public
+`registerTool`/`registerResource`/`registerPrompt` calls preserve registration
+schemas and callback signatures even when the callback body disappears.
 
 Private scalar/array tables with a wide `Record<string, ...>` or
 `Record<number, ...>` annotation can fold as one initializer (at least two
 entries). Inferred scalar/array tables and explicitly annotated wide-key
-constructor tables require at least eight
-entries. Every table reference must be an indexed lookup read; exports, aliases,
-type queries, whole-object returns/arguments, key enumeration and mutations
+constructor tables require at least eight entries. Every table reference must be
+an indexed lookup read; exports, aliases, type queries, whole-object
+returns/arguments, key enumeration and mutations
 protect the table. Assertions/literal types, methods, computed keys and spreads
 also protect structure; constructor entries containing object schemas, callbacks
 or calls are not folded. Unknown factories and untyped object writes, including
 configuration IIFEs with spread-derived types, are intentionally retained.
-Other initializers are omitted when the removed fragment is longer than the omission marker; short values stay
-unchanged. Comments and their line terminators remain, except category comments
-inside a table whose values were folded.
+Other initializers are omitted when the removed fragment is longer than the
+omission marker; short values stay unchanged. Comments and their line terminators
+remain, except category comments inside a table whose values were folded.
 Omissions use synthetic `/* … */` or Python `...` markers, with indentation for
 whole-line omissions. Adjacent deleted regions merge; presentation-only blank
 lines between AST children compact, while literal and comment interiors stay
@@ -117,7 +126,8 @@ Seven grouped tests cover all four grammars, signature and Unicode comment
 preservation, nested bindings, exact original-line ranges, genuinely smaller
 output, unsupported paths, invalid syntax, unchanged non-smaller fallbacks,
 private tables versus public types/schemas, CommonJS APIs and local alias chains,
-local data writes/reducers versus shadowed or behavioral receivers, and
+local data writes/reducers versus shadowed or behavioral receivers, state versus
+installation aliases, output schemas versus implementation arguments, and
 whitespace/literal boundaries. A separate development ASan/UBSan harness exercised
 the actual C FFI adapter and grammars, repeated cleanup, parse errors, timeout and size-limit
 paths using a byte-array allocator shim with `moonbit.h`'s layout. This checks

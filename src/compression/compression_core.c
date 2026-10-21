@@ -331,6 +331,15 @@ static int member_assignment(Selection *s, TSNode node) {
     js_assignment(right);
 }
 
+static int public_schema_call(Selection *s, TSNode node) {
+  if (!is(node, "call_expression")) return 0;
+  TSNode fn = field(node, "function");
+  return is(fn, "member_expression") &&
+    (text_is(s, field(fn, "property"), "registerTool") ||
+     text_is(s, field(fn, "property"), "registerResource") ||
+     text_is(s, field(fn, "property"), "registerPrompt"));
+}
+
 /* Keep enclosing conditions only when they contain an outline declaration.
  * Comments are restored separately, including their physical line breaks. */
 static int contains_outline(Selection *s, TSNode node, unsigned depth) {
@@ -339,7 +348,7 @@ static int contains_outline(Selection *s, TSNode node, unsigned depth) {
   if (classlike(node) || type_declaration(node) || importlike(node) ||
       is(node, "function_declaration") || is(node, "generator_function_declaration") ||
       is(node, "function_definition") || is(node, "method_definition") ||
-      member_assignment(s, node)) return 1;
+      member_assignment(s, node) || public_schema_call(s, node)) return 1;
   if ((is(node, "lexical_declaration") || is(node, "variable_declaration") ||
        is(node, "expression_statement")) && signature_binding(s, node, depth + 1)) return 1;
   if (s->python && is(node, "expression_statement") &&
@@ -468,6 +477,36 @@ static int static_require(Selection *s, TSNode node) {
     is(ts_node_named_child(field(node, "arguments"), 0), "string");
 }
 
+/* Behavior origins protect installations, not the state aliases inside bodies.
+ * Members of imported APIs are opaque; this/req/parameters alone prove nothing. */
+static int behavior_value(Selection *s, TSNode node, unsigned depth) {
+  if (depth > 32 || ts_node_is_null(node)) return 0;
+  if (callable(node) || classlike(node) || static_require(s, node)) return 1;
+  if (is(node, "identifier")) {
+    TSNode bound = binding(s, node, node);
+    if (callable(bound) || classlike(bound)) return 1;
+    for (TSNode parent = bound; !ts_node_is_null(parent); parent = ts_node_parent(parent)) {
+      if (importlike(parent)) return 1;
+      if (is(parent, "program") || is(parent, "statement_block") || callable(parent)) break;
+    }
+    TSNode type = field(bound, "type");
+    if (!ts_node_is_null(type)) type = ts_node_named_child(type, 0);
+    if (is(type, "function_type") || is(type, "constructor_type")) return 1;
+    return is(bound, "variable_declarator") && behavior_value(s, field(bound, "value"), depth + 1);
+  }
+  if (is(node, "member_expression") || is(node, "subscript_expression"))
+    return behavior_value(s, field(node, "object"), depth + 1);
+  if (is(node, "as_expression") || is(node, "satisfies_expression") || is(node, "parenthesized_expression"))
+    return behavior_value(s, ts_node_named_child(node, 0), depth + 1);
+  if (js_assignment(node)) return behavior_value(s, field(node, "right"), depth + 1);
+  if (is(node, "call_expression")) {
+    TSNode fn = field(node, "function");
+    return is(fn, "member_expression") && text_is(s, field(fn, "property"), "bind") &&
+      behavior_value(s, field(fn, "object"), depth + 1);
+  }
+  return 0;
+}
+
 static void literal_outline(Selection *s, TSNode node, unsigned depth) {
   if (s->plan.status) return;
   if (depth > 512) { s->plan.status = 3; return; }
@@ -569,15 +608,26 @@ static int escapes(Selection *s, TSNode node, TSNode declaration, unsigned depth
       same_name(s, node, field(declaration, "name")) &&
       ts_node_eq(binding(s, node, node), declaration)) {
     TSNode reference = node, parent = ts_node_parent(node);
-    while (is(parent, "object") || is(parent, "pair") || is(parent, "spread_element") ||
-           is(parent, "parenthesized_expression") || is(parent, "as_expression") ||
-           is(parent, "satisfies_expression") ||
-           ((is(parent, "member_expression") || is(parent, "subscript_expression")) &&
-            ts_node_eq(field(parent, "object"), reference))) {
-      reference = parent;
-      parent = ts_node_parent(parent);
+    for (;;) {
+      if (is(parent, "arguments")) {
+        TSNode call = ts_node_parent(parent), fn = field(call, "function");
+        if (public_schema_call(s, call) ||
+            (is(fn, "member_expression") && text_is(s, field(fn, "object"), "JSON") &&
+             text_is(s, field(fn, "property"), "stringify") &&
+             ts_node_is_null(binding(s, call, field(fn, "object"))))) return 1;
+        /* An ordinary call exposes a schema only if its result escapes too. */
+        reference = call;
+        parent = ts_node_parent(call);
+      } else if (is(parent, "object") || is(parent, "pair") || is(parent, "spread_element") ||
+                 is(parent, "parenthesized_expression") || is(parent, "as_expression") ||
+                 is(parent, "satisfies_expression") || is(parent, "await_expression") ||
+                 ((is(parent, "member_expression") || is(parent, "subscript_expression")) &&
+                  ts_node_eq(field(parent, "object"), reference))) {
+        reference = parent;
+        parent = ts_node_parent(parent);
+      } else break;
     }
-    if (is(parent, "return_statement") || is(parent, "arguments") ||
+    if (is(parent, "return_statement") ||
         (member_assignment(s, parent) && ts_node_eq(field(parent, "right"), reference))) return 1;
     if (is(parent, "variable_declarator") && ts_node_eq(field(parent, "value"), reference) &&
         is(field(parent, "name"), "identifier")) {
@@ -620,17 +670,37 @@ static int object_schema(Selection *s, TSNode node, unsigned depth) {
 static int api_alias_reference(Selection *s, TSNode node, TSNode declaration,
                                unsigned depth, int api) {
   if (depth > 512) { s->plan.status = 3; return 1; }
-  if (api && is(node, "identifier")) {
-    TSNode bound = binding(s, node, node);
-    if (same_name(s, node, field(declaration, "name")) && ts_node_eq(bound, declaration)) return 1;
-    TSNode value = field(bound, "value");
-    if (is(bound, "variable_declarator") && (is(value, "identifier") ||
-        is(value, "member_expression") || is(value, "subscript_expression")) &&
-        api_alias_reference(s, value, declaration, depth + 1, 1)) return 1;
+  if (api) {
+    if (is(node, "identifier")) {
+      TSNode bound = binding(s, node, node);
+      if (same_name(s, node, field(declaration, "name")) && ts_node_eq(bound, declaration)) return 1;
+      TSNode value = field(bound, "value");
+      return is(bound, "variable_declarator") &&
+        api_alias_reference(s, value, declaration, depth + 1, 1);
+    }
+    if (is(node, "member_expression") || is(node, "subscript_expression"))
+      return api_alias_reference(s, field(node, "object"), declaration, depth + 1, 1) ||
+        (is(node, "subscript_expression") &&
+         api_alias_reference(s, field(node, "index"), declaration, depth + 1, 1));
+    if (is(node, "as_expression") || is(node, "satisfies_expression") || is(node, "parenthesized_expression"))
+      return api_alias_reference(s, ts_node_named_child(node, 0), declaration, depth + 1, 1);
+    if (js_assignment(node))
+      return api_alias_reference(s, field(node, "right"), declaration, depth + 1, 1);
+    if (is(node, "call_expression"))
+      return api_alias_reference(s, field(node, "function"), declaration, depth + 1, 1);
+    /* Installing a function/class does not expose the aliases in its body. */
+    return 0;
   }
-  if (member_assignment(s, node))
-    return api_alias_reference(s, field(node, "left"), declaration, depth + 1, 1) ||
-      api_alias_reference(s, field(node, "right"), declaration, depth + 1, 1);
+  if (member_assignment(s, node)) {
+    int behavior = behavior_value(s, field(node, "right"), 0);
+    /* An opaque explicit receiver type may describe behavior outside this AST.
+     * Keep its annotation, without promoting untyped state in the function. */
+    TSNode type = field(declaration, "type");
+    int typed_receiver = !ts_node_is_null(type) && !data_type(s, type, 0);
+    if ((behavior && api_alias_reference(s, field(node, "right"), declaration, depth + 1, 1)) ||
+        ((behavior || typed_receiver) &&
+         api_alias_reference(s, field(node, "left"), declaration, depth + 1, 1))) return 1;
+  }
   for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
     if (api_alias_reference(s, ts_node_named_child(node, i), declaration, depth + 1, api)) return 1;
   return 0;

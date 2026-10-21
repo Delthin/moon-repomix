@@ -259,6 +259,89 @@ test "CommonJS exports aliases and callback-installed member APIs keep signature
     ] {
     assert_false(data.text.contains(fragment))
   }
+  let focused_source =
+    #|import { handle } from './handlers';
+    #|res.send = function send(body, callback) {
+    #|  var chunk = body;
+    #|  var req = this.req;
+    #|  var app = this.app;
+    #|  var done = callback;
+    #|  var next = req.next;
+    #|  var value = chunk;
+    #|  this.payload = value;
+    #|  this.continue = next;
+    #|  req.done = done;
+    #|  app.chunk = chunk;
+    #|};
+    #|function installBehavior(method: string) {
+    #|  const first = handle;
+    #|  const second = first;
+    #|  const api = externalApi;
+    #|  api[method] = second;
+    #|  function localHandler(input: string) { consume(input); }
+    #|  const localAlias = localHandler;
+    #|  api.local = localAlias;
+    #|  class Handler { run(input: string) { consume(input); } }
+    #|  const ClassAlias = Handler;
+    #|  api.Handler = ClassAlias;
+    #|}
+    #|async function schemas(server: Server): Promise<Response> {
+    #|  const internal = { internalMode: true };
+    #|  consume(internal);
+    #|  const state = { privateState: true };
+    #|  cache.set('cache-key', state);
+    #|  const cliOptions = { implementationOption: true } as CliOptions;
+    #|  await runCli(cliOptions);
+    #|  const registered = { inputSchema: inputType, outputSchema: outputType };
+    #|  server.registerTool('tool', registered, async (args: Args): Promise<Response> => {
+    #|    const scratch = { scratchKey: true };
+    #|    record(scratch);
+    #|    const response = { responseField: args.value };
+    #|    return response;
+    #|  });
+    #|  const publicContext = { directory: directoryName };
+    #|  const publicMetrics = { totalFiles: paths.length };
+    #|  return await formatResponse(publicContext, publicMetrics);
+    #|}
+    #|function emptyRegistration(server: Server) {
+    #|  server.registerTool('empty', { inputSchema: inputType, annotations: { readOnlyHint: true } }, async (args: Args): Promise<void> => { consume(args); });
+    #|}
+    #|function shadowSerialization(JSON: Helper) { const shadowed = { shadowState: true }; JSON.stringify(shadowed); }
+    #|function transformedSchema(): Result {
+    #|  const exposed = { externalShape: true };
+    #|  const validated = validate(exposed);
+    #|  return validated;
+    #|}
+    #|function serialization() {
+    #|  const json = { serializedShape: true };
+    #|  consume(JSON.stringify(json));
+    #|}
+    #|
+  let focused = @compression.compress("focused.ts", focused_source)
+  assert_true(focused.applied)
+  for
+    fragment in [
+      "res.send = function send(body, callback)", "this.payload = value;", "this.continue = next;",
+      "const first = handle;", "const second = first;", "const api = externalApi;",
+      "api[method] = second;", "function localHandler(input: string)", "const localAlias = localHandler;",
+      "api.local = localAlias;", "class Handler", "const ClassAlias = Handler;",
+      "api.Handler = ClassAlias;", "schemas(server: Server): Promise<Response>",
+      "const registered = { inputSchema: inputType, outputSchema: outputType };",
+      "server.registerTool(", "async (args: Args): Promise<Response>", "const response = { responseField: args.value };",
+      "const publicContext = { directory: directoryName };", "const publicMetrics = { totalFiles: paths.length };",
+      "server.registerTool('empty',", "annotations: { readOnlyHint: true }", "async (args: Args): Promise<void>",
+      "const exposed = { externalShape: true };", "const json = { serializedShape: true };",
+    ] {
+    assert_true(focused.text.contains(fragment))
+  }
+  for
+    fragment in [
+      "var chunk", "var req", "var app", "var done", "var next", "var value", "internalMode",
+      "privateState", "implementationOption", "scratchKey", "shadowState", "consume(",
+      "cache.set(", "runCli(",
+    ] {
+    assert_false(focused.text.contains(fragment))
+  }
 }
 
 ///|
