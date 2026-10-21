@@ -64,7 +64,8 @@ async test "real repository: unborn, scoped patches, NUL names, logs and unsafe 
   fixture_git(dir, ["mv", "--", "scope/old", "scope/new"])
   fixture_git(dir, ["mv", "--", "scope/cross", "outside-moved"])
   @fs.write_file(dir + "/scope/" + odd, "special changed\n")
-  @fs.write_file(dir + "/outside", "outside changed\n")
+  let outside_marker = "outside changed\n" + @platform.basename(dir) + "\n"
+  @fs.write_file(dir + "/outside", outside_marker)
   let marker = dir + "/extension-ran"
   // Deliberately executable repository configuration. The trailing comment
   // ignores Git's extension arguments. This is fixture data, never a runner.
@@ -92,7 +93,20 @@ async test "real repository: unborn, scoped patches, NUL names, logs and unsafe 
   )
   let snapshot = @git.collect(dir + "/scope", diffs=true, logs=2)
   assert_false(@fs.exists(marker))
-  assert_eq(snapshot.repository_root, @platform.separators(@fs.realpath(dir)))
+  if @platform.is_windows() {
+    // Git expands 8.3 ancestors such as RUNNER~1; async realpath preserves them.
+    // Verify the same fresh repository through a unique filesystem marker.
+    assert_eq(
+      @platform.basename(snapshot.repository_root),
+      @platform.basename(dir),
+    )
+    assert_eq(
+      @fs.read_file(snapshot.repository_root + "/outside").text(),
+      outside_marker,
+    )
+  } else {
+    assert_eq(snapshot.repository_root, @platform.separators(@fs.realpath(dir)))
+  }
   assert_true(snapshot.revision is Some(_))
   assert_eq(snapshot.diffs.length(), 6)
   let staged = snapshot.diffs.filter(d => d.kind == "staged")
