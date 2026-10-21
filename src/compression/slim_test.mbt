@@ -92,6 +92,8 @@ test "private scalar tables fold but public keys and literal types survive" {
     #|(wrappedMutation[key]) = incoming;
     #|const destructuredMutation: Record<string, string[]> = { destructuredMutationKey: ['alpha'], destructuredMutationOther: ['beta'] };
     #|[destructuredMutation[key]] = incoming;
+    #|let loopMutation: Record<string, string[]> = { loopMutationKey: ['alpha'], loopMutationOther: ['beta'] };
+    #|for (loopMutation of items) { consume(loopMutation); }
     #|const queried: Record<string, string[]> = { queryKey: ['alpha'], queryOther: ['beta'] };
     #|type Element = typeof queried['queryKey'];
     #|const schemaConstructors: Record<string, Widget> = { constructorSchemaKey: new Widget({ handler: callback }), b: new Widget('b'), c: new Widget('c'), d: new Widget('d'), e: new Widget('e'), f: new Widget('f'), g: new Widget('g'), h: new Widget('h') };
@@ -121,11 +123,11 @@ test "private scalar tables fold but public keys and literal types survive" {
       "mutatedKey:", "mutatedOther:", "updatedKey:", "updatedOther:", "deletedKey:",
       "deletedOther:", "augmentedKey:", "augmentedOther:", "wrappedMutationKey:",
       "wrappedMutationOther:", "destructuredMutationKey:", "destructuredMutationOther:",
-      "queryKey:", "queryOther:", "typeof queried['queryKey']", "constructorSchemaKey:",
-      "callKey:", "['computedArrayKey']:", "computedArrayOther:", "...externalArrayMap",
-      "spreadArrayKey:", "literalMethod(value: string): string", "methodArrayKey:",
-      "narrowArrayKey:", "narrowArrayOther:", "literalConstructorKey:", "behaviorAliasKey: handler",
-      "smallKey:", "smallConstructorKey:", "export { remote } from './remote';",
+      "loopMutationKey:", "loopMutationOther:", "queryKey:", "queryOther:", "typeof queried['queryKey']",
+      "constructorSchemaKey:", "callKey:", "['computedArrayKey']:", "computedArrayOther:",
+      "...externalArrayMap", "spreadArrayKey:", "literalMethod(value: string): string",
+      "methodArrayKey:", "narrowArrayKey:", "narrowArrayOther:", "literalConstructorKey:",
+      "behaviorAliasKey: handler", "smallKey:", "smallConstructorKey:", "export { remote } from './remote';",
       "export * from './types';",
     ] {
     assert_true(tables.text.contains(fragment), msg=fragment[:])
@@ -140,6 +142,14 @@ test "private scalar tables fold but public keys and literal types survive" {
     #|function loopShadow() { for (const shadowed of items) { consume(shadowed); } }
     #|function catchShadow() { try { work(); } catch (shadowed) { consume(shadowed); } }
     #|function hoistedShadow() { if (condition) { var shadowed = input; } consume(shadowed); }
+    #|const blockFunction: Record<string, string[]> = { blockFunctionKey: ['alpha'], blockFunctionOther: ['beta'] };
+    #|export function functionBoundary() { if (condition) { function blockFunction() {} } return blockFunction; }
+    #|const blockClass: Record<string, string[]> = { blockClassKey: ['alpha'], blockClassOther: ['beta'] };
+    #|export function classBoundary() { if (condition) { class blockClass {} } return blockClass; }
+    #|const typeOnly: Record<string, string[]> = { typeOnlyKey: ['alpha'], typeOnlyOther: ['beta'] };
+    #|export function typeBoundary() { type typeOnly = string; return typeOnly; }
+    #|const signatureDefault: Record<string, string[]> = { signatureDefaultKey: ['alpha'], signatureDefaultOther: ['beta'] };
+    #|export function signatureBoundary(value = signatureDefault) { var signatureDefault = local; return value; }
     #|namespace builtinShadow {
     #|  type Record<K, V> = { localTypeKey: V };
     #|  const protectedMap: Record<string, string[]> = { builtinShadowKey: ['alpha'], builtinShadowOther: ['beta'] };
@@ -152,9 +162,17 @@ test "private scalar tables fold but public keys and literal types survive" {
     shadow.text.contains(
       "const shadowed: Record<string, string[]> = /* … */;",
     ),
+    msg=shadow.text[:],
   )
   assert_true(shadow.text.contains("builtinShadowKey:"))
   assert_true(shadow.text.contains("builtinShadowOther:"))
+  for
+    key in [
+      "blockFunctionKey:", "blockFunctionOther:", "blockClassKey:", "blockClassOther:",
+      "typeOnlyKey:", "typeOnlyOther:", "signatureDefaultKey:", "signatureDefaultOther:",
+    ] {
+    assert_true(shadow.text.contains(key), msg=key[:])
+  }
 }
 
 ///|

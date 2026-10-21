@@ -160,6 +160,8 @@ static int same_name(Selection *s, TSNode a, TSNode b) {
 static TSNode scope_binding(Selection *s, TSNode node, TSNode name, unsigned depth) {
   if (depth > 512) { s->plan.status = 3; return (TSNode){0}; }
   if (ts_node_is_null(node)) return (TSNode){0};
+  if (is(node, "assignment_pattern"))
+    return scope_binding(s, field(node, "left"), name, depth + 1);
   TSNode declared = field(node, "name");
   if (same_name(s, declared, name)) return node;
   if ((is(node, "identifier") || is(node, "shorthand_property_identifier_pattern")) &&
@@ -204,8 +206,13 @@ static TSNode binding(Selection *s, TSNode from, TSNode name) {
       TSNode found = scope_binding(s, field(scope, "parameters"), name, 0);
       if (!ts_node_is_null(found)) return found;
       if (same_name(s, field(scope, "parameter"), name)) return scope;
-      found = hoisted_binding(s, field(scope, "body"), name, 0);
-      if (!ts_node_is_null(found)) return found;
+      TSNode body = field(scope, "body");
+      /* Parameter defaults and signature types cannot see body-local vars. */
+      if (!ts_node_is_null(body) && ts_node_start_byte(from) >= ts_node_start_byte(body) &&
+          ts_node_end_byte(from) <= ts_node_end_byte(body)) {
+        found = hoisted_binding(s, body, name, 0);
+        if (!ts_node_is_null(found)) return found;
+      }
     } else if (is(scope, "for_in_statement") || is(scope, "for_statement") || is(scope, "catch_clause")) {
       TSNode pattern = field(scope, is(scope, "catch_clause") ? "parameter" :
                                    is(scope, "for_statement") ? "initializer" : "left");
@@ -296,18 +303,39 @@ static int index_only(Selection *s, TSNode node, TSNode declaration, unsigned de
   if (depth > 512) { s->plan.status = 3; return 0; }
   TSNode name = field(declaration, "name");
   if ((is(node, "identifier") || is(node, "shorthand_property_identifier")) &&
-      same_name(s, node, name) && !ts_node_eq(node, name) &&
-      ts_node_eq(binding(s, node, node), declaration)) {
-    TSNode parent = ts_node_parent(node);
-    for (TSNode ancestor = parent; !ts_node_is_null(ancestor); ancestor = ts_node_parent(ancestor))
-      if (is(ancestor, "type_query")) return 0;
-    if (!is(parent, "subscript_expression") || !ts_node_eq(field(parent, "object"), node)) return 0;
-    for (TSNode use = ts_node_parent(parent); !ts_node_is_null(use); use = ts_node_parent(use)) {
-      TSNode left = field(use, "left");
-      if (((js_assignment(use) || is(use, "augmented_assignment_expression")) &&
-           !ts_node_is_null(left) && ts_node_start_byte(left) <= ts_node_start_byte(parent) &&
-           ts_node_end_byte(left) >= ts_node_end_byte(parent)) ||
-          is(use, "update_expression") || is(use, "unary_expression")) return 0;
+      same_name(s, node, name) && !ts_node_eq(node, name)) {
+    TSNode bound = binding(s, node, node);
+    if (!ts_node_eq(bound, declaration)) {
+      /* Only definite value declarations prove that this is a different table.
+       * Type-only names and mode-dependent block functions stay ambiguous. */
+      int shadow = is(bound, "variable_declarator") || is(bound, "required_parameter") ||
+        is(bound, "optional_parameter");
+      if (is(bound, "identifier") || is(bound, "shorthand_property_identifier_pattern")) {
+        TSNode owner = ts_node_parent(bound);
+        shadow = is(owner, "formal_parameters") || is(owner, "required_parameter") ||
+          is(owner, "optional_parameter") || is(owner, "rest_pattern") ||
+          is(owner, "assignment_pattern") || is(owner, "object_pattern") ||
+          is(owner, "array_pattern") || is(owner, "pair_pattern") || is(owner, "catch_clause");
+        if (is(owner, "for_in_statement")) {
+          for (uint32_t i = 0; i < ts_node_child_count(owner); ++i) {
+            TSNode token = ts_node_child(owner, i);
+            if (is(token, "const") || is(token, "let") || is(token, "var")) shadow = 1;
+          }
+        }
+      }
+      if (!shadow) return 0;
+    } else {
+      TSNode parent = ts_node_parent(node);
+      for (TSNode ancestor = parent; !ts_node_is_null(ancestor); ancestor = ts_node_parent(ancestor))
+        if (is(ancestor, "type_query")) return 0;
+      if (!is(parent, "subscript_expression") || !ts_node_eq(field(parent, "object"), node)) return 0;
+      for (TSNode use = ts_node_parent(parent); !ts_node_is_null(use); use = ts_node_parent(use)) {
+        TSNode left = field(use, "left");
+        if (((js_assignment(use) || is(use, "augmented_assignment_expression")) &&
+             !ts_node_is_null(left) && ts_node_start_byte(left) <= ts_node_start_byte(parent) &&
+             ts_node_end_byte(left) >= ts_node_end_byte(parent)) ||
+            is(use, "update_expression") || is(use, "unary_expression")) return 0;
+      }
     }
   }
   for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)

@@ -45,8 +45,9 @@ Private scalar/primitive-array tables with an explicit wide
 initializer with at least two entries. Inferred scalar/array tables and explicitly
 wide-key `Record` tables of constructor expressions require at least eight
 entries. References must be indexed reads of the same lexical binding; parameter,
-block, loop, catch and hoisted bindings can shadow it. Exports, aliases, type
-queries, whole-table returns/serialization/arguments, key enumeration and table
+block, loop, catch and hoisted bindings can shadow it. Ambiguous type-only or
+block declarations preserve the table, and parameter defaults do not inherit
+body-local bindings. Exports, aliases, type queries, whole-table returns/serialization/arguments, key enumeration and table
 mutations protect structure. Literal types/assertions, methods, computed keys
 and spreads also protect it; constructor arguments containing object schemas,
 inline callbacks or calls prevent folding. Other initializers are omitted when the
