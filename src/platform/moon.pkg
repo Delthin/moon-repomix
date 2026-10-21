@@ -10,5 +10,5 @@ import {
 supported_targets = "native"
 
 options(
-  "native-stub": [ "platform.c" ],
+  "native-stub": [ "platform.c", "owned_tree.c" ],
 )

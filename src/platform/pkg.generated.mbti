@@ -20,6 +20,8 @@ pub async fn output_path(String, String) -> String
 
 pub fn parent(String) -> String
 
+pub fn remove_owned_tree(String) -> Unit raise
+
 pub fn separators(String) -> String
 
 pub async fn tokenizer_path() -> String

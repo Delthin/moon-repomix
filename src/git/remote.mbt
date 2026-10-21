@@ -167,7 +167,7 @@ async fn temporary_checkout(
   let directory = @fs.tmpdir(prefix="moon-git-checkout-")
   let mut retained = false
   defer (if !retained {
-    @async.protect_from_cancel(() => @fs.rmdir(directory, recursive=true))
+    @async.protect_from_cancel(() => @platform.remove_owned_tree(directory))
   })
   let head = operation(directory)
   owned_checkouts[directory] = ()
@@ -186,7 +186,7 @@ pub async fn cleanup(checkout : Checkout) -> Unit {
         "checkout is not owned by this process or was already cleaned",
       )
     }
-    @fs.rmdir(checkout.directory, recursive=true)
+    @platform.remove_owned_tree(checkout.directory)
     owned_checkouts.remove(checkout.directory)
   })
 }

@@ -16,4 +16,8 @@ import {
   "Delthin/moon_repomix/platform",
 } for "test"
 
+import {
+  "moonbitlang/async/os_error",
+} for "wbtest"
+
 supported_targets = "native"

@@ -57,6 +57,20 @@ async fn git(args : Array[String], cwd : String) -> Unit {
 }
 
 ///|
+// This standalone script uses async 0.22.5, not the product's async 0.19.2.
+// Keep cleanup local: Git's native clean removes read-only fixture objects and
+// unlinks directory symlinks/junctions without traversing their targets. The
+// second force flag is required for our nested fixture repository. Only invoke
+// this on the exact fresh tmpdir allocated below, never on a supplied path.
+async fn cleanup_fixture(temp : String) -> Unit {
+  git(["init", "--quiet", "--template=", "--initial-branch=fixture"], temp)
+  git(["clean", "--quiet", "-ffdx", "--", "."], temp)
+  assert_eq(@fs.readdir(temp), [".git"])
+  // The outer repository has no objects; only writable init metadata remains.
+  @fs.rmdir(temp, recursive=true)
+}
+
+///|
 fn source(header : String, line : String, footer : String) -> String {
   header + line.repeat(80) + footer
 }
@@ -133,8 +147,17 @@ async fn main {
   }
   let binary = @fs.realpath(args[1])
   let vocabulary = @fs.realpath(args[2])
+  let foreign = @fs.tmpdir(prefix="moon-repomix-advanced-foreign-")
+  defer @fs.rmdir(foreign, recursive=true)
+  @fs.write_file(foreign + "/keep", "outside fixture", create_mode=CreateNew)
   let temp = @fs.tmpdir(prefix="moon-repomix-advanced-")
-  defer @fs.rmdir(temp, recursive=true)
+  defer @async.protect_from_cancel(() => {
+    cleanup_fixture(temp)
+    assert_eq(@fs.read_file(foreign + "/keep").text(), "outside fixture")
+    assert_false(@fs.exists(temp))
+  })
+  // async 0.22.5 uses an unprivileged NTFS junction on Windows for this link.
+  @fs.symlink(target=foreign, temp + "/outside-link")
   if args.contains("--remote-smoke") {
     remote_smoke(binary, vocabulary, temp)
     return

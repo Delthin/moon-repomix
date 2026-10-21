@@ -33,7 +33,7 @@ async fn fixture_git(directory : String, args : Array[String]) -> Unit {
 ///|
 async test "real repository: unborn, scoped patches, NUL names, logs and unsafe extensions" {
   let dir = @fs.tmpdir(prefix="moon-git-context-test-")
-  defer @async.protect_from_cancel(() => @fs.rmdir(dir, recursive=true))
+  defer @async.protect_from_cancel(() => @platform.remove_owned_tree(dir))
   fixture_git(dir, ["init", "--template=", "--initial-branch=main"])
   @fs.mkdir(dir + "/scope")
   let odd = if @platform.is_windows() {
@@ -153,7 +153,7 @@ async test "real repository: unborn, scoped patches, NUL names, logs and unsafe 
     _ => fail("expected output cap error")
   }
   let plain = @fs.tmpdir(prefix="moon-git-not-repo-")
-  defer @async.protect_from_cancel(() => @fs.rmdir(plain, recursive=true))
+  defer @async.protect_from_cancel(() => @platform.remove_owned_tree(plain))
   try @git.collect(plain) catch {
     @git.NotRepository => ()
     err => raise err

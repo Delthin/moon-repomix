@@ -20,7 +20,9 @@ Git configuration, disabled hooks/fsmonitor/signature display/external diff/
 textconv/credential helpers/submodules/replace objects/automatic maintenance.
 Only PATH and OS runtime variables (SystemRoot, WINDIR, TEMP, TMP, TMPDIR,
 PATHEXT) are copied from the host; injected GIT_* and shell/helper variables are
-not inherited. Null devices use `NUL` on Windows and `/dev/null` elsewhere.
+not inherited. Configuration null devices use `NUL` on Windows and `/dev/null`
+elsewhere. Child stdin is an EOF pipe, never an inherited terminal or an async
+file open on a Windows device.
 Worktree diffs also disable every configured clean/process attribute filter,
 including filters from included repository configuration. Git metadata is read,
 not rewritten. Concurrent malicious modification of repository/config files is
@@ -62,7 +64,11 @@ tasks and subsequently resume cancellation. Cleanup only accepts directories
 allocated by this package in the same process; public struct fields do not grant
 permission to delete arbitrary paths. Successful cleanup invalidates the handle
 (do not call concurrently or twice). Deletion errors propagate and retain ownership
-so the caller can retry explicitly. Repository symlinks are removed, not followed.
+so the caller can retry explicitly. Native cleanup removes read-only Git objects;
+child symlinks/junctions are removed, never followed, and a linked root is rejected.
+Windows clears read-only attributes through the exact no-follow file handle,
+not path-based chmod; read-only files with multiple hardlinks are rejected to
+avoid changing attributes of a potentially foreign file.
 
 Package tests use one synthetic real repository for scoped diff/log and dangerous
 extension markers (POSIX marker execution, Windows uses failing extension config),

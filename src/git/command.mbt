@@ -136,7 +136,10 @@ async fn git_raw(
     defer stdout.close()
     let (stderr, err_pipe) = @process.read_from_process()
     defer stderr.close()
-    let input = @process.redirect_from_file(null_device())
+    // A closed writer gives Git immediate EOF without inheriting interactive
+    // stdin or opening NUL as an overlapped file on Windows.
+    let (input, writer) = @process.write_to_process()
+    writer.close()
     @async.with_task_group(group => {
       let child = group.spawn(() => {
         @process.run(
