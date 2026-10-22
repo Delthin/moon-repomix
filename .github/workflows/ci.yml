@@ -7,7 +7,6 @@ jobs:
     env:
       # Keep this equal to moon-toolchain; check-toolchain verifies the installation.
       MOONBIT_INSTALL_VERSION: "0.10.15+943464bfa"
-      BENCHMARK_WORKSPACE: ${{ runner.temp }}/moon-repomix-performance-${{ github.run_id }}-${{ github.run_attempt }}
     strategy:
       fail-fast: false
       matrix:
@@ -21,6 +20,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Initialize Linux benchmark workspace path
+        if: runner.os == 'Linux'
+        shell: bash
+        run: printf 'BENCHMARK_WORKSPACE=%s/moon-repomix-performance-%s-%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Install pinned MoonBit toolchain (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -111,7 +114,7 @@ jobs:
         run: moon run --target native scripts/benchmark.mbtx run "$BENCHMARK_WORKSPACE" _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
       - name: Performance evidence (including setup or measurement failures)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always() && runner.os == 'Linux'
+        if: always() && runner.os == 'Linux' && env.BENCHMARK_WORKSPACE != ''
         with:
           name: performance-linux-x64
           path: |
