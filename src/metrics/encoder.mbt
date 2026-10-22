@@ -100,6 +100,10 @@ fn Encoder::encode_text(
   let mut start = 0
   let mut byte_start = 0
   let mut count = 0
+  // A call-local memo never sums separately tokenized documents: keys are exact
+  // pre-tokenized byte pieces, whose BPE merges cannot cross piece boundaries.
+  // Keep Encoder immutable/reentrant, and bound retained keys to 2 MiB.
+  let counts : Map[Bytes, Int32] = Map([])
   while start < chars.length() {
     let end = self.piece_end(chars, start)
     let mut byte_end = byte_start
@@ -117,7 +121,23 @@ fn Encoder::encode_text(
     }
     // The immutable UTF-8 snapshot supplies borrowed slices for every rank
     // lookup; neither pre-tokenized pieces nor candidate merges copy bytes.
-    count += self.encode_piece(bytes[byte_start:byte_end], output)
+    let piece = bytes[byte_start:byte_end]
+    if output is None {
+      if piece.length() == 1 {
+        // Loading validates that every possible single byte is a rank.
+        count += 1
+      } else if counts.get_from_bytes(piece) is Some(known) {
+        count += known
+      } else {
+        let size = self.encode_piece(piece, None)
+        count += size
+        if piece.length() <= 256 && counts.length() < 8192 {
+          counts[piece.to_owned()] = size
+        }
+      }
+    } else {
+      count += self.encode_piece(piece, output)
+    }
     start = end
     byte_start = byte_end
   }

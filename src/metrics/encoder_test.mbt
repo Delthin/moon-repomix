@@ -34,6 +34,14 @@ async test "ordinary o200k IDs match independent tiktoken 0.14.0 golden" {
   assert_eq(encoder.count("hel") + encoder.count("lo"), 2)
   assert_eq(encoder.count("hello"), 1)
   assert_eq(encoder.encode("hello"), [24912])
+  // The count memo is scoped to exact regex pieces in one call. Full encoding
+  // does not use it, so repeated/Unicode pieces exercise the memo independently.
+  let repeated = "antidisestablishmentarianism MixedCaseIdentifier123 中文 😀\n".repeat(
+    128,
+  )
+  let expected = encoder.encode(repeated).length()
+  assert_eq(encoder.count(repeated), expected)
+  assert_eq(encoder.count(repeated), expected)
 }
 
 ///|
