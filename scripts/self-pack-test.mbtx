@@ -4,6 +4,159 @@ import {
   "moonbitlang/async@0.22.5/fs",
   "moonbitlang/async@0.22.5/process",
   "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+}
+
+///|
+fn packed_tokens(report : String) -> Int32 raise {
+  for word in report.split(" "); previous = "" {
+    if word == "tokens" {
+      break @string.parse_int(previous)
+    }
+    continue word.to_owned()
+  } nobreak {
+    fail("Missing complete document token count")
+  }
+}
+
+///|
+async fn moonbit_self_pack(
+  binary : String,
+  common : Array[String],
+  repo : String,
+  output : String,
+) -> Unit {
+  let raw_path = output + "/moonbit-raw.json"
+  let compressed_path = output + "/moonbit-compressed.json"
+  let selected = common +
+    [
+      "--style", "json", "--include", "src/**/*.{mbt,mbti}", "--top-files-len", "0",
+    ]
+  let (raw_code, _, raw_error) = @process.collect_output(
+    binary,
+    selected + ["-o", raw_path],
+    cwd=repo,
+  )
+  @fs.write_file(output + "/moonbit-raw.log", raw_error, create_mode=CreateNew)
+  assert_eq(raw_code, 0, msg=raw_error.text())
+  let (code, _, error) = @process.collect_output(
+    binary,
+    selected + ["--compress", "--full-metadata", "-o", compressed_path],
+    cwd=repo,
+  )
+  @fs.write_file(
+    output + "/moonbit-compressed.log",
+    error,
+    create_mode=CreateNew,
+  )
+  assert_eq(code, 0, msg=error.text())
+  guard @json.parse(@fs.read_file(raw_path).text())
+    is { "files": Object(original), .. } else {
+    fail("Missing raw MoonBit files")
+  }
+  guard @json.parse(@fs.read_file(compressed_path).text())
+    is {
+      "files": Object(files),
+      "metadata": { "compression": Array(records), .. },
+      ..
+    } else {
+    fail("Missing complete MoonBit records")
+  }
+  assert_true(!files.is_empty())
+  assert_eq(files.length(), original.length())
+  assert_eq(records.length(), files.length())
+  for (path, value) in files {
+    assert_true(path.has_suffix(".mbt") || path.has_suffix(".mbti"), msg=path)
+    guard original.get(path) is Some(String(source)) else {
+      fail("Different accepted MoonBit set: " + path)
+    }
+    assert_eq(source, @fs.read_file(repo + "/" + path).text(), msg=path)
+    if path.has_suffix(".mbti") {
+      assert_eq(value, Json(source), msg=path)
+    }
+  }
+  assert_false(files.contains("src/security/scan_test.mbt"))
+  let mut applied_count = 0
+  let mut interface_count = 0
+  for record in records {
+    guard record
+      is {
+        "path": String(path),
+        "language": String("moonbit"),
+        "applied": applied,
+        "reason": reason,
+        "ranges": Array(ranges),
+        "originalTokens": Number(before, ..),
+        "outputTokens": Number(after, ..),
+        ..
+      } else {
+      fail("Invalid MoonBit compression record")
+    }
+    guard original.get(path) is Some(String(source)) &&
+      files.get(path) is Some(String(text)) else {
+      fail("MoonBit record without body")
+    }
+    if path.has_suffix(".mbti") {
+      interface_count += 1
+    }
+    match applied {
+      True => {
+        applied_count += 1
+        assert_eq(reason, Json::null())
+        assert_true(after < before && !ranges.is_empty(), msg=path)
+        let lines : Array[StringView] = source.split("\n").collect()
+        let mut previous = 0.0
+        for range in ranges {
+          guard range is [Number(start, ..), Number(end, ..)] else {
+            fail("Invalid original line range")
+          }
+          assert_true(
+            start > previous &&
+            end >= start &&
+            end <= lines.length().to_double(),
+            msg=path,
+          )
+          previous = end
+        }
+      }
+      False => {
+        assert_eq(reason, Json("not-smaller"), msg=path)
+        assert_eq(text, source, msg=path)
+        assert_true(ranges.is_empty(), msg=path)
+      }
+      _ => fail("Invalid applied flag")
+    }
+  }
+  assert_true(applied_count > 0 && interface_count > 0)
+  for
+    (path, anchor) in [
+      ("src/types.mbt", "pub fn options("),
+      ("src/pack.mbt", "pub async fn pack("),
+      ("src/metrics/encoder.mbt", "pub fn Encoder::count("),
+      ("src/selection/select.mbt", "pub async fn select("),
+    ] {
+    guard files.get(path) is Some(String(text)) else {
+      fail("Missing real MoonBit module: " + path)
+    }
+    assert_true(text.contains(anchor), msg=path + ":" + anchor)
+  }
+  let raw_tokens = packed_tokens(raw_error.text())
+  let compressed_tokens = packed_tokens(error.text())
+  assert_true(compressed_tokens < raw_tokens)
+  println(
+    "MoonBit self-pack: " +
+    files.length().to_string() +
+    " files, " +
+    applied_count.to_string() +
+    " applied, " +
+    interface_count.to_string() +
+    " interfaces, " +
+    raw_tokens.to_string() +
+    " -> " +
+    compressed_tokens.to_string() +
+    " complete tokens (full metadata).",
+  )
 }
 
 ///|
@@ -107,10 +260,11 @@ async fn main {
       @fs.read_file(repo + "/assets/tokenizer-golden.json").text() + "\n",
     )
   }
+  moonbit_self_pack(binary, common, repo, output)
   println(xml_err.text().split("\n").collect()[0])
   println(md_error.text().split("\n").collect()[0])
   println(
-    "PASS: real repository, demo code retained, assets excluded by config, repeat/stdout equality, XML/Markdown and explicit golden fixture",
+    "PASS: real repository, MoonBit raw/skeleton accepted-set equality, signatures/interfaces/original ranges, assets excluded, repeat/stdout, XML/Markdown and golden fixture",
   )
   println("Output: " + output)
 }
