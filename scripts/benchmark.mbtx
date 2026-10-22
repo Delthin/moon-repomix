@@ -704,6 +704,7 @@ async fn check_ranges(h : Harness, repo : Repo) -> Json {
     }
     guard !applied ||
       (
+        reason is Null &&
         language is String(_) &&
         !ranges.is_empty() &&
         !bodies[path].trim().is_empty()
@@ -730,6 +731,7 @@ async fn check_ranges(h : Harness, repo : Repo) -> Json {
       fail("Invalid compression token counts")
     }
     if !applied {
+      assert_true(ranges.is_empty())
       assert_eq(bodies[path], source)
     }
     for (anchor_path, fragments) in anchors(repo.id) {

@@ -118,4 +118,6 @@ jobs:
             ${{ env.BENCHMARK_WORKSPACE }}/report/
             ${{ env.BENCHMARK_WORKSPACE }}/logs/
             ${{ env.BENCHMARK_WORKSPACE }}/manifest/
+            ${{ env.BENCHMARK_WORKSPACE }}/documents/*-0.json
+            ${{ env.BENCHMARK_WORKSPACE }}/documents/*-ranges.json
           if-no-files-found: warn

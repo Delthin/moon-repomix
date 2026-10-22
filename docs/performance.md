@@ -85,7 +85,7 @@ moon run --target native scripts/benchmark.mbtx local "$WORKSPACE" \
 moon run --target native scripts/benchmark.mbtx verify "$WORKSPACE"
 ```
 
-Linux CI 复用已有 release CLI，运行同样六场景；macOS/Windows 功能测试不增加性能矩阵。`performance-linux-x64` artifact 在成功或失败时都尝试上传，**仅含 `report/`、`logs/`、`manifest/`**，不含语料、documents、node_modules、cache 或完整环境。离线 `verify` 需要本机保留的 documents，不能只靠精简 CI artifact 重跑。三 OS 另外上传 `moonbit-self-pack-*`，范围仅为 `dist/self-pack/moonbit-*` 的真实 MoonBit 自打包证据。
+Linux CI 复用已有 release CLI，运行同样六场景；macOS/Windows 功能测试不增加性能矩阵。`performance-linux-x64` artifact 在成功或失败时都尝试上传，包含 `report/`、`logs/`、`manifest/`，并保留两端每场景的预热输出及计时外源映射输出，方便直接检查正文；其余计时输出以散列证明与预热一致。不包含语料 checkout、node_modules、cache 或完整环境。离线 `verify` 仍需恢复固定源文件，不能仅靠 artifact 重跑。三 OS 另外上传 `moonbit-self-pack-*`，范围仅为 `dist/self-pack/moonbit-*` 的真实 MoonBit 自打包证据。
 
 ### 开发依赖与数据许可
 
