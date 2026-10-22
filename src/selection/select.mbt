@@ -114,17 +114,9 @@ pub async fn select(root : String, options : SelectionOptions) -> Selection {
     raise SelectionError::InvalidRoot(root)
   }
   let root = canonical(input)
-  let includes = options.include_patterns.map(p => {
-    compile_pattern(p, "include", 0, true)
-  })
-  let custom = options.ignore.map(p => compile_pattern(p, "ignore", 0, true))
-  let defaults = if options.use_default_patterns {
-    [".git", ".hg", ".svn", "node_modules", "_build", ".DS_Store"].map(p => {
-      compile_pattern(p, "default", 0, true)
-    })
-  } else {
-    []
-  }
+  let includes = custom_patterns(options.include_patterns, "include")
+  let custom = custom_patterns(options.ignore, "ignore")
+  let defaults = default_patterns(options.use_default_patterns)
   let output = match options.output {
     None => None
     Some(path) => {

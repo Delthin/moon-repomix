@@ -41,17 +41,9 @@ pub async fn path_filter(
   {
     root,
     options,
-    includes: options.include_patterns.map(p => {
-      compile_pattern(p, "include", 0, true)
-    }),
-    custom: options.ignore.map(p => compile_pattern(p, "ignore", 0, true)),
-    defaults: if options.use_default_patterns {
-      [".git", ".hg", ".svn", "node_modules", "_build", ".DS_Store"].map(p => {
-        compile_pattern(p, "default", 0, true)
-      })
-    } else {
-      []
-    },
+    includes: custom_patterns(options.include_patterns, "include"),
+    custom: custom_patterns(options.ignore, "ignore"),
+    defaults: default_patterns(options.use_default_patterns),
     inherited,
     blocked: blocked is Some(_),
     output,

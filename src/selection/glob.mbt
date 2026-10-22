@@ -46,11 +46,9 @@ fn compile_pattern(
       raw.has_prefix("/") ||
       raw.has_prefix("\\") ||
       raw.has_prefix("!") ||
-      raw.contains(":") ||
-      raw.contains("{") ||
-      raw.contains("}")
+      raw.contains(":")
     ) {
-    raise bad("absolute paths, negation and braces are not supported")
+    raise bad("absolute paths and negation are not supported")
   }
   let anchored = raw.has_prefix("/")
   let directory = raw.has_suffix("/")

@@ -197,7 +197,7 @@ async fn local_rules(
   }
   if options.use_dot_ignore {
     load_rules(base, ".ignore", rules)
-    load_rules(base, ".repomixignore", rules)
   }
+  load_rules(base, ".repomixignore", rules)
   rules
 }

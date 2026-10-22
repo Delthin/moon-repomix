@@ -49,7 +49,7 @@ test "glob validation, recursive components, classes, directory includes and UTF
   for
     bad in [
       "", "/absolute", "C:/absolute", "\\absolute", "\\\\server\\share", "../escape",
-      "a/../b", "a//b", "!negate", "{a,b}", "a**b", "[", "[z-a]", "foo\\",
+      "a/../b", "a//b", "!negate", "a**b", "[", "[z-a]", "foo\\",
     ] {
     let rejected = try {
       ignore(compile_pattern(bad, "include", 0, true))
@@ -219,6 +219,13 @@ async test "dot layers, deeper overrides, custom final exclusions and independen
     })
     assert_true(selected(no_dot, "drop.dot"))
     assert_false(selected(no_dot, "same.txt"))
+    let no_git_or_dot = select(root, {
+      ..SelectionOptions::default(),
+      use_gitignore: false,
+      use_dot_ignore: false,
+    })
+    assert_false(selected(no_git_or_dot, "same.txt"))
+    assert_true(selected(no_git_or_dot, "drop.dot"))
     let no_defaults = select(root, {
       ..SelectionOptions::default(),
       use_default_patterns: false,
