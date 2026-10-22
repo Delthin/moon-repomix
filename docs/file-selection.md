@@ -51,11 +51,12 @@ files 和 skipped 分别按相对路径的 **UTF-8 字节词典序** 排序，�
 ## 精确文件列表
 
 - `file_paths=None` 保持目录遍历；`Some([])` 是零文件，绝不退回全仓。`SelectionOptions` 字段不变。PathFilter 的 root 使用 select 返回的 canonical root。
-- `Some(paths)` 是 literal 根相对**文件**列表，`*`、`?`、方括号、花括号都不是模式。只检查列出的路径及祖先，不 readdir、不递归列出的目录，也不校验无关子树规则。保留空格、Unicode 和大小写；去重后按 UTF-8 字节排序，files/skipped 各自维持该顺序。
+- `Some(paths)` 是 literal 根相对**文件**列表，`*`、`?`、方括号、花括号都不是模式。只检查列出的路径及祖先，按需读取并缓存未剪枝父目录的原始目录项名称，不递归列出的目录，也不校验无关子树规则。保留空格、Unicode 和大小写；去重后按 UTF-8 字节排序，files/skipped 各自维持该顺序。
+- 已存在的普通文件/目录组件必须与父目录项**原始拼写完全一致**；不自动折叠大小写或做 Unicode 归一化。OS 能解析但目录项名称不同的大小写、Unicode 或 Windows 8.3 短名别名记 NonLiteralPath，防止字符串忽略规则被路径别名绕过。先 no-follow 分类再核对名称，每层排除目录立即剪枝，不读取其内部目录项。
 - 使用可移植 `/` 分隔写法。空路径、绝对路径、空组件、`.`、`..`、NUL、反斜杠及冒号均整体报 `InvalidPattern(source="file_paths", line=0, pattern=原始路径, ...)`，Windows 盘符、UNC、盘符相对路径也不能逃逸；**两接口都在规则 I/O 前校验完整列表**，不悄悄删除非法项。此限制不改变普通遍历或无精确列表的 Git 路径对 Unix 反斜杠/冒号文件名的支持。
 - 显式列表不绕过 include/default/custom/Git/dot/output-self 规则。每个列出路径从根逐组件 no-follow 检查，链接祖先或末项均记 Symlink；祖先是普通文件记 NotDirectory；其他非普通类型记 UnsupportedFileType；末项是普通目录记 Directory，不展开内容。
-- 完整路径语法校验后：继承的根剪枝 → 每层父目录规则加载 → 该组件 no-follow 类型（含 MissingFile）→ output-self → default → custom → Git/dot 规则 → 最终 include。普通文件/祖先缺失记 MissingFile；只有 ENOENT 是缺失，权限、规则解析、其他 I/O 和取消仍传播。一个列出路径只记一条 skip，path 保留列出项，祖先排除以 IgnoredDirectory 原因表示（不额外枚举祖先 skip）；空列表不读取根内规则。
-- PathFilter 使用同一私有 reason 决策和 exact 集合：未列出的路径恒 false，不递归列出的目录；但允许不存在的文件/目录组件供 Git 删除记录过滤，其余规则照常适用。Git rename 两端是否都匹配由调用者现有逻辑决定，本包不改变该契约。列表与规则、候选文件均不会直接读取候选正文。
+- 完整路径语法校验后：继承的根剪枝 → 每层父目录规则加载 → 该组件 no-follow 类型（含 MissingFile）→ 已存在普通组件的 literal 拼写 → 文件/目录位置类型 → output-self → default → custom → Git/dot 规则 → 最终 include。普通文件/祖先缺失记 MissingFile；只有 ENOENT 是缺失，权限、规则解析、其他 I/O 和取消仍传播。一个列出路径只记一条 skip，path 保留列出项，祖先排除以 IgnoredDirectory 原因表示（不额外枚举祖先 skip）；空列表不读取根内规则。
+- PathFilter 使用同一私有 reason 决策和 exact 集合：未列出的路径恒 false，不递归列出的目录；但允许不存在的文件/目录组件供 Git 删除记录过滤；来自 Git 的已存在组件同样要求磁盘目录项原始拼写，其余规则照常适用。Git rename 两端是否都匹配由调用者现有逻辑决定，本包不改变该契约。列表与规则、候选文件均不会直接读取候选正文。
 
 ## 作用域与顺序
 
@@ -99,7 +100,7 @@ files 和 skipped 分别按相对路径的 **UTF-8 字节词典序** 排序，�
 
 ENOENT 表示规则或元数据不存在；权限、解码、遍历、其他 I/O 错误和取消均向调用者传播。
 
-skipped.reason 当前形式：`Symlink`、`UnsupportedFileType`、`OutputFile`、`NotIncluded`、精确列表专用 `MissingFile`/`Directory`/`NotDirectory`、`Ignored:default`、`IgnoredDirectory:default`、`Ignored:custom`、`IgnoredDirectory:custom`、`Ignored:<source>:<line>`、`IgnoredDirectory:<source>:<line>`。冒号后的来源是诊断信息，不宜按冒号拆字段（Windows 盘符也含冒号）；目录统计应识别 IgnoredDirectory 前缀。
+skipped.reason 当前形式：`Symlink`、`UnsupportedFileType`、`OutputFile`、`NotIncluded`、精确列表专用 `MissingFile`/`Directory`/`NotDirectory`/`NonLiteralPath`、`Ignored:default`、`IgnoredDirectory:default`、`Ignored:custom`、`IgnoredDirectory:custom`、`Ignored:<source>:<line>`、`IgnoredDirectory:<source>:<line>`。冒号后的来源是诊断信息，不宜按冒号拆字段（Windows 盘符也含冒号）；目录统计应识别 IgnoredDirectory 前缀。
 
 ## 测试
 
@@ -112,6 +113,6 @@ moon info src/selection --target native
 moon check src/selection --target native
 ```
 
-`selection_wbtest.mbt` 使用自动清理的临时合成树，覆盖：逐项比较真实 `git check-ignore --no-index`（屏蔽全局/系统配置）、父层/嵌套/目录反选与剪枝、dot/custom/默认独立开关、真实父路径输出别名与缺失输出、UTF-8 顺序、未读正文、链接/断链/FIFO、规则解码和类型错误、无 Git 父层与 worktree commondir。`compat_wbtest.mbt` 另覆盖固定原版默认集合具体文件、根/嵌套作用域、共享剪枝、root-relative include、嵌套花括号及 256/8 边界、Git 字面花括号；`exact_wbtest.mbt` 覆盖 literal 列表、空列表/重复/UTF-8 排序、所有忽略层及来源、非法路径整体失败、目录/缺失/链接祖先/FIFO、未读正文、output 别名与 Git 删除路径集合。测试需要现有 Git，Unix 类型夹具还需要现有 mkfifo。
+`selection_wbtest.mbt` 使用自动清理的临时合成树，覆盖：逐项比较真实 `git check-ignore --no-index`（屏蔽全局/系统配置）、父层/嵌套/目录反选与剪枝、dot/custom/默认独立开关、真实父路径输出别名与缺失输出、UTF-8 顺序、未读正文、链接/断链/FIFO、规则解码和类型错误、无 Git 父层与 worktree commondir。`compat_wbtest.mbt` 另覆盖固定原版默认集合具体文件、根/嵌套作用域、共享剪枝、root-relative include、嵌套花括号及 256/8 边界、Git 字面花括号；`exact_wbtest.mbt` 覆盖 literal 列表、空列表/重复/UTF-8 排序、所有忽略层及来源、非法路径整体失败、目录/缺失/链接祖先/FIFO、未读正文、output 别名与 Git 删除路径集合；并在探测到大小写不敏感的夹具卷时验证文件/目录大写别名不能绕过 ignore 或 `.git` 排除。测试需要现有 Git，Unix 类型夹具还需要现有 mkfifo。
 
 CLI 功能测试还覆盖 Windows junction 排除；目标平台运行由 native CI 矩阵执行。

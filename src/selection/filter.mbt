@@ -23,6 +23,7 @@ struct PathFilter {
   output : String?
   exact : Map[String, Bool]?
   cache : Map[String, Array[Rule]]
+  names : Map[String, Map[String, Bool]]
 }
 
 ///|
@@ -55,6 +56,7 @@ async fn make_path_filter(
     output,
     exact: paths.map(paths => Map::from_array(paths.map(path => (path, true)))),
     cache: Map([]),
+    names: Map([]),
   }
 }
 
@@ -76,7 +78,8 @@ pub async fn path_filter(
 ///|
 // Shared decision for exact candidate discovery and Git filtering. Only the
 // latter allows missing paths (deletions). Ancestors are checked before loading
-// rules beneath them, and no candidate body or directory listing is opened.
+// rules beneath them. Exact lists also check on-disk spelling using cached names
+// of visited parents; pruned directories are never listed or entered.
 async fn PathFilter::reason(
   self : PathFilter,
   relative : String,
@@ -108,13 +111,37 @@ async fn PathFilter::reason(
     partial = if partial == "" { part } else { partial + "/" + part }
     let path = join(directory, part)
     let is_dir = i < parts.length() - 1
-    match optional_kind(path) {
+    let kind = optional_kind(path)
+    match kind {
       Some(SymLink) => return Some("Symlink")
-      Some(Directory) if !is_dir => return Some("Directory")
-      Some(Regular) if is_dir => return Some("NotDirectory")
       Some(kind) if kind != Regular && kind != Directory =>
         return Some("UnsupportedFileType")
       None if require_file => return Some("MissingFile")
+      _ => ()
+    }
+    if self.exact is Some(_) && kind is Some(_) {
+      // stat can accept case-folded, normalization or short-name aliases. Only
+      // ordinary existing entries reach here; compare their parent's raw names
+      // before entering this component or applying string-based exclusions.
+      let names = match self.names.get(directory) {
+        Some(names) => names
+        None => {
+          let names = Map::from_array(
+            @fs.readdir(directory, include_hidden=true, sort=false).map(name => {
+              (name, true)
+            }),
+          )
+          self.names[directory] = names
+          names
+        }
+      }
+      if !names.contains(part) {
+        return Some("NonLiteralPath")
+      }
+    }
+    match kind {
+      Some(Directory) if !is_dir => return Some("Directory")
+      Some(Regular) if is_dir => return Some("NotDirectory")
       _ => ()
     }
     if self.output is Some(output) && normalize(path) == output {

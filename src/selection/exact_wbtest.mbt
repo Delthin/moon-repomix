@@ -39,6 +39,7 @@ async test "exact lists are literal, deduplicated and sorted, never recurse or s
     assert_false(no_paths.allows("z.txt"))
     let normal = path_filter(root, options)
     assert_true(normal.allows("unlisted.txt"))
+    assert_eq(normal.names.length(), 0)
   }
 }
 
@@ -46,7 +47,7 @@ async test "exact lists are literal, deduplicated and sorted, never recurse or s
 async test "exact lists share every exclusion layer, output precedence and Git deletion membership" {
   fixture() <| root => {
     init_git(root)
-    put(root, ".gitignore", "git.txt\npruned/\n")
+    put(root, ".gitignore", "git.txt\npruned/\nprivate.ts\nsecret/\n")
     put(root, ".ignore", "dot.txt\n")
     put(root, ".repomixignore", "repomix.txt\n")
     put(root, "src/.repomixignore", "nested.txt\n")
@@ -101,6 +102,9 @@ async test "exact lists share every exclusion layer, output precedence and Git d
       )
     }
     assert_false(filter.allows("src/not-listed.txt"))
+    for pruned in ["pruned", "node_modules"] {
+      assert_false(filter.names.contains(join(root, pruned)))
+    }
     let switches = select(
       root,
       {
@@ -127,6 +131,53 @@ async test "exact lists share every exclusion layer, output precedence and Git d
     assert_eq(blocked.skipped.map(s => (s.path, s.reason)), [
       ("a.txt", "IgnoredDirectory:" + join(root, ".gitignore") + ":2"),
     ])
+    put(root, "private.ts", "ignored file")
+    put(root, "secret/hidden.ts", "ignored subtree")
+    put(root, "secret/.repomixignore", "[invalid\n")
+    let guarded = SelectionOptions::default()
+    let literal_paths = [
+      ".git/config", "private.ts", "secret/hidden.ts", "src/keep.txt", "src/deleted.txt",
+    ]
+    let literal = select(root, guarded, file_paths=Some(literal_paths))
+    assert_eq(literal.files.map(f => f.relative), ["src/keep.txt"])
+    let literal_filter = path_filter(
+      root,
+      guarded,
+      file_paths=Some(literal_paths),
+    )
+    for path in [".git/config", "private.ts", "secret/hidden.ts"] {
+      assert_false(literal_filter.allows(path), msg=path)
+    }
+    assert_true(literal_filter.allows("src/keep.txt"))
+    assert_true(literal_filter.allows("src/deleted.txt"))
+    assert_true(literal_filter.names.contains(root))
+    assert_true(literal_filter.names.contains(join(root, "src")))
+    for pruned in [".git", "secret"] {
+      assert_false(literal_filter.names.contains(join(root, pruned)))
+    }
+    // Probe the fixture volume; on case-sensitive filesystems the aliases really
+    // are missing paths, which Git is intentionally allowed to describe.
+    if optional_kind(join(root, "PRIVATE.ts")) is Some(Regular) {
+      let aliases = [
+        ".GIT/config", "PRIVATE.ts", "SECRET/hidden.ts", "SRC/keep.txt", "src/KEEP.txt",
+        "SRC/deleted.txt", "SRC",
+      ]
+      let aliased = select(root, guarded, file_paths=Some(aliases))
+      assert_eq(aliased.files.length(), 0)
+      assert_eq(aliased.skipped.map(s => (s.path, s.reason)), [
+        (".GIT/config", "NonLiteralPath"),
+        ("PRIVATE.ts", "NonLiteralPath"),
+        ("SECRET/hidden.ts", "NonLiteralPath"),
+        ("SRC", "NonLiteralPath"),
+        ("SRC/deleted.txt", "NonLiteralPath"),
+        ("SRC/keep.txt", "NonLiteralPath"),
+        ("src/KEEP.txt", "NonLiteralPath"),
+      ])
+      let alias_filter = path_filter(root, guarded, file_paths=Some(aliases))
+      for path in aliases {
+        assert_false(alias_filter.allows(path), msg=path)
+      }
+    }
   }
 }
 
