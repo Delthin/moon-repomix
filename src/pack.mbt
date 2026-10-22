@@ -99,8 +99,18 @@ async fn pack_directory(
   let excluded : Set[String] = Set([])
   let skipped = selected.skipped.copy()
   let findings : Array[Finding] = []
+  let mut since_timer_poll = 0
   for candidate in selected.files {
-    @async.sleep(0)
+    // pause keeps the task cancellable without creating an OS timer per file.
+    // Periodically poll timers as well, including when filesystem calls finish
+    // synchronously, so a busy ready queue cannot starve timeout cancellation.
+    if since_timer_poll >= 32 {
+      @async.sleep(0)
+      since_timer_poll = 0
+    } else {
+      @async.pause()
+      since_timer_poll += 1
+    }
     match @input.read(candidate.path, options.max_file_size) {
       Skipped(reason) => {
         skipped.push({ path: candidate.relative, reason, })
