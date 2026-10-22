@@ -1,24 +1,38 @@
 ///|
+#cfg(platform="windows")
+fn literal_glob_filename() -> String {
+  "literal[ab]{x,y}.txt"
+}
+
+///|
+#cfg(not(platform="windows"))
+fn literal_glob_filename() -> String {
+  "literal[ab]*{x,y}.txt"
+}
+
+///|
 async test "exact lists are literal, deduplicated and sorted, never recurse or scan unrelated trees" {
   fixture() <| root => {
     init_git(root)
+    // Windows forbids '*' in filenames; both variants still exercise literal
+    // class/brace syntax, while POSIX also covers a literal wildcard character.
+    let literal_name = literal_glob_filename()
     for
       path in [
-        "z.txt", "literal[ab]*{x,y}.txt", " space .txt", "猫.txt", "src/child.txt",
-        "unlisted.txt", "\u{e000}.txt", "\u{10000}.txt",
+        "z.txt", literal_name, " space .txt", "猫.txt", "src/child.txt", "unlisted.txt",
+        "\u{e000}.txt", "\u{10000}.txt",
       ] {
       put(root, path, "body")
     }
     put(root, "unrelated/.repomixignore", "[invalid\n")
     let options = SelectionOptions::default()
     let paths = [
-      "z.txt", "src", "literal[ab]*{x,y}.txt", "猫.txt", "z.txt", " space .txt",
-      "\u{10000}.txt", "\u{e000}.txt",
+      "z.txt", "src", literal_name, "猫.txt", "z.txt", " space .txt", "\u{10000}.txt",
+      "\u{e000}.txt",
     ]
     let result = select(root, options, file_paths=Some(paths))
     assert_eq(result.files.map(f => f.relative), [
-      " space .txt", "literal[ab]*{x,y}.txt", "z.txt", "猫.txt", "\u{e000}.txt",
-      "\u{10000}.txt",
+      " space .txt", literal_name, "z.txt", "猫.txt", "\u{e000}.txt", "\u{10000}.txt",
     ])
     assert_eq(result.skipped.map(s => (s.path, s.reason)), [
       ("src", "Directory"),
@@ -27,7 +41,7 @@ async test "exact lists are literal, deduplicated and sorted, never recurse or s
       assert_eq(file.path, join(result.root, file.relative))
     }
     let filter = path_filter(result.root, options, file_paths=Some(paths))
-    assert_true(filter.allows("literal[ab]*{x,y}.txt"))
+    assert_true(filter.allows(literal_name))
     assert_false(filter.allows("src"))
     assert_false(filter.allows("src/child.txt"))
     assert_false(filter.allows("unlisted.txt"))
