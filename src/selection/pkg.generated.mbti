@@ -2,9 +2,9 @@
 package "Delthin/moon_repomix/selection"
 
 // Values
-pub async fn path_filter(String, SelectionOptions) -> PathFilter
+pub async fn path_filter(String, SelectionOptions, file_paths? : Array[String]?) -> PathFilter
 
-pub async fn select(String, SelectionOptions) -> Selection
+pub async fn select(String, SelectionOptions, file_paths? : Array[String]?) -> Selection
 
 // Errors
 pub(all) suberror SelectionError {

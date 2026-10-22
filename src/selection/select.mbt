@@ -84,10 +84,16 @@ async fn Walker::walk(
 }
 
 ///|
-/// Traverse an absolute ordinary directory without opening candidate files.
+/// Discover files without opening candidate bodies. With file_paths, inspect only
+/// literal root-relative entries and their ancestors, never recurse directories.
 /// Ignore files are read strictly; I/O and cancellation propagate unchanged.
 /// Files and skips are sorted by UTF-8 bytes of root-relative paths.
-pub async fn select(root : String, options : SelectionOptions) -> Selection {
+pub async fn select(
+  root : String,
+  options : SelectionOptions,
+  file_paths~ : Array[String]? = None,
+) -> Selection {
+  let paths = exact_paths(file_paths)
   let mut input = separators(root)
   if !absolute(input) {
     raise SelectionError::InvalidRoot(root)
@@ -114,6 +120,18 @@ pub async fn select(root : String, options : SelectionOptions) -> Selection {
     raise SelectionError::InvalidRoot(root)
   }
   let root = canonical(input)
+  if paths is Some(paths) {
+    let filter = make_path_filter(root, options, Some(paths))
+    let files : Array[Candidate] = []
+    let skipped : Array[Skipped] = []
+    for relative in paths {
+      match filter.reason(relative, true) {
+        Some(reason) => skipped.push({ path: relative, reason, })
+        None => files.push({ path: join(root, relative), relative, })
+      }
+    }
+    return { root, files, skipped, }
+  }
   let includes = custom_patterns(options.include_patterns, "include")
   let custom = custom_patterns(options.ignore, "ignore")
   let defaults = default_patterns(options.use_default_patterns)
