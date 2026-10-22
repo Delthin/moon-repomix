@@ -68,6 +68,8 @@ fn detect(path : String) -> (Int32, String)? {
     Some((0, "javascript"))
   } else if name.has_suffix(".py") || name.has_suffix(".pyi") {
     Some((3, "python"))
+  } else if name.has_suffix(".mbt") || name.has_suffix(".mbti") {
+    Some((4, "moonbit"))
   } else {
     None
   }
@@ -79,8 +81,8 @@ fn fallback(text : String, language : String?, reason : String) -> Outcome {
 }
 
 ///|
-/// Compress JavaScript/JSX, TypeScript/TSX or Python into a source-ordered AST
-/// outline. Implementations become synthetic `/* … */` (JS/TS) or `...`
+/// Compress JavaScript/JSX, TypeScript/TSX, Python or MoonBit into a source-ordered
+/// AST outline. Implementations become synthetic `/* … */` or `...`
 /// (Python) markers. This is context text, not executable source.
 ///
 /// Stable fallback reasons: unsupported, parse-error, not-smaller, timeout,

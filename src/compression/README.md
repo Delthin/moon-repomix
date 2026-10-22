@@ -1,8 +1,7 @@
 # Native structure compression
 
-Independent native-only package `Delthin/moon_repomix/compression`. No root
-module dependency changes, subprocesses, runtime parser installations, or build
-downloads. Tree-sitter runtime and generated grammar C sources ship in `vendor/`;
+Independent native-only package `Delthin/moon_repomix/compression`. No
+subprocesses, runtime parser installations, or build downloads. Tree-sitter runtime and generated grammar C sources ship in `vendor/`;
 see [THIRD_PARTY.md](THIRD_PARTY.md) for exact sources and licenses.
 
 ## Integration contract
@@ -31,6 +30,7 @@ extensions, case-insensitively:
 | `.ts`, `.mts`, `.cts` | `typescript` |
 | `.tsx` | `tsx` |
 | `.py`, `.pyi` | `python` |
+| `.mbt`, `.mbti` | `moonbit` |
 
 The function parses the complete UTF-8 input with its actual grammar. AST node
 kinds and fields select original source fragments; no regular-expression body
@@ -58,6 +58,34 @@ Omissions use synthetic `/* … */` or Python `...` markers, with indentation fo
 whole-line omissions. Adjacent deleted regions merge; presentation-only blank
 lines between AST children compact, while literal and comment interiors stay
 unchanged. The result is context text, **not executable source**.
+
+### MoonBit AST coverage
+
+MoonBit uses the official root grammar with documented current-syntax patches
+for both source and interface files.
+Functions (including `async`, `Type::method`, extern and local named functions),
+`impl ... with` methods and tests retain their complete original signatures,
+parameters/defaults, return/error annotations and body delimiters. Their
+implementation interiors are omitted using AST block/token boundaries. Foreign
+symbol/module linkage strings remain intact; only multiline inline extern bodies
+are omitted. Local
+struct/enum/type declarations and named functions survive even inside discarded
+control flow; enclosing implementation conditions are not retained for MoonBit.
+Matrix-function cases are implementations. Imports, attributes/`#cfg`, `///|`
+comments, constants, structs, enums, traits, type aliases, derives and interface
+impl declarations remain unchanged. Record-update and string braces are never
+used as callable-body boundaries. Plain `#|` and interpolated `$|` multiline
+strings, Unicode and CRLF are covered. A scanner-local CRLF adapter leaves
+the input and vendored scanner bytes unchanged. MoonBit does not use the JS/TS/Python
+initializer-folding or presentation-compaction passes. Interface-only `.mbti`
+files normally return `not-smaller`, not `applied`.
+
+The ABI 15 grammar supports tuple identifier bindings in `for` loops, inclusive
+`..<=` range patterns and `errdefer`. The runtime remains v0.25.3; the local grammar
+patch, generator version and generated-source hashes are in
+[THIRD_PARTY.md](THIRD_PARTY.md). Invalid syntax returns the
+exact original with `language = Some("moonbit")`, `reason = Some("parse-error")`
+and no ranges. Error/missing nodes are never ignored or normalized away.
 
 `ranges` has one entry per retained contiguous original fragment, in the same
 order as the output. Bounds are **1-based inclusive original lines**, not output
@@ -87,24 +115,27 @@ and byte mask, and frees them before returning a MoonBit-managed byte plan.
 
 Package-local C translation units include vendored resources using relative
 paths; `moon.pkg` needs no platform-specific include/link flags. The upstream
-runtime includes Windows clock/endian support. macOS native compilation and
-functional tests were verified using `moonc v0.10.15+943464bfa`; Windows execution
-and cross-compilation remain unverified (no Windows SDK/toolchain was available).
-MoonBit grammar support is intentionally not included.
+runtime includes Windows clock/endian support. The original seven compression
+groups have passed native CI on Windows, Linux and macOS. The MoonBit groups and
+scanner adapter have been verified on macOS native with
+`moonc v0.10.15+943464bfa`; MoonBit Windows/Linux execution is not yet claimed.
+All adapters use portable C and need no platform-specific flags.
 
 With the project toolchain selected:
 
 ```
-moon check src/compression --target native
-moon test src/compression --target native
+moon check src/compression --target native --frozen
+moon test src/compression --target native --frozen
 moon fmt src/compression
-moon info src/compression --target native
+moon info src/compression --target native --frozen
 ```
 
-Seven grouped tests cover all four grammars, signature and Unicode comment
+The original seven grouped tests remain unchanged and cover JS/TS/TSX/Python,
+signature and Unicode comment
 preservation, nested bindings, exact original-line ranges, genuinely smaller
 output, unsupported paths, invalid syntax, unchanged non-smaller fallbacks,
-private tables versus public types, CommonJS APIs, and whitespace/literal boundaries. A separate development ASan/UBSan harness exercised the actual C FFI
-adapter and grammars, repeated cleanup, parse errors, timeout and size-limit
-paths using a byte-array allocator shim with `moonbit.h`'s layout. This checks
-C-side lifetimes rather than MoonBit GC instrumentation.
+private tables versus public types, CommonJS APIs, and whitespace/literal boundaries.
+Two additional MoonBit groups cover declarations/literal boundaries, tuple loops,
+range patterns, `errdefer`, complete default callback signatures, nested matrix
+functions, invalid/`#~` fallbacks, case-insensitive extensions, `.mbti` interfaces
+and exact Unicode/CRLF output and line ranges.

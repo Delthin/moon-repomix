@@ -7,6 +7,7 @@ const TSLanguage *tree_sitter_javascript(void);
 const TSLanguage *tree_sitter_typescript(void);
 const TSLanguage *tree_sitter_tsx(void);
 const TSLanguage *tree_sitter_python(void);
+const TSLanguage *tree_sitter_moonbit(void);
 
 typedef struct {
   SCPlan plan;
@@ -512,7 +513,7 @@ static void comments(Selection *s, TSNode node, unsigned depth) {
   if (is(node, "object") && is(ts_node_parent(node), "variable_declarator") &&
       s->plan.keep[ts_node_start_byte(ts_node_parent(node))] &&
       !s->plan.keep[ts_node_start_byte(node)]) return;
-  if (is(node, "comment")) {
+  if (is(node, "comment") || is(node, "block_comment")) {
     select_node(s, node, 1);
     /* A removed statement may have owned the following newline. Without it,
      * adjacent // comments become one line and swallow the next fragment. */
@@ -576,6 +577,82 @@ static void merge_omissions(Selection *s) {
   }
 }
 
+/* MoonBit has no body field: only a callable's direct block child is its
+ * implementation. Never treat struct literals, record updates, attributes,
+ * parameter defaults, return/effect types or type declaration braces as bodies.
+ * The root grammar also handles .mbti declarations without bodies. */
+static int moonbit_callable(TSNode node) {
+  return is(node, "function_definition") || is(node, "impl_definition") ||
+    is(node, "test_definition") || is(node, "named_lambda_expression") ||
+    is(node, "anonymous_lambda_expression") ||
+    is(node, "named_matrix_expression") || is(node, "anonymous_matrix_lambda_expression");
+}
+
+static int moonbit_type(TSNode node) {
+  return is(node, "struct_definition") || is(node, "enum_definition") ||
+    is(node, "type_definition");
+}
+
+static void moonbit_walk(Selection *, TSNode, unsigned);
+
+/* Recover locally named functions/types even below discarded control flow.
+ * Their surrounding implementation is not necessary executable context. */
+static void moonbit_nested(Selection *s, TSNode node, unsigned depth) {
+  if (s->plan.status) return;
+  if (depth > 512) { s->plan.status = 3; return; }
+  if (moonbit_type(node) || is(node, "named_lambda_expression") ||
+      is(node, "named_matrix_expression")) {
+    select_node(s, node, 1);
+    moonbit_walk(s, node, depth + 1);
+    return;
+  }
+  /* Literal interiors are indivisible original fragments, not declarations. */
+  if (is(node, "literal") || is(node, "string_interpolation")) return;
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    moonbit_nested(s, ts_node_named_child(node, i), depth + 1);
+}
+
+static void moonbit_body(Selection *s, TSNode body, unsigned depth) {
+  /* Keep only the actual opening/closing AST tokens, including inline braces. */
+  uint32_t n = ts_node_child_count(body);
+  TSNode open = {0}, close = {0};
+  for (uint32_t i = 0; i < n; ++i) {
+    TSNode child = ts_node_child(body, i);
+    if (is(child, "{") && ts_node_is_null(open)) open = child;
+    if (is(child, "}")) close = child;
+  }
+  if (!ts_node_is_null(open) && !ts_node_is_null(close)) {
+    uint32_t start = ts_node_end_byte(open), end = ts_node_start_byte(close);
+    if (start <= end) memset(s->plan.keep + start, 0, end - start);
+    for (uint32_t i = 0; i < ts_node_named_child_count(body); ++i)
+      moonbit_nested(s, ts_node_named_child(body, i), depth + 1);
+  }
+}
+
+static void moonbit_walk(Selection *s, TSNode node, unsigned depth) {
+  if (s->plan.status) return;
+  if (depth > 512) { s->plan.status = 3; return; }
+  if (is(node, "named_matrix_expression") || is(node, "anonymous_matrix_lambda_expression")) {
+    moonbit_body(s, node, depth + 1);
+    return;
+  }
+  int callable_node = moonbit_callable(node);
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i) {
+    TSNode child = ts_node_named_child(node, i);
+    if (callable_node && is(child, "block_expression"))
+      moonbit_body(s, child, depth + 1);
+    else if (callable_node && is(child, "external_source")) {
+      /* Foreign symbol/module strings are declaration linkage, not bodies.
+       * Only an inline multiline implementation is safe to replace here. */
+      for (uint32_t j = 0; j < ts_node_named_child_count(child); ++j) {
+        TSNode source = ts_node_named_child(child, j);
+        if (is(source, "multiline_string_literal")) select_node(s, source, 0);
+      }
+    } else if (!callable_node)
+      moonbit_walk(s, child, depth + 1);
+  }
+}
+
 SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
                uint64_t timeout_micros) {
   Selection s = {{NULL, length, 0}, language == 3, source};
@@ -586,6 +663,7 @@ SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
     case 1: grammar = tree_sitter_typescript(); break;
     case 2: grammar = tree_sitter_tsx(); break;
     case 3: grammar = tree_sitter_python(); break;
+    case 4: grammar = tree_sitter_moonbit(); break;
     default: s.plan.status = 4; return s.plan;
   }
   TSParser *parser = ts_parser_new();
@@ -607,9 +685,10 @@ SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
       s.plan.status = 3;
     } else {
       memset(s.plan.keep, 1, length);
-      walk(&s, ts_tree_root_node(tree), 0, 0);
+      if (language == 4) moonbit_walk(&s, ts_tree_root_node(tree), 0);
+      else walk(&s, ts_tree_root_node(tree), 0, 0);
       comments(&s, ts_tree_root_node(tree), 0);
-      presentation(&s, ts_tree_root_node(tree), 0);
+      if (language != 4) presentation(&s, ts_tree_root_node(tree), 0);
       merge_omissions(&s);
     }
   }

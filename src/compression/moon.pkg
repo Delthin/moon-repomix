@@ -15,6 +15,8 @@ options(
     "tsx_scanner.c",
     "python_parser.c",
     "python_scanner.c",
+    "moonbit_parser.c",
+    "moonbit_scanner.c",
     "compression_core.c",
     "ffi.c",
   ],

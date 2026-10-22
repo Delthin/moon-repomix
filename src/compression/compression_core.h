@@ -8,7 +8,7 @@ typedef struct {
   int32_t status;
 } SCPlan;
 /* Status: 0 success, 1 parse-error, 2 timeout, 3 resource-limit,
- * 4 parser-unavailable. Languages: 0 JS, 1 TS, 2 TSX, 3 Python. */
+ * 4 parser-unavailable. Languages: 0 JS, 1 TS, 2 TSX, 3 Python, 4 MoonBit. */
 SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
                uint64_t timeout_micros);
 #endif
