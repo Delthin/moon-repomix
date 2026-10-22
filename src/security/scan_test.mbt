@@ -86,6 +86,7 @@ test "length placeholders ordinary code and contact information are negative" {
       "emit(\"token=\" + api_key + \"\\n\")",
       "emit(\"quoted \\\"text\\\"\", \"secret=\" + my_secret + \"\\n\")",
       "contact person@company.dev +1-202-555-0199 192.168.1.1",
+      "中文 😀 e\u0301\r\nordinary code",
     ] {
     assert_eq(@security.scan("negative", text, 0).length(), 0)
   }

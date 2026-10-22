@@ -32,7 +32,7 @@ pub fn scan(path:String, text:String, bom_bytes:Int) -> Array[Finding] raise Sca
 
 Git 诊断使用 `git:diff:N` 或 `git:commit:ID` 标签，偏移和行号相对于补丁正文或提交章节，而非磁盘文件。补丁行标记不作为源代码参与边界判断，位置仍与原补丁一致。
 
-引擎返回 UTF-16 单位索引，适配层转换为 UTF-8 字节偏移后加上 BOM 长度。范围落在代理对内部时报错。回归覆盖中文、emoji、组合字符、CRLF 和 BOM。
+引擎返回 UTF-16 单位索引，适配层先校验文本，仅在命中时记录所需边界的 UTF-8 字节偏移和行号，再加上 BOM 长度。无命中文件不分配逐字符坐标表，坐标存储随命中数量增长。范围落在代理对内部时报错。回归覆盖中文、emoji、组合字符、CRLF 和 BOM。
 
 ## 错误与调用约束
 

@@ -47,63 +47,82 @@ pub fn scan(
   if bom_bytes != 0 && bom_bytes != 3 {
     raise InvalidBomOffset
   }
-  // moon_scrub 0.5.2 walks String.length()/text[i]: UTF-16 code units.
-  // Interior surrogate positions stay -1, so an invalid engine range fails shut.
-  let bytes = Array::make(text.length() + 1, -1)
-  let lines = Array::make(text.length() + 1, 1)
-  let mut unit = 0
+  // Validate before running the engine, retaining the public error contract.
   let mut offset = bom_bytes
-  let mut line = 1
-  let mut previous_cr = false
-  bytes[0] = offset
   for c in text {
     let cp = c.to_int()
     if cp >= 0xD800 && cp <= 0xDFFF {
       raise InvalidText
     }
-    let width = if cp < 0x80 {
-      1
-    } else if cp < 0x800 {
-      2
-    } else if cp < 0x10000 {
-      3
-    } else {
-      4
-    }
+    let width = scalar_utf8_bytes(cp)
     if offset > 2147483647 - width {
       raise InputTooLarge
     }
     offset += width
+  }
+  let hits = @moon_scrub.scan_with_config(
+    text,
+    @moon_scrub.ScanConfig::secrets_only(),
+  )
+  if hits.is_empty() {
+    return []
+  }
+  // moon_scrub uses UTF-16 offsets. Only hit boundaries need disk coordinates;
+  // clean files never allocate a per-code-unit byte/line table.
+  let boundaries : Set[Int32] = Set([])
+  for hit in hits {
+    if hit.start < 0 || hit.end <= hit.start || hit.end > text.length() {
+      raise InvalidEngineRange
+    }
+    boundaries.add(hit.start)
+    boundaries.add(hit.end)
+  }
+  let coordinates : Map[Int32, (Int32, Int32)] = Map(
+    [],
+    capacity=boundaries.length(),
+  )
+  coordinates[0] = (bom_bytes, 1)
+  let mut unit = 0
+  offset = bom_bytes
+  let mut line = 1
+  let mut previous_cr = false
+  for c in text {
+    let cp = c.to_int()
+    offset += scalar_utf8_bytes(cp)
     unit += if cp > 0xFFFF { 2 } else { 1 }
     if c == '\r' || (c == '\n' && !previous_cr) {
       line += 1
     }
     previous_cr = c == '\r'
-    bytes[unit] = offset
-    lines[unit] = line
+    if boundaries.contains(unit) {
+      coordinates[unit] = (offset, line)
+    }
   }
   let out : Array[Finding] = []
-  for
-    hit in @moon_scrub.scan_with_config(
-      text,
-      @moon_scrub.ScanConfig::secrets_only(),
-    ) {
-    if hit.start < 0 ||
-      hit.end <= hit.start ||
-      hit.end > text.length() ||
-      bytes[hit.start] < 0 ||
-      bytes[hit.end] < 0 {
+  for hit in hits {
+    // An interior surrogate position has no entry and fails shut.
+    guard coordinates.get(hit.start) is Some((start, hit_line)) else {
+      raise InvalidEngineRange
+    }
+    guard coordinates.get(hit.end) is Some((end, _)) else {
       raise InvalidEngineRange
     }
     if rule_for(text, hit) is Some(rule) {
-      out.push({
-        rule,
-        path,
-        start: bytes[hit.start],
-        end: bytes[hit.end],
-        line: lines[hit.start],
-      })
+      out.push({ rule, path, start, end, line: hit_line, })
     }
   }
   out
+}
+
+///|
+fn scalar_utf8_bytes(cp : Int32) -> Int32 {
+  if cp < 0x80 {
+    1
+  } else if cp < 0x800 {
+    2
+  } else if cp < 0x10000 {
+    3
+  } else {
+    4
+  }
 }
