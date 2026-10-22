@@ -13,6 +13,15 @@ test "library options select formats and their matching output filenames" {
     assert_eq(options.output, "repomix-output." + suffix)
     assert_true(options.security_check)
     assert_false(options.full_metadata)
+    assert_eq(options.file_paths, None)
   }
   assert_true(@moon_repomix.options(".", full_metadata=true).full_metadata)
+  assert_eq(
+    @moon_repomix.options(".", file_paths=Some([])).file_paths,
+    Some([]),
+  )
+  let paths = ["src/a.mbt"]
+  let precise = @moon_repomix.options(".", file_paths=Some(paths))
+  paths.push("src/b.mbt")
+  assert_eq(precise.file_paths, Some(["src/a.mbt"]))
 }

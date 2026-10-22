@@ -1,5 +1,7 @@
 # 配置与命令行
 
+本页对应当前主线源码；v0.2.0 安装包和库接口请参阅 [该版本文档](https://github.com/Delthin/moon-repomix/blob/v0.2.0/docs/configuration.md)。
+
 配置按“默认值 → 选定的 JSON 文件 → 显式 CLI 参数”合并。普通字段由后者覆盖；include 和自定义 ignore 列表按 JSON、CLI 的顺序追加，按原字符串去重并保留首次出现的位置。未出现的布尔参数不参与覆盖，因此 JSON 中的 `false` 会保留。
 
 CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 `repomix.config.json`。远程模式仅加载显式指定的本地配置。显式配置路径、输出路径以启动时的工作目录为基准；include/ignore 以输入根目录为基准。默认配置文件不存在时使用默认值，显式指定的文件不存在则报错。
@@ -9,8 +11,10 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | 参数 | 行为 |
 | --- | --- |
 | `[directory]` | 单个输入目录，默认 `.` |
-| `-o, --output PATH` | 输出文件路径 |
+| `-o, --output PATH` | 输出文件路径；`-` 表示 stdout，`./-` 表示普通文件 |
 | `--stdout` | 正文写入 stdout，诊断写入 stderr |
+| `--stdin` | 显式读取 UTF-8 文件列表，每行一个路径，接受 CRLF |
+| `--stdin0` | 显式读取 NUL 分隔的 UTF-8 文件列表，适配 Git `-z` |
 | `--style xml\|markdown\|json\|plain` | 默认 XML；默认文件名为 `repomix-output` 加对应的 `.xml`、`.md`、`.json`、`.txt` 扩展名 |
 | `--compress`, `--no-compress` | 开启或关闭语法树结构压缩，默认关闭 |
 | `--full-metadata`, `--no-full-metadata` | 四种格式显示完整逐文件元数据，默认使用概览；库模型始终完整 |
@@ -23,7 +27,7 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--include GLOBS` | 追加逗号分隔的正向选择模式 |
 | `-i, --ignore GLOBS` | 追加逗号分隔的自定义排除模式 |
 | `--no-gitignore` | 关闭 Git 规则 |
-| `--no-dot-ignore` | 关闭 `.ignore`、`.repomixignore` |
+| `--no-dot-ignore` | 只关闭 `.ignore`；`.repomixignore` 继续生效 |
 | `--no-default-patterns` | 关闭内置忽略规则 |
 | `--no-security-check` | 关闭扫描，记录关闭状态并显示警告 |
 | `--token-count-encoding o200k_base` | 指定当前支持的编码 |
@@ -38,11 +42,23 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `-h, --help` | 显示帮助 |
 | `-v, --version` | 显示版本；`-v` 不是 verbose |
 
-值参数支持 `--key=value` 和分开传值，`-o=PATH` 也可用。以 `-` 开头的值须使用等号形式。短选项不能合并，也不接受 `-oPATH`。`--` 结束参数解析，可用于输入名以 `-` 开头的目录。CSV 项会去除首尾空白，空项报错；重复的标量参数取最后一个值，列表参数继续追加。
+值参数支持 `--key=value` 和分开传值，`-o=PATH` 也可用。以 `-` 开头的值须使用等号形式，输出值单独的 `-` 也可直接传入。短选项不能合并，也不接受 `-oPATH`。`--` 结束参数解析，可用于输入名以 `-` 开头的目录。CSV 只在花括号和字符类之外按逗号分项；项首尾空白会去除，空项报错。重复的标量参数取最后一个值，列表参数继续追加。
 
 `--token-count-tree` 会将紧随其后的非选项参数作为阈值。目录应放在该选项之前，或用 `--token-count-tree -- directory` 分隔；也可使用 `--token-count-tree=0 directory`。两项统计参数只影响 stderr，`--quiet` 会隐藏它们，打包正文与预算不受影响。详见 [Token 分布与排名](tokenization.md#token-分布与排名)。
 
-`--stdout` 与显式 CLI `--output` 冲突，但与 JSON 中的输出文件名不冲突。stdout 模式不创建输出文件。文件名 `-` 表示普通文件，标准输出须使用 `--stdout`。
+`-o -`、`--output=-`、JSON 的 `output.filePath: "-"` 与 `--stdout` 都选择标准输出。`--stdout -o -` 可同时使用；`--stdout` 与显式 CLI 普通输出文件冲突，与 JSON 中的默认文件名不冲突。stdout 模式不创建文件；需要名为 `-` 的普通文件时使用 `-o ./-`。
+
+### 文件列表输入
+
+```sh
+git ls-files -z | moon-repomix . --stdin0 --style markdown -o -
+```
+
+stdin 仅由这两个 CLI 参数显式开启，配置文件不会隐式读取终端。原始输入上限为 8 MiB，接受可选 UTF-8 BOM，非法 UTF-8 或超限时退出且保留旧输出。两种模式互斥，也不能和 `--init` 组合；help/version 仍优先返回。
+
+换行模式接受 LF/CRLF；NUL 模式保留路径中的换行及 CR。协议忽略空记录，保留文件名的前后空格，文件列表本身不解释 glob。路径相对输入根，使用 `/` 分隔；绝对路径、盘符、反斜杠、冒号和空、`.`、`..` 组件整体报错。重复项去重，目录不递归；不存在的普通文件记录跳过。空列表选择零文件，而不是全仓。
+
+文件列表与 include 取交集，仍应用所有 ignore、链接检查、输出自排除、原始内容扫描及大小限制；开启 Git 上下文时，diff 和提交路径也受同一集合限制。
 
 ## JSON 配置
 
@@ -79,7 +95,7 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 
 `tokenizer_path` 通过 CLI 或编程接口设置，不属于 JSON 字段。
 
-include 和自定义 ignore 拒绝空模式、前导 `!`、绝对路径、反斜杠、冒号、花括号及 `..` 组件。支持 `*`、`?`、`**`、字符类和目录模式；完整语法由文件选择包校验。规则文件中的 `!` 反选另按 [文件选择规则](file-selection.md) 处理。
+include 和自定义 ignore 拒绝空模式、前导 `!`、绝对路径、反斜杠、冒号、NUL 及 `..` 组件。支持 `*`、`?`、`**`、字符类、目录模式及有界的 `{a,b}` 嵌套备选；完整语法和展开上限由文件选择包校验。include 相对根匹配，`LICENSE` 只选根文件，`**/LICENSE` 选择各层文件。规则文件中的 `!` 反选另按 [文件选择规则](file-selection.md) 处理。
 
 ## 配置包接口
 
@@ -89,10 +105,11 @@ include 和自定义 ignore 拒绝空模式、前导 `!`、绝对路径、反斜
 pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError
 pub fn parse_json(text : String) -> Patch raise ConfigError
 pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError
+pub fn parse_file_list(text : String, nul~ : Bool = false) -> Array[String] raise ConfigError
 pub fn Patch::empty() -> Patch
 ```
 
-传入 `parse_cli` 的参数不含 `argv[0]`。`Cli` 包含 `directory`、`config_path : String?`、`action : Action`、`stdout`、`quiet`、`verbose` 和 `patch : Patch`。`Action` 为 `Pack | Init | Help | Version`；不同显式动作冲突，相同动作可重复。CLI 在读取配置和词表前处理 help/version/init。
+传入 `parse_cli` 的参数不含 `argv[0]`。`Cli` 包含 `directory`、`config_path : String?`、`action : Action`、`stdout`、`stdin_mode : StdinMode`、`quiet`、`verbose` 和 `patch : Patch`。`StdinMode` 为 `Off | Lines | Nul`；解析和合并只记录模式，调用者读取后将列表传给 `Options.file_paths`。`Action` 为 `Pack | Init | Help | Version`；不同显式动作冲突，相同动作可重复。CLI 在读取配置和词表前处理 help/version/init。
 
 没有选定配置文件时，向 `resolve` 传 `None`。`Patch` 的标量字段为可选值，列表为追加项；可从 `Patch::empty()` 修改字段构造。它不含 directory/stdout/quiet/verbose。`resolve` 校验两份 Patch 中的全部字段，包括随后被覆盖的值；合并不修改输入，结果数组独立分配。
 
@@ -100,9 +117,10 @@ pub fn Patch::empty() -> Patch
 | --- | --- |
 | `directory` | `String`，`.` |
 | `output` | `String`，由样式决定 |
-| `stdout` | `Bool`，false |
+| `stdout` | `Bool`，默认 false；`resolve` 在输出值为 `-` 时设为 true |
 | `style` | `Style`，默认 `Xml`；可选 `Markdown`、`Json`、`Plain` |
 | `include_patterns`, `ignore` | `Array[String]`，空 |
+| `file_paths` | `Array[String]?`，默认 `None` 为遍历；`Some([])` 为零文件，仅库/显式 CLI 列表使用 |
 | `use_gitignore`, `use_dot_ignore`, `use_default_patterns` | `Bool`，true |
 | `security_check` | `Bool`，true |
 | `encoding` | `String`，`o200k_base` |

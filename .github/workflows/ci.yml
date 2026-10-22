@@ -51,6 +51,8 @@ jobs:
         run: moon run --target native scripts/functional.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken --xml-oracle
       - name: Common input and configuration scenarios
         run: moon run --target native scripts/scenarios.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
+      - name: Literal file-list and stdout compatibility
+        run: moon run --target native scripts/input-list-test.mbtx
       - name: Token report functional tests
         run: moon run --target native scripts/token-reports-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
       - name: Output format functional tests

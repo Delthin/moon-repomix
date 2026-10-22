@@ -36,6 +36,7 @@ suberror CliError {
   Configuration
   Resource
   Write
+  InputList
 }
 
 ///|
@@ -79,7 +80,11 @@ async fn run() -> Int32 {
     return 0
   }
   let patch = read_config(cli, cwd)
-  let options = @config.resolve(cli, patch) catch { _ => raise Configuration }
+  let resolved = @config.resolve(cli, patch) catch { _ => raise Configuration }
+  let options = match read_stdin(cli.stdin_mode) {
+    None => resolved
+    Some(paths) => { ..resolved, file_paths: Some(paths), }
+  }
   if !options.security_check {
     @stdio.stderr.write("Warning: secret scanning is disabled.\n")
   }
@@ -124,6 +129,7 @@ async fn main {
           @repomix.RemoteError => "RemoteError"
           Resource | @repomix.ResourceError => "ResourceError"
           Write => "OutputError"
+          InputList => "InputError"
           _ => "OperationError"
         }
       }

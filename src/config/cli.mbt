@@ -29,11 +29,46 @@ fn cli_positive_int(value : String, field : String) -> Int32 raise ConfigError {
 ///|
 fn csv_patterns(value : String) -> Array[String] raise ConfigError {
   let result : Array[String] = []
-  for item in value.split(",") {
-    let pattern = item.to_owned().trim().to_owned()
-    validate_pattern(pattern)
-    result.push(pattern)
+  let mut start = 0
+  let mut braces = 0
+  // 1: class start; 2: after !/^; 3: ordinary class members.
+  let mut class_state = 0
+  for i in 0..<value.length() {
+    let c = value[i]
+    if class_state > 0 {
+      if c == ']' && class_state == 3 {
+        class_state = 0
+      } else if class_state == 1 && (c == '!' || c == '^') {
+        class_state = 2
+      } else {
+        class_state = 3
+      }
+      continue
+    }
+    match c {
+      '[' => class_state = 1
+      '{' => braces += 1
+      '}' => {
+        if braces == 0 {
+          raise InvalidValue("glob")
+        }
+        braces -= 1
+      }
+      ',' if braces == 0 => {
+        let pattern = value[start:i].to_owned().trim().to_owned()
+        validate_pattern(pattern)
+        result.push(pattern)
+        start = i + 1
+      }
+      _ => ()
+    }
   }
+  if braces != 0 || class_state != 0 {
+    raise InvalidValue("glob")
+  }
+  let pattern = value[start:].to_owned().trim().to_owned()
+  validate_pattern(pattern)
+  result.push(pattern)
   result
 }
 
@@ -53,6 +88,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
   let mut config_path : String? = None
   let mut action = Pack
   let mut stdout = false
+  let mut stdin_mode = StdinMode::Off
   let mut quiet = false
   let mut verbose = false
   let mut positional_only = false
@@ -113,7 +149,11 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       let value = match inline {
         Some(value) => value
         None => {
-          if index >= args.length() || args[index].has_prefix("-") {
+          if index >= args.length() ||
+            (
+              args[index].has_prefix("-") &&
+              !((key == "-o" || key == "--output") && args[index] == "-")
+            ) {
             raise MissingValue(key)
           }
           let value = args[index]
@@ -181,6 +221,18 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       }
       match key {
         "--stdout" => stdout = true
+        "--stdin" => {
+          if stdin_mode == Nul {
+            raise Conflict("stdin/stdin0")
+          }
+          stdin_mode = Lines
+        }
+        "--stdin0" => {
+          if stdin_mode == Lines {
+            raise Conflict("stdin/stdin0")
+          }
+          stdin_mode = Nul
+        }
         "--quiet" => quiet = true
         "--verbose" => verbose = true
         "--no-gitignore" => patch.use_gitignore = Some(false)
@@ -206,8 +258,11 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
   if quiet && verbose {
     raise Conflict("quiet/verbose")
   }
-  if stdout && patch.output is Some(_) {
+  if stdout && patch.output is Some(path) && path != "-" {
     raise Conflict("output/stdout")
+  }
+  if action == Init && stdin_mode != Off {
+    raise Conflict("stdin/init")
   }
   validate_patch(patch)
   {
@@ -215,6 +270,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
     config_path,
     action,
     stdout,
+    stdin_mode,
     quiet,
     verbose,
     patch,

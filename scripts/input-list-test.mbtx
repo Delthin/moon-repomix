@@ -1,0 +1,413 @@
+///|
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+  "moonbitlang/core/encoding/utf8",
+}
+
+///|
+async fn git(args : Array[String], cwd : String) -> Bytes {
+  let null = if @env.get_env_var("OS") == Some("Windows_NT") {
+    "NUL"
+  } else {
+    "/dev/null"
+  }
+  let environment = {
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": null,
+    "GIT_CONFIG_SYSTEM": null,
+    "GIT_ATTR_NOSYSTEM": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+  }
+  for
+    key in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR", "PATHEXT"] {
+    if @env.get_env_var(key) is Some(value) {
+      environment[key] = value
+    }
+  }
+  let (input, writer) = @process.write_to_process()
+  writer.close()
+  let (code, out, err) = @process.collect_output(
+    "git",
+    [
+      "-c",
+      "core.hooksPath=" + null,
+      "-c",
+      "core.fsmonitor=false",
+      "-c",
+      "core.attributesFile=" + null,
+    ] +
+    args,
+    cwd~,
+    stdin=input,
+    inherit_env=false,
+    extra_env=environment,
+  )
+  if code != 0 {
+    println(err.text())
+    fail("fixture Git command failed")
+  }
+  out.binary()
+}
+
+///|
+// Only used for the fresh owned tmpdir below. The empty parent repository has
+// no read-only objects; native Git clean removes its nested fixture repository.
+async fn cleanup(temp : String) -> Unit {
+  ignore(
+    git(["init", "--quiet", "--template=", "--initial-branch=fixture"], temp),
+  )
+  ignore(git(["clean", "--quiet", "-ffdx", "--", "."], temp))
+  assert_eq(@fs.readdir(temp), [".git"])
+  @fs.rmdir(temp, recursive=true)
+}
+
+///|
+async fn invoke(
+  binary : String,
+  args : Array[String],
+  cwd : String,
+  data : Bytes,
+  file_input~ : Bool = false,
+) -> (Int32, String, String) {
+  @async.with_timeout(30000, async fn() {
+    if file_input {
+      let path = cwd + "/stdin.dat"
+      @fs.write_file(path, data)
+      let input = @process.redirect_from_file(path)
+      let (code, out, err) = @process.collect_output(
+        binary,
+        args,
+        cwd~,
+        stdin=input,
+      )
+      return (code, out.text(), err.text())
+    }
+    let (input, writer) = @process.write_to_process()
+    @async.with_task_group(async fn(group) {
+      group.spawn_bg(async fn() {
+        defer writer.close()
+        writer.write(data)
+      })
+      let (code, out, err) = @process.collect_output(
+        binary,
+        args,
+        cwd~,
+        stdin=input,
+      )
+      (code, out.text(), err.text())
+    })
+  })
+}
+
+///|
+fn keys(text : String) -> Array[String] raise {
+  guard @json.parse(text) is { "files": Object(files), .. } else {
+    fail("missing JSON files")
+  }
+  let names : Array[String] = files.keys().collect()
+  names.sort_by((left, right) => {
+    let a = @utf8.encode(left)
+    let b = @utf8.encode(right)
+    for i in 0..<a.length().min(b.length()) {
+      if a[i] != b[i] {
+        return a[i].to_int() - b[i].to_int()
+      }
+    }
+    a.length() - b.length()
+  })
+  names
+}
+
+///|
+fn body(text : String, path : String) -> String raise {
+  guard @json.parse(text) is { "files": Object(files), .. } else {
+    fail("missing JSON files")
+  }
+  guard files.get(path) is Some(String(value)) else {
+    fail("missing selected body")
+  }
+  value
+}
+
+///|
+fn tokens(report : String) -> Int32 raise {
+  for word in report.split(" "); previous = "" {
+    if word == "tokens" {
+      break @string.parse_int(previous)
+    }
+    continue word.to_owned()
+  } nobreak {
+    fail("Missing final document token count")
+  }
+}
+
+///|
+fn success(code : Int32, err : String) -> Unit raise {
+  if code != 0 {
+    println(err)
+    fail("file-list CLI invocation failed")
+  }
+}
+
+///|
+async fn main {
+  let cwd = @env.current_dir().unwrap()
+  let binary = cwd +
+    "/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe"
+  let vocabulary = cwd + "/assets/tokenizer-o200k_base.tiktoken"
+  let temp = @fs.tmpdir(prefix="moon-input-list-test-")
+  defer cleanup(temp)
+  let root = temp + "/repo"
+  @fs.mkdir(root + "/src", recursive=true)
+  let alpha = "export function alpha(n: number): number {\n" +
+    "  n += 1;\n".repeat(60) +
+    "  return n;\n}\n"
+  @fs.write_file(root + "/src/a.ts", alpha)
+  @fs.write_file(root + "/src/b.js", "export const beta = 1;\n")
+  @fs.write_file(root + "/src/space name.ts", "export const spaced = 1;\n")
+  @fs.write_file(root + "/src/中文.ts", "export const unicode = 1;\n")
+  for name in ["dot-hidden.ts", "repomix-hidden.ts", "git-hidden.ts"] {
+    @fs.write_file(root + "/src/" + name, "export const hidden = 1;\n")
+  }
+  @fs.write_file(root + "/src/Cargo.lock", "synthetic lock\n")
+  let synthetic = "gh" + "p_" + "Ab9Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
+  @fs.write_file(
+    root + "/src/secret.ts",
+    "const token = \"" + synthetic + "\";\n",
+  )
+  @fs.write_file(root + "/.ignore", "src/dot-hidden.ts\n")
+  @fs.write_file(root + "/.repomixignore", "src/repomix-hidden.ts\n")
+  @fs.write_file(root + "/.gitignore", "src/git-hidden.ts\n")
+  ignore(
+    git(["init", "--quiet", "--template=", "--initial-branch=fixture"], root),
+  )
+  ignore(git(["config", "user.name", "File-list Fixture"], root))
+  ignore(git(["config", "user.email", "fixture@example.invalid"], root))
+  ignore(git(["add", "--force", "."], root))
+  ignore(git(["commit", "--quiet", "-m", "fixture baseline"], root))
+  @fs.write_file(root + "/src/a.ts", alpha + "// staged update\n")
+  ignore(git(["add", "src/a.ts"], root))
+  @fs.write_file(root + "/src/b.js", "export const beta = 2;\n")
+  let common = [
+    root, "--style=json", "--top-files-len=0", "--include=src/**", "--tokenizer-path",
+    vocabulary,
+  ]
+  let (code, baseline, stderr) = invoke(binary, common + ["-o", "-"], temp, b"")
+  success(code, stderr)
+  let expected = ["src/a.ts", "src/b.js", "src/space name.ts", "src/中文.ts"]
+  assert_eq(keys(baseline), expected)
+  assert_eq(body(baseline, "src/a.ts"), alpha + "// staged update\n")
+  let dash = temp + "/-"
+  @fs.write_file(dash, "KEEP")
+  for args in [["--output=-"], ["--stdout", "-o", "-"]] {
+    let (code, out, err) = invoke(binary, common + args, temp, b"")
+    success(code, err)
+    assert_eq(out, baseline)
+    assert_eq(@fs.read_file(dash).text(), "KEEP")
+  }
+  let config = temp + "/stdout.config.json"
+  @fs.write_file(config, "{\"output\":{\"filePath\":\"-\"}}")
+  let (code, out, err) = invoke(
+    binary,
+    common + ["--config", config],
+    temp,
+    b"",
+  )
+  success(code, err)
+  assert_eq(out, baseline)
+  let (code, out, err) = invoke(binary, common + ["-o", "./-"], temp, b"")
+  success(code, err)
+  assert_eq(out, "")
+  assert_eq(@fs.read_file(dash).text(), baseline)
+
+  // These positive cases feed a real OS pipe, including EOF, not a device file.
+  let input = @utf8.encode(
+    "\uFEFFsrc/a.ts\r\nsrc/space name.ts\r\nsrc/a.ts\r\n",
+  )
+  let (code, out, err) = invoke(
+    binary,
+    common + ["--stdin", "-o", "-"],
+    temp,
+    input,
+  )
+  success(code, err)
+  assert_eq(keys(out), ["src/a.ts", "src/space name.ts"])
+  assert_eq(body(out, "src/a.ts"), body(baseline, "src/a.ts"))
+  let tracked = git(["ls-files", "-z"], root)
+  let (code, out, err) = invoke(
+    binary,
+    common + ["--stdin0", "-o", "-"],
+    temp,
+    tracked,
+  )
+  success(code, err)
+  assert_eq(keys(out), expected)
+  let (code, out, err) = invoke(
+    binary,
+    common + ["--stdin", "-o", "-"],
+    temp,
+    b"",
+  )
+  success(code, err)
+  assert_eq(keys(out), [])
+  let (code, out, err) = invoke(
+    binary,
+    common + ["--stdin", "-o", "-"],
+    temp,
+    @utf8.encode("src/missing.ts\n"),
+  )
+  success(code, err)
+  assert_eq(keys(out), [])
+
+  let one = @utf8.encode("src/a.ts\u0000")
+  let (code, out, err) = invoke(
+    binary,
+    common +
+    [
+      "--stdin0", "--compress", "--include-diffs", "--include-logs", "--include-logs-count=1",
+      "--full-metadata", "-o", "-",
+    ],
+    temp,
+    one,
+  )
+  success(code, err)
+  assert_eq(keys(out), ["src/a.ts"])
+  assert_true(body(out, "src/a.ts").length() < alpha.length())
+  guard @json.parse(out)
+    is {
+      "metadata": {
+        "git": { "diffs": Array(diffs), "commits": Array(commits), .. },
+        ..
+      },
+      ..
+    } else {
+    fail("missing scoped Git metadata")
+  }
+  assert_eq(diffs.length(), 1)
+  assert_eq(commits.length(), 1)
+  for patch in diffs {
+    guard patch is { "paths": Array(paths), .. } else {
+      fail("missing diff paths")
+    }
+    assert_eq(paths, [Json("src/a.ts")])
+  }
+  for commit in commits {
+    guard commit is { "files": Array(paths), .. } else {
+      fail("missing commit files")
+    }
+    assert_eq(paths, [Json("src/a.ts")])
+  }
+  let secret_input = @utf8.encode("src/secret.ts\n")
+  let (code, out, err) = invoke(
+    binary,
+    common + ["--stdin", "-o", "-"],
+    temp,
+    secret_input,
+  )
+  success(code, err)
+  assert_eq(keys(out), [])
+  assert_false(out.contains(synthetic))
+  assert_true(err.contains("Security"))
+  let (code, out, err) = invoke(
+    binary,
+    common + ["--stdin", "--no-dot-ignore", "-o", "-"],
+    temp,
+    @utf8.encode("src/dot-hidden.ts\nsrc/repomix-hidden.ts\n"),
+  )
+  success(code, err)
+  assert_eq(keys(out), ["src/dot-hidden.ts"])
+  let (code, out, err) = invoke(
+    binary,
+    common + ["--stdin", "-o", "-"],
+    temp,
+    @utf8.encode("src/Cargo.lock\n"),
+  )
+  success(code, err)
+  assert_eq(keys(out), [])
+
+  let destination = temp + "/preserved.json"
+  @fs.write_file(destination, "OLD")
+  for
+    data in [
+      @utf8.encode("../escape.ts\n"),
+      @utf8.encode("/absolute.ts\n"),
+      b"\xff",
+      @utf8.encode("src/a.ts\u0000src/b.js\n"),
+    ] {
+    let (code, _, _) = invoke(
+      binary,
+      common + ["--stdin", "-o", destination],
+      temp,
+      data,
+      file_input=true,
+    )
+    assert_true(code != 0)
+    assert_eq(@fs.read_file(destination).text(), "OLD")
+  }
+  let overflow = @utf8.encode("x".repeat(8388609))
+  let (code, _, err) = invoke(
+    binary,
+    common + ["--stdin", "-o", destination],
+    temp,
+    overflow,
+    file_input=true,
+  )
+  assert_true(code != 0)
+  assert_true(err.contains("InputError"))
+  assert_eq(@fs.read_file(destination).text(), "OLD")
+
+  let select = common + ["--stdin", "-o", "-"]
+  let (code, document, report) = invoke(
+    binary,
+    select,
+    temp,
+    @utf8.encode("src/a.ts\n"),
+  )
+  success(code, report)
+  let count = tokens(report)
+  let (code, equal, err) = invoke(
+    binary,
+    select + ["--token-budget=" + count.to_string()],
+    temp,
+    @utf8.encode("src/a.ts\n"),
+  )
+  success(code, err)
+  assert_eq(equal, document)
+  let (code, over, _) = invoke(
+    binary,
+    select + ["--token-budget=" + (count - 1).to_string()],
+    temp,
+    @utf8.encode("src/a.ts\n"),
+  )
+  assert_eq(code, 1)
+  assert_eq(over, document)
+  if @env.get_env_var("OS") != Some("Windows_NT") {
+    let newline = "src/line\nbreak.ts"
+    @fs.write_file(root + "/" + newline, "export const newline = 1;\n")
+    let (code, out, err) = invoke(
+      binary,
+      common + ["--stdin0", "-o", "-"],
+      temp,
+      @utf8.encode(newline + "\u0000"),
+    )
+    success(code, err)
+    assert_eq(keys(out), [newline])
+  }
+  let (code, help, err) = invoke(
+    binary,
+    ["--help", "--stdin", "--tokenizer-path=missing"],
+    temp,
+    b"\xff",
+    file_input=true,
+  )
+  success(code, err)
+  assert_true(help.contains("--stdin0"))
+  println(
+    "PASS stdout aliases, literal dash, bounded UTF-8 stdin/EOF, exact lists, filters, Git scope, raw scanning and final budgets",
+  )
+}

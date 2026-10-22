@@ -14,6 +14,14 @@ pub(all) enum TokenCountTree {
 } derive(Eq, Debug)
 
 ///|
+/// Explicit CLI file-list input. Configuration files never enable stdin reads.
+pub(all) enum StdinMode {
+  Off
+  Lines
+  Nul
+} derive(Eq, Debug)
+
+///|
 pub(all) enum Action {
   Pack
   Init
@@ -83,6 +91,7 @@ pub(all) struct Cli {
   config_path : String?
   action : Action
   stdout : Bool
+  stdin_mode : StdinMode
   quiet : Bool
   verbose : Bool
   patch : Patch
@@ -103,6 +112,7 @@ pub(all) struct Options {
   remote_branch : String?
   max_git_bytes : Int32
   include_patterns : Array[String]
+  file_paths : Array[String]?
   ignore : Array[String]
   use_gitignore : Bool
   use_dot_ignore : Bool
@@ -149,6 +159,12 @@ pub extend Action with Eq::{equal, not_equal}
 pub extend Action with Debug::{to_repr}
 
 ///|
+pub extend StdinMode with Eq::{equal, not_equal}
+
+///|
+pub extend StdinMode with Debug::{to_repr}
+
+///|
 pub extend Patch with Debug::{to_repr}
 
 ///|
@@ -181,8 +197,7 @@ fn validate_pattern(pattern : String) -> Unit raise ConfigError {
     pattern.has_prefix("/") ||
     pattern.contains("\\") ||
     pattern.contains(":") ||
-    pattern.contains("{") ||
-    pattern.contains("}") {
+    pattern.contains("\u0000") {
     raise InvalidValue("glob")
   }
   for part in pattern.split("/") {
@@ -273,12 +288,22 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
   if cli.quiet && cli.verbose {
     raise Conflict("quiet/verbose")
   }
-  // Only an explicitly supplied CLI --output conflicts with --stdout.
-  if cli.stdout && cli.patch.output is Some(_) {
+  // '-' agrees with --stdout; an explicit regular filename conflicts.
+  if cli.stdout && cli.patch.output is Some(path) && path != "-" {
     raise Conflict("output/stdout")
   }
   let patch = cli.patch
   let style = patch.style.unwrap_or(file.style.unwrap_or(Xml))
+  let output = patch.output.unwrap_or(
+    file.output.unwrap_or(
+      match style {
+        Xml => "repomix-output.xml"
+        Markdown => "repomix-output.md"
+        Json => "repomix-output.json"
+        Plain => "repomix-output.txt"
+      },
+    ),
+  )
   let remote = match patch.remote {
     Some(_) as value => value
     None => file.remote
@@ -295,17 +320,8 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
   }
   {
     directory: cli.directory,
-    output: patch.output.unwrap_or(
-      file.output.unwrap_or(
-        match style {
-          Xml => "repomix-output.xml"
-          Markdown => "repomix-output.md"
-          Json => "repomix-output.json"
-          Plain => "repomix-output.txt"
-        },
-      ),
-    ),
-    stdout: cli.stdout,
+    output,
+    stdout: cli.stdout || output == "-",
     style,
     compress: patch.compress.unwrap_or(file.compress.unwrap_or(false)),
     full_metadata: patch.full_metadata.unwrap_or(
@@ -329,6 +345,7 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
       file.include_patterns,
       patch.include_patterns,
     ),
+    file_paths: None,
     ignore: append_unique(file.ignore, patch.ignore),
     use_gitignore: patch.use_gitignore.unwrap_or(
       file.use_gitignore.unwrap_or(true),

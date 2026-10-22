@@ -93,7 +93,11 @@ async fn git_context(
   if !options.include_diffs && !options.include_logs {
     return { sections: [], metadata: Json::null(), revision: None, }
   }
-  let filter = @selection.path_filter(root, selection_options)
+  let filter = @selection.path_filter(
+    root,
+    selection_options,
+    file_paths=options.file_paths,
+  )
   let accept_diff = async fn(paths : Array[String]) -> Bool {
     if paths.is_empty() {
       return false

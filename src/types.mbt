@@ -84,6 +84,7 @@ pub fn options(
   style~ : Style = Xml,
   compress~ : Bool = false,
   full_metadata~ : Bool = false,
+  file_paths~ : Array[String]? = None,
   include_diffs~ : Bool = false,
   include_logs~ : Bool = false,
   include_logs_count~ : Int32 = 50,
@@ -99,5 +100,12 @@ pub fn options(
   cli.patch.include_logs_count = Some(include_logs_count)
   cli.patch.remote = remote
   cli.patch.remote_branch = remote_branch
-  @config.resolve(cli, None)
+  let resolved = @config.resolve(cli, None)
+  {
+    ..resolved,
+    file_paths: match file_paths {
+      None => None
+      Some(paths) => Some(paths.copy())
+    },
+  }
 }

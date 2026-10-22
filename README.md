@@ -7,7 +7,7 @@
 - **代码结构压缩**：`--compress` 为 JavaScript/TypeScript（含 JSX/TSX）和 Python 保留声明、类型、注释与嵌套结构，省略实现细节；其他语言保留原文。
 - **远程与 Git 上下文**：获取公开 HTTPS 仓库的指定版本，或把本地源码、暂存/未暂存差异和近期提交组合成评审材料。
 - **四格式导出**：XML、Markdown、JSON 和纯文本均含目录结构，默认展示轻量概览；`--full-metadata` 提供逐文件记录与原始行区间。
-- **筛选与密钥扫描**：组合忽略规则和 glob；先扫描原始内容，再压缩，命中的文件、补丁或提交整体排除。
+- **筛选与密钥扫描**：组合忽略规则和 glob；源码版还支持 stdin 精确文件列表、NUL 协议和花括号备选。先扫描原始内容，再压缩，命中的文件、补丁或提交整体排除。
 - **计数与预算**：精确计算完整输出的 `o200k_base` token 数，提供文件排名、目录统计与预算检查；同一处理流程也可通过库 API 复用。
 
 ## 最快上手
@@ -28,6 +28,19 @@ moon run --target native scripts/demo.mbtx
 ```
 
 它会自动构建 CLI，将输入副本、XML、Markdown 和诊断日志保留在新建的 `dist/demo/`；目录已存在就报错，不覆盖。也可传入另一个尚不存在的输出目录。步骤和观察点见 [演示指南](docs/demo.md)。
+
+## 源码版的文件列表与兼容行为
+
+当前主线在 v0.2.0 之后增加了文件列表和筛选兼容能力；安装版用法见 [v0.2.0 文档](https://github.com/Delthin/moon-repomix/tree/v0.2.0)。下列命令用于从当前源码构建并安装的 CLI：
+
+```sh
+# 只处理 Git 列出的文件，NUL 协议保留文件名中的空格和换行
+git ls-files -z | moon-repomix . --stdin0 --style markdown -o -
+# 多种后缀；引号让 CLI 而非 shell 展开备选
+moon-repomix ./project --include 'src/**/*.{mbt,ts,py}' -o -
+```
+
+`--stdin` 每行一个相对路径，`--stdin0` 使用 NUL 分隔；空输入选零文件，重复项去重，列表仍受 ignore、原始内容扫描和 Git 路径筛选约束。`-o -`、`--output=-` 和配置中的 `output.filePath: "-"` 均输出到 stdout；`-o ./-` 写入普通文件。`--no-dot-ignore` 仅关闭 `.ignore`，`.repomixignore` 始终生效。详细规则见 [配置文档](docs/configuration.md)。
 
 ## 安装
 
@@ -128,7 +141,7 @@ let result = @repomix.pack(options, runtime)
 // result.files / skipped / findings / security / budget 提供统计及状态。
 ```
 
-`options` 默认使用 XML；可通过 `style` 选择 `Xml`、`Markdown`、`Json`、`Plain`，同时选择对应的默认文件名。`options` 还接受 `compress`、`full_metadata`、`include_diffs`、`include_logs`、`include_logs_count`、`remote : String?` 和 `remote_branch : String?`。远程调用使用目录 `"."`，例如 `options(".", remote=Some("https://github.com/octocat/Hello-World.git"))`。`pack` 返回结果，不写文件，并负责远程目录的获取与清理；由调用者决定如何处理输出和预算超限。词表同目录还须有 `tokenizer-unicode-16.0.0.txt`，两份资源均校验 SHA-256。一个 `Runtime` 可复用于多次顺序打包。接口见 [`src/pkg.generated.mbti`](src/pkg.generated.mbti)。
+`options` 默认使用 XML；可通过 `style` 选择 `Xml`、`Markdown`、`Json`、`Plain`，同时选择对应的默认文件名。`options` 还接受 `compress`、`full_metadata`、`include_diffs`、`include_logs`、`include_logs_count`、`remote : String?` 和 `remote_branch : String?`。当前源码另支持 `file_paths : Array[String]?`：`None` 表示遍历，`Some(paths)` 只选择列表中的文件，`Some([])` 为零文件；此参数尚不属于 v0.2.0 的库接口。远程调用使用目录 `"."`，例如 `options(".", remote=Some("https://github.com/octocat/Hello-World.git"))`。`pack` 返回结果，不写文件，并负责远程目录的获取与清理；由调用者决定如何处理输出和预算超限。词表同目录还须有 `tokenizer-unicode-16.0.0.txt`，两份资源均校验 SHA-256。一个 `Runtime` 可复用于多次顺序打包。接口见 [`src/pkg.generated.mbti`](src/pkg.generated.mbti)。
 
 ## 开发与打包
 
@@ -152,6 +165,7 @@ moon run --target native scripts/functional.mbtx _build/native/release/build/cmd
 moon run --target native scripts/token-reports-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
 moon run --target native scripts/output-formats-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
 moon run --target native scripts/advanced-context-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
+moon run --target native scripts/input-list-test.mbtx
 moon run --target native scripts/self-pack-test.mbtx ../moon-repomix-self-check
 ```
 

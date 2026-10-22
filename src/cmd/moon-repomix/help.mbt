@@ -3,8 +3,10 @@ let help : String =
   #|moon-repomix — pack local or remote repository context
   #|Usage: moon-repomix [directory] [options]
   #|
-  #|  -o, --output PATH              Output file (relative to working directory)
+  #|  -o, --output PATH              Output file; '-' writes stdout, './-' is a file
   #|      --stdout                   Write only the document to stdout
+  #|      --stdin                    Read a literal UTF-8 file list, one path per line
+  #|      --stdin0                   Read a NUL-separated file list (for git -z)
   #|      --style FORMAT             xml|markdown|json|plain (default: xml)
   #|      --compress / --no-compress  Syntax-tree code skeletons with source lines
   #|      --full-metadata            Full per-file records and source maps in any format
@@ -14,10 +16,10 @@ let help : String =
   #|      --remote HTTPS_URL         Fetch a public repository into a temporary root
   #|      --remote-branch REF        Remote branch, tag or revision
   #|      --max-git-bytes N          Aggregate Git text limit (default: 8388608)
-  #|      --include GLOBS            Comma-separated positive filters
+  #|      --include GLOBS            Root-relative filters; supports {a,b} alternatives
   #|  -i, --ignore GLOBS             Comma-separated exclusion filters
   #|      --no-gitignore             Disable .gitignore and Git exclude rules
-  #|      --no-dot-ignore            Disable .ignore and .repomixignore
+  #|      --no-dot-ignore            Disable .ignore; .repomixignore still applies
   #|      --no-default-patterns      Disable built-in excludes
   #|      --no-security-check        Disable secret scanning (warns)
   #|      --token-count-encoding NAME  Only o200k_base is supported
@@ -40,5 +42,7 @@ let help : String =
   #|Place directory before --token-count-tree, or separate it with --.
   #|Directory token sums are not the final document count used for budgets.
   #|All formats use a metadata overview by default; --full-metadata keeps per-file records.
+  #|Stdin modes are exclusive, bounded to 8 MiB, and never bypass ignore/scanning.
+  #|Empty stdin selects zero files; paths are literal and relative to the input root.
   #|With --stdout, redirect outside the input root or explicitly ignore the target.
   #|

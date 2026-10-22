@@ -10,7 +10,7 @@ import {
 }
 
 // Values
-pub fn options(String, style? : @config.Style, compress? : Bool, full_metadata? : Bool, include_diffs? : Bool, include_logs? : Bool, include_logs_count? : Int, remote? : String?, remote_branch? : String?) -> @config.Options raise
+pub fn options(String, style? : @config.Style, compress? : Bool, full_metadata? : Bool, file_paths? : Array[String]?, include_diffs? : Bool, include_logs? : Bool, include_logs_count? : Int, remote? : String?, remote_branch? : String?) -> @config.Options raise
 
 pub async fn pack(@config.Options, Runtime) -> PackResult
 

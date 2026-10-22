@@ -8,6 +8,8 @@ import {
 // Values
 pub fn parse_cli(Array[String]) -> Cli raise ConfigError
 
+pub fn parse_file_list(String, nul? : Bool) -> Array[String] raise ConfigError
+
 pub fn parse_json(String) -> Patch raise ConfigError
 
 pub fn resolve(Cli, Patch?) -> Options raise ConfigError
@@ -42,6 +44,7 @@ pub(all) struct Cli {
   config_path : String?
   action : Action
   stdout : Bool
+  stdin_mode : StdinMode
   quiet : Bool
   verbose : Bool
   patch : Patch
@@ -62,6 +65,7 @@ pub(all) struct Options {
   remote_branch : String?
   max_git_bytes : Int
   include_patterns : Array[String]
+  file_paths : Array[String]?
   ignore : Array[String]
   use_gitignore : Bool
   use_dot_ignore : Bool
@@ -104,6 +108,15 @@ pub(all) struct Patch {
 } derive(@debug.Debug)
 pub fn Patch::empty() -> Self
 pub fn Patch::to_repr(Self) -> @debug.Repr
+
+pub(all) enum StdinMode {
+  Off
+  Lines
+  Nul
+} derive(Eq, @debug.Debug)
+pub fn StdinMode::equal(Self, Self) -> Bool
+pub fn StdinMode::not_equal(Self, Self) -> Bool
+pub fn StdinMode::to_repr(Self) -> @debug.Repr
 
 pub(all) enum Style {
   Xml

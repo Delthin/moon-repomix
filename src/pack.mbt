@@ -81,7 +81,11 @@ async fn pack_directory(
     use_default_patterns: options.use_default_patterns,
     output: destination,
   }
-  let selected = @selection.select(root, selection_options) catch {
+  let selected = @selection.select(
+    root,
+    selection_options,
+    file_paths=options.file_paths,
+  ) catch {
     err => {
       if @async.is_cancellation_error(err) {
         raise err

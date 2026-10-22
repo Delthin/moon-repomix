@@ -5,6 +5,7 @@ test "defaults and presence-aware configuration precedence" {
   assert_eq(cli.config_path, None)
   assert_eq(cli.action, @config.Action::Pack)
   assert_eq(cli.patch.security_check, None)
+  assert_eq(cli.stdin_mode, @config.StdinMode::Off)
   let defaults = @config.resolve(cli, None)
   assert_eq(defaults.output, "repomix-output.xml")
   assert_eq(defaults.style, @config.Style::Xml)
@@ -14,6 +15,7 @@ test "defaults and presence-aware configuration precedence" {
   assert_eq(defaults.token_budget, None)
   assert_eq(defaults.top_files_length, 5)
   assert_false(defaults.full_metadata)
+  assert_eq(defaults.file_paths, None)
   let detailed = @config.parse_json("{\"output\":{\"fullMetadata\":true}}")
   assert_true(
     @config.resolve(@config.parse_cli([]), Some(detailed)).full_metadata,
@@ -129,6 +131,48 @@ test "CLI surface and action queries are pure" {
     ),
   )
   assert_true(stdout.stdout)
+  for args in [["-o", "-"], ["--output=-"], ["--stdout", "--output", "-"]] {
+    assert_true(@config.resolve(@config.parse_cli(args), None).stdout)
+  }
+  assert_true(
+    @config.resolve(
+      @config.parse_cli([]),
+      Some(@config.parse_json("{\"output\":{\"filePath\":\"-\"}}")),
+    ).stdout,
+  )
+  assert_false(
+    @config.resolve(@config.parse_cli(["-o", "-", "-o", "./-"]), None).stdout,
+  )
+  assert_eq(@config.parse_cli(["--stdin"]).stdin_mode, @config.StdinMode::Lines)
+  assert_eq(
+    @config.parse_cli(["--stdin0", "--stdin0"]).stdin_mode,
+    @config.StdinMode::Nul,
+  )
+  assert_eq(
+    @config.parse_cli([
+      "--include=src/*.{js,ts},docs/{a,{b,c}}.md,icons/[,].svg",
+    ]).patch.include_patterns,
+    ["src/*.{js,ts}", "docs/{a,{b,c}}.md", "icons/[,].svg"],
+  )
+}
+
+///|
+test "literal file-list protocols preserve names and explicit emptiness" {
+  assert_eq(
+    @config.parse_file_list("\uFEFFsrc/a.ts\r\n spaced name.js \r\n\n"),
+    ["src/a.ts", " spaced name.js "],
+  )
+  assert_eq(@config.parse_file_list("a\nb.ts\u0000 leading \u0000", nul=true), [
+    "a\nb.ts", " leading ",
+  ])
+  assert_eq(@config.parse_file_list(""), [])
+  assert_eq(@config.parse_file_list("\r\n\n"), [])
+  try @config.parse_file_list("a\u0000b\n") catch {
+    @config.ConfigError::InvalidValue("stdin") => ()
+    _ => fail("unexpected file-list error")
+  } noraise {
+    _ => fail("NUL is not a newline list separator")
+  }
 }
 
 ///|
@@ -196,6 +240,12 @@ test "strict rejection of invalid configuration and CLI" {
       ["--max-git-bytes=0"],
       ["--quiet", "--verbose"],
       ["--stdout", "-o", "out.xml"],
+      ["--stdin", "--stdin0"],
+      ["--stdin0", "--stdin"],
+      ["--stdin=false"],
+      ["--stdin0=false"],
+      ["--init", "--stdin"],
+      ["--include=src/{a,b"],
       ["--output"],
       ["--style=html"],
       ["one", "two"],
@@ -228,10 +278,7 @@ test "strict rejection of invalid configuration and CLI" {
       _ => fail("expected invalid CLI arguments")
     }
   }
-  for
-    pattern in [
-      "{a,b}", "/absolute", "a/../b", "../b", "C:/data", "a\\b", "!keep", "",
-    ] {
+  for pattern in ["/absolute", "a/../b", "../b", "C:/data", "a\\b", "!keep", ""] {
     try @config.parse_cli(["--include=" + pattern]) catch {
       @config.ConfigError::InvalidValue("glob") => ()
       _ => fail("expected glob error")
