@@ -1,0 +1,1028 @@
+///|
+/// Reproducible developer benchmark; see docs/performance.md.
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+}
+
+///|
+struct Repo {
+  id : String
+  url : String
+  revision : String
+  directory : String
+  count : Int32
+} derive(ToJson)
+
+///|
+fn corpora() -> Array[Repo] {
+  [
+    {
+      id: "repomix",
+      url: "https://github.com/yamadashy/repomix.git",
+      revision: "80b4280a9196feace092fc672dfe2b5fac62ef08",
+      directory: "src",
+      count: 144,
+    },
+    {
+      id: "express",
+      url: "https://github.com/expressjs/express.git",
+      revision: "1faf228935aa0a13111f92c28ee795be64ce3f0f",
+      directory: "lib",
+      count: 12,
+    },
+    {
+      id: "requests",
+      url: "https://github.com/psf/requests.git",
+      revision: "0e322af87745eff34caffe4df68456ebc20d9068",
+      directory: "src/requests",
+      count: 19,
+    },
+  ]
+}
+
+///|
+struct Harness {
+  work : String
+  linux : Bool
+  environment : Map[String, String]
+}
+
+///|
+struct Sample {
+  repo : String
+  mode : String
+  implementation : String
+  round : Int32
+  wall_seconds : Double
+  user_seconds : Double
+  sys_seconds : Double
+  rss_bytes : Double
+  output_sha256 : String
+  output_bytes : Int32
+  api_ok : Bool
+} derive(ToJson)
+
+///|
+async fn save(path : String, value : Json) -> Unit {
+  @fs.write_file(path, value.stringify(indent=2) + "\n", create_mode=CreateNew)
+}
+
+///|
+async fn command(
+  h : Harness,
+  id : String,
+  program : String,
+  args : Array[String],
+  cwd : String,
+) -> String {
+  let stem = h.work + "/logs/" + id
+  // Only an allowlisted child environment is used; never serialize the caller's environment.
+  save(stem + ".command.json", {
+    "program": Json(program),
+    "argv": Json(args),
+    "cwd": Json(cwd),
+  })
+  let (code, out, err) = @process.collect_output(
+    program,
+    args,
+    cwd~,
+    inherit_env=false,
+    extra_env=h.environment,
+  )
+  @fs.write_file(stem + ".stdout", out, create_mode=CreateNew)
+  @fs.write_file(stem + ".stderr", err, create_mode=CreateNew)
+  save(stem + ".exit.json", { "exit": Json(code) })
+  guard code == 0 else { fail("Command failed (no retry): " + stem) }
+  let diagnostics = out.text() + "\n" + err.text()
+  for
+    warning in [
+      "Failed to count tokens", "Error during", "Error in token counting worker",
+      "Error in batch token counting worker",
+    ] {
+    guard !diagnostics.contains(warning) else {
+      fail("Token counting failure: " + stem)
+    }
+  }
+  out.text()
+}
+
+///|
+async fn harness(work : String) -> Harness {
+  let (code, out, _) = @process.collect_output("/usr/bin/uname", ["-s"])
+  guard code == 0 &&
+    (out.text().trim() == "Linux" || out.text().trim() == "Darwin") else {
+    fail("Benchmark requires Linux GNU time or macOS /usr/bin/time")
+  }
+  let path = @env.get_env_var("PATH").unwrap_or("/usr/bin:/bin")
+  {
+    work,
+    linux: out.text().trim() == "Linux",
+    environment: {
+      "PATH": path,
+      "HOME": work + "/home",
+      "XDG_CONFIG_HOME": work + "/config",
+      "XDG_CACHE_HOME": work + "/cache",
+      "TMPDIR": work + "/tmp",
+      "TMP": work + "/tmp",
+      "TEMP": work + "/tmp",
+      "REPOMIX_TOKEN_CACHE_PATH": work + "/cache/token-counts.json",
+      "REPOMIX_LOG_LEVEL": "1",
+      "GIT_CONFIG_NOSYSTEM": "1",
+      "GIT_CONFIG_GLOBAL": "/dev/null",
+      "GIT_ATTR_NOSYSTEM": "1",
+      "GIT_TERMINAL_PROMPT": "0",
+      "GIT_ASKPASS": "/usr/bin/false",
+      "SSH_ASKPASS": "/usr/bin/false",
+      "NO_COLOR": "1",
+      "CI": "1",
+      "LC_ALL": "C",
+    },
+  }
+}
+
+///|
+async fn digest(h : Harness, path : String) -> String {
+  let (code, out, err) = @process.collect_output(
+    if h.linux {
+      "/usr/bin/sha256sum"
+    } else {
+      "/usr/bin/shasum"
+    },
+    (if h.linux { [] } else { ["-a", "256"] }) + [path],
+    cwd=h.work,
+    inherit_env=false,
+    extra_env=h.environment,
+  )
+  guard code == 0 else { fail("SHA-256 failed: " + err.text()) }
+  out.text()[0:64].to_owned()
+}
+
+///|
+fn git_args() -> Array[String] {
+  [
+    "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "credential.helper=",
+    "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "submodule.recurse=false",
+    "-c", "core.attributesFile=/dev/null", "-c", "init.defaultBranch=benchmark",
+  ]
+}
+
+///|
+async fn walk(root : String, relative : String, result : Array[String]) -> Unit {
+  let path = root + "/" + relative
+  match @fs.kind(path, follow_symlink=false) {
+    Directory =>
+      for entry in @fs.readdir(path, include_hidden=true) {
+        walk(root, relative + "/" + entry, result)
+      }
+    Regular => result.push(relative)
+    _ => fail("Corpus must contain only regular files/directories: " + path)
+  }
+}
+
+///|
+async fn inventory(root : String, repo : Repo) -> Array[String] {
+  let paths = ["LICENSE"]
+  assert_true(@fs.kind(root + "/LICENSE", follow_symlink=false) == Regular)
+  walk(root, repo.directory, paths)
+  paths.sort()
+  assert_eq(paths.length(), repo.count)
+  paths
+}
+
+///|
+async fn source_manifest(h : Harness, root : String, repo : Repo) -> Json {
+  let hashes : Map[String, String] = Map([])
+  for path in inventory(root, repo) {
+    hashes[path] = digest(h, root + "/" + path)
+  }
+  Json(hashes)
+}
+
+///|
+fn dirname(path : String) -> String {
+  path[0:path.rev_find("/").unwrap()].to_owned()
+}
+
+///|
+async fn prepare(work : String, sources : Array[String]) -> Unit {
+  // mkdir is exclusive: never overwrite a previous run or clean an arbitrary path.
+  guard work.has_prefix("/") else {
+    fail("Use an absolute, new workspace outside the source checkout")
+  }
+  @fs.mkdir(work)
+  let work = @fs.realpath(work)
+  for
+    dir in [
+      "logs", "report", "manifest", "home", "config", "cache", "tmp", "inputs", "documents",
+      "reference", "empty-template",
+    ] {
+    @fs.mkdir(work + "/" + dir)
+  }
+  let h = harness(work)
+  save(work + "/report/setup-started.json", {
+    "phase": "setup",
+    "local": Json(!sources.is_empty()),
+  })
+  assert_eq(
+    command(h, "node-version", "node", ["--version"], work).trim(),
+    "v25.9.0",
+  )
+  let node_cli = if sources.is_empty() {
+    @fs.write_file(
+      work + "/reference/package.json",
+      "{\"private\":true}\n",
+      create_mode=CreateNew,
+    )
+    command(
+      h,
+      "npm-install",
+      "npm",
+      [
+        "install",
+        "--prefix",
+        work + "/reference",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        "--save-exact",
+        "repomix@1.18.1",
+      ],
+      work,
+    )
+    |> ignore
+    @fs.write_file(
+      work + "/manifest/reference-package-lock.json",
+      @fs.read_file(work + "/reference/package-lock.json"),
+      create_mode=CreateNew,
+    )
+    work + "/reference/node_modules/repomix/bin/repomix.cjs"
+  } else {
+    @fs.realpath(sources[0])
+  }
+  let node_package = @fs.realpath(dirname(dirname(node_cli)) + "/package.json")
+  guard @json.parse(@fs.read_file(node_package).text())
+    is { "version": String("1.18.1"), .. } else {
+    fail("Expected installed repomix@1.18.1")
+  }
+  for index, repo in corpora() {
+    let input = work + "/inputs/" + repo.id
+    if sources.is_empty() {
+      @fs.mkdir(input)
+      command(
+        h,
+        repo.id + "-init",
+        "git",
+        git_args() + ["init", "--template=" + work + "/empty-template", input],
+        work,
+      )
+      |> ignore
+      command(
+        h,
+        repo.id + "-sparse",
+        "git",
+        git_args() +
+        [
+          "sparse-checkout",
+          "set",
+          "--no-cone",
+          "/" + repo.directory + "/",
+          "/LICENSE",
+        ],
+        input,
+      )
+      |> ignore
+      command(
+        h,
+        repo.id + "-fetch",
+        "git",
+        git_args() +
+        [
+          "fetch",
+          "--depth=1",
+          "--no-tags",
+          "--no-recurse-submodules",
+          repo.url,
+          repo.revision,
+        ],
+        input,
+      )
+      |> ignore
+      command(
+        h,
+        repo.id + "-checkout",
+        "git",
+        git_args() + ["checkout", "--detach", repo.revision],
+        input,
+      )
+      |> ignore
+      assert_eq(
+        command(
+          h,
+          repo.id + "-head",
+          "git",
+          git_args() + ["rev-parse", "HEAD"],
+          input,
+        ).trim(),
+        repo.revision,
+      )
+    } else {
+      let source = @fs.realpath(sources[index + 1])
+      @fs.mkdir(input)
+      // An empty repository boundary prevents unrelated ancestor ignore rules from changing inputs.
+      @fs.mkdir(input + "/.git")
+      for path in inventory(source, repo) {
+        let parent = path.rev_find("/").map(end => path[0:end].to_owned())
+        if parent is Some(parent) {
+          @fs.mkdir(input + "/" + parent, recursive=true, allow_exist=true)
+        }
+        @fs.write_file(
+          input + "/" + path,
+          @fs.read_file(source + "/" + path),
+          create_mode=CreateNew,
+        )
+      }
+      assert_eq(
+        source_manifest(h, source, repo),
+        source_manifest(h, input, repo),
+      )
+    }
+    save(
+      work + "/manifest/" + repo.id + "-source.json",
+      source_manifest(h, input, repo),
+    )
+  }
+  @fs.write_file(
+    work + "/native.config.json",
+    "{\"security\":{\"enableSecurityCheck\":true},\"tokenCount\":{\"encoding\":\"o200k_base\"}}\n",
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    work + "/node.config.json",
+    "{\"input\":{\"processors\":[]},\"output\":{\"git\":{\"sortByChanges\":false}},\"security\":{\"enableSecurityCheck\":true},\"tokenCount\":{\"encoding\":\"o200k_base\"}}\n",
+    create_mode=CreateNew,
+  )
+  save(work + "/manifest/prepared.json", {
+    "node_cli": Json(node_cli),
+    "node_package": Json(node_package),
+    "node_cli_sha256": Json(digest(h, node_cli)),
+    "node_package_sha256": Json(digest(h, node_package)),
+    "corpora": Json(corpora()),
+    "provenance": Json(
+      if sources.is_empty() {
+        "public HTTPS fetch; exact HEAD verified"
+      } else {
+        "maintainer-supplied fixed sources; copied selected files only; hashes verified; revisions declared, not remotely verified"
+      },
+    ),
+    "node_version": "25.9.0",
+    "repomix_version": "1.18.1",
+    "cache": "new HOME/XDG/TMP and token cache; retained after warmup; normal Node worker pool",
+  })
+  save(work + "/report/setup-complete.json", { "phase": "setup-complete" })
+  println("Prepared: " + work)
+}
+
+///|
+fn files(document : String) -> Map[String, String] raise {
+  guard @json.parse(document) is { "files": Object(entries), .. } else {
+    fail("Missing JSON files map")
+  }
+  let result : Map[String, String] = Map([])
+  for path, value in entries {
+    guard value is String(body) else { fail("Non-string file body") }
+    result[path] = body
+  }
+  result
+}
+
+///|
+fn paths(bodies : Map[String, String]) -> Array[String] {
+  let result = bodies.keys().collect()
+  result.sort()
+  result
+}
+
+///|
+/// Independent sampled API obligations. Node compression has different retention semantics.
+fn anchors(repo : String) -> Array[(String, Array[String])] {
+  match repo {
+    "express" =>
+      [
+        (
+          "lib/express.js",
+          [
+            "function createApplication()", "exports = module.exports = createApplication",
+          ],
+        ),
+        (
+          "lib/application.js",
+          [
+            "app.use = function use(fn)", "app.route = function route(path)", "app[method] = function(path)",
+          ],
+        ),
+      ]
+    "requests" =>
+      [
+        (
+          "src/requests/sessions.py",
+          [
+            "class Session(SessionRedirectMixin):", "from .adapters import HTTPAdapter",
+          ],
+        ),
+        (
+          "src/requests/api.py",
+          [
+            "def request(method, url, **kwargs):", "def get(url, params=None, **kwargs):",
+            "def post(url, data=None, json=None, **kwargs):",
+          ],
+        ),
+      ]
+    _ =>
+      [
+        (
+          "src/index.ts",
+          [
+            "export { runCli } from './cli/cliRun.js'", "export { pack } from './core/packager.js'",
+            "export type { PackResult } from './core/packager.js'",
+          ],
+        ),
+        ("src/core/packager.ts", ["export const pack = async ("]),
+      ]
+  }
+}
+
+///|
+fn normalize(text : String) -> String {
+  text.split("\n").map(line => line.trim().to_owned()).collect().join(" ")
+}
+
+///|
+fn cli(
+  h : Harness,
+  repo : Repo,
+  implementation : String,
+  native : String,
+  node_cli : String,
+  vocabulary : String,
+  compressed : Bool,
+  output : String,
+) -> (String, Array[String]) {
+  let args = [
+    h.work + "/inputs/" + repo.id,
+    "--config",
+    h.work + "/" + implementation + ".config.json",
+    "--include",
+    repo.directory + "/**,LICENSE",
+    "--style",
+    "json",
+    "--parsable-style",
+    "--top-files-len",
+    "0",
+    "--quiet",
+    "-o",
+    output,
+  ]
+  if compressed {
+    args.push("--compress")
+  }
+  if implementation == "node" {
+    ("node", [node_cli] + args)
+  } else {
+    (native, args + ["--tokenizer-path", vocabulary])
+  }
+}
+
+///|
+fn time_fields(
+  stderr : String,
+  linux : Bool,
+) -> (Double, Double, Double, Double) raise {
+  if linux {
+    for line in stderr.split("\n") {
+      if line.has_prefix("BENCH_TIME ") {
+        let fields = line.split(" ").collect()
+        guard fields.length() == 5 else { fail("Malformed GNU time metrics") }
+        return (
+          @string.parse_double(fields[1]),
+          @string.parse_double(fields[2]),
+          @string.parse_double(fields[3]),
+          @string.parse_double(fields[4]) * 1024.0,
+        )
+      }
+    }
+    fail("Missing GNU time metrics")
+  } else {
+    let values : Map[String, Double] = Map([])
+    for line in stderr.split("\n") {
+      let line = line.trim()
+      for name in ["real", "user", "sys"] {
+        if line.has_prefix(name + " ") {
+          values[name] = @string.parse_double(line[name.length():].trim())
+        }
+      }
+      if line.find("  maximum resident set size") is Some(end) {
+        values["rss"] = @string.parse_double(line[0:end].trim())
+      }
+    }
+    guard values.length() == 4 else { fail("Missing macOS time metrics") }
+    (values["real"], values["user"], values["sys"], values["rss"])
+  }
+}
+
+///|
+async fn measure(
+  h : Harness,
+  repo : Repo,
+  implementation : String,
+  native : String,
+  node_cli : String,
+  vocabulary : String,
+  compressed : Bool,
+  round : Int32,
+) -> Sample {
+  let mode = if compressed { "compressed" } else { "raw" }
+  let id = repo.id + "-" + mode + "-" + implementation + "-" + round.to_string()
+  let output = h.work + "/documents/" + id + ".json"
+  let (program, args) = cli(
+    h, repo, implementation, native, node_cli, vocabulary, compressed, output,
+  )
+  command(
+    h,
+    id,
+    "/usr/bin/time",
+    (if h.linux { ["-f", "BENCH_TIME %e %U %S %M"] } else { ["-lp"] }) +
+    [program] +
+    args,
+    h.work,
+  )
+  |> ignore
+  let (wall_seconds, user_seconds, sys_seconds, rss_bytes) = time_fields(
+    @fs.read_file(h.work + "/logs/" + id + ".stderr").text(),
+    h.linux,
+  )
+  guard wall_seconds > 0.0 && rss_bytes > 0.0 else {
+    fail("Unusable time/RSS metrics: " + id)
+  }
+  let document = @fs.read_file(output)
+  let bodies = files(document.text())
+  let root = h.work + "/inputs/" + repo.id
+  assert_eq(paths(bodies), inventory(root, repo))
+  if !compressed {
+    for path, body in bodies {
+      let source = @fs.read_file(root + "/" + path).text()
+      assert_eq(
+        body,
+        if implementation == "native" {
+          source
+        } else {
+          source.trim().to_owned()
+        },
+      )
+    }
+  }
+  let obligations : Array[Json] = []
+  let mut api_ok = true
+  for (path, fragments) in anchors(repo.id) {
+    for fragment in fragments {
+      let present = normalize(bodies[path]).contains(fragment)
+      obligations.push({
+        "path": Json(path),
+        "fragment": Json(fragment),
+        "present": Json(present),
+      })
+      api_ok = api_ok && present
+    }
+  }
+  save(h.work + "/report/" + id + "-contract.json", {
+    "paths": Json(paths(bodies)),
+    "api_anchors": Json(obligations),
+    "api_required": Json(implementation == "native" || !compressed),
+  })
+  guard api_ok || (implementation == "node" && compressed) else {
+    fail("API preservation failed: " + id)
+  }
+  let sample : Sample = {
+    repo: repo.id,
+    mode,
+    implementation,
+    round,
+    wall_seconds,
+    user_seconds,
+    sys_seconds,
+    rss_bytes,
+    output_sha256: digest(h, output),
+    output_bytes: document.binary().length(),
+    api_ok,
+  }
+  save(h.work + "/report/" + id + "-sample.json", ToJson::to_json(sample))
+  println(
+    id +
+    " wall=" +
+    wall_seconds.to_string() +
+    " rss_bytes=" +
+    rss_bytes.to_string(),
+  )
+  sample
+}
+
+///|
+/// Full metadata is validated outside timing; its bodies must equal the measured compact output.
+async fn validate_ranges(
+  h : Harness,
+  repo : Repo,
+  native : String,
+  node_cli : String,
+  vocabulary : String,
+) -> Unit {
+  let output = h.work + "/documents/" + repo.id + "-ranges.json"
+  let (program, args) = cli(
+    h, repo, "native", native, node_cli, vocabulary, true, output,
+  )
+  command(h, repo.id + "-ranges", program, args + ["--full-metadata"], h.work)
+  |> ignore
+  save(h.work + "/report/" + repo.id + "-ranges.json", check_ranges(h, repo))
+}
+
+///|
+async fn check_ranges(h : Harness, repo : Repo) -> Json {
+  let text = @fs.read_file(h.work + "/documents/" + repo.id + "-ranges.json").text()
+  let bodies = files(text)
+  assert_eq(
+    bodies,
+    files(
+      @fs.read_file(
+        h.work + "/documents/" + repo.id + "-compressed-native-0.json",
+      ).text(),
+    ),
+  )
+  guard @json.parse(text)
+    is { "metadata": { "compression": Array(records), .. }, .. } else {
+    fail("Missing full compression records")
+  }
+  let seen : Map[String, Json] = Map([])
+  for record in records {
+    guard record
+      is {
+        "path": String(path),
+        "ranges": Array(ranges),
+        "applied": applied_json,
+        "language": language,
+        "reason": reason,
+        "originalTokens": Number(original_tokens, ..),
+        "outputTokens": Number(output_tokens, ..),
+        ..
+      } else {
+      fail("Incomplete compression record")
+    }
+    let applied = match applied_json {
+      True => true
+      False => false
+      _ => fail("Non-boolean applied field")
+    }
+    let known_reason = match reason {
+      Null
+      | String("not-fewer-tokens")
+      | String("not-smaller")
+      | String("unsupported") => true
+      _ => false
+    }
+    guard known_reason else {
+      fail(
+        "Unexpected compression fallback: " + path + " " + reason.stringify(),
+      )
+    }
+    guard !seen.contains(path) && bodies.contains(path) else {
+      fail("Duplicate/unknown compression path")
+    }
+    guard language is Null || language is String(_) else {
+      fail("Invalid compression language")
+    }
+    guard !applied ||
+      (
+        language is String(_) &&
+        !ranges.is_empty() &&
+        !bodies[path].trim().is_empty()
+      ) else {
+      fail("Missing compressed body/ranges/language: " + path)
+    }
+    let source = @fs.read_file(h.work + "/inputs/" + repo.id + "/" + path).text()
+    let lines = source.split("\n").collect()
+    let mut previous = 0
+    for range in ranges {
+      guard range is [Number(start, ..), Number(end, ..)] &&
+        start == start.floor() &&
+        end == end.floor() &&
+        start > previous.to_double() &&
+        end >= start &&
+        end <= lines.length().to_double() else {
+        fail("Invalid source line ranges: " + path)
+      }
+      previous = end.to_int()
+    }
+    guard original_tokens > 0.0 &&
+      output_tokens > 0.0 &&
+      (!applied || output_tokens < original_tokens) else {
+      fail("Invalid compression token counts")
+    }
+    if !applied {
+      assert_eq(bodies[path], source)
+    }
+    for (anchor_path, fragments) in anchors(repo.id) {
+      if anchor_path != path {
+        continue
+      }
+      for fragment in fragments {
+        let mut found = false
+        for index, line in lines {
+          if line.contains(fragment) {
+            found = true
+            if !applied {
+              continue
+            } // Raw fallback was already checked byte-for-byte.
+            assert_true(
+              ranges
+              .iter()
+              .any(range => {
+                match range {
+                  [Number(start, ..), Number(end, ..)] =>
+                    start <= (index + 1).to_double() &&
+                    (index + 1).to_double() <= end
+                  _ => false
+                }
+              }),
+            )
+          }
+        }
+        guard found else { fail("Source API anchor missing: " + fragment) }
+      }
+    }
+    seen[path] = record
+  }
+  assert_eq(seen.length(), repo.count)
+  Json(records)
+}
+
+///|
+fn median(values : Array[Double]) -> Double {
+  let sorted = values.copy()
+  sorted.sort()
+  sorted[sorted.length() / 2]
+}
+
+///|
+fn stats(values : Array[Double]) -> Json {
+  let med = median(values)
+  let sorted = values.copy()
+  sorted.sort()
+  {
+    "median": Json(med),
+    "min": Json(sorted[0]),
+    "max": Json(sorted[sorted.length() - 1]),
+    "mad": Json(
+      median(values.map(x => if x < med { med - x } else { x - med })),
+    ),
+    "samples": Json(values),
+  }
+}
+
+///|
+async fn run(work : String, native : String, vocabulary : String) -> Unit {
+  let work = @fs.realpath(work)
+  @fs.mkdir(work + "/run")
+  let h = harness(work)
+  let native = @fs.realpath(native)
+  let vocabulary = @fs.realpath(vocabulary)
+  guard @json.parse(@fs.read_file(work + "/manifest/prepared.json").text())
+    is {
+      "node_cli": String(node_cli),
+      "node_package": String(node_package),
+      "node_cli_sha256": String(node_sha),
+      "node_package_sha256": String(package_sha),
+      ..
+    } else {
+    fail("Workspace preparation incomplete")
+  }
+  assert_eq(
+    command(h, "run-node-version", "node", ["--version"], work).trim(),
+    "v25.9.0",
+  )
+  assert_eq(digest(h, node_cli), node_sha)
+  assert_eq(digest(h, node_package), package_sha)
+  let identities : Map[String, String] = Map([])
+  for
+    path in [
+      native,
+      vocabulary,
+      @fs.realpath(dirname(vocabulary) + "/tokenizer-unicode-16.0.0.txt"),
+      node_cli,
+      node_package,
+      @fs.realpath("scripts/benchmark.mbtx"),
+      work + "/native.config.json",
+      work + "/node.config.json",
+    ] {
+    identities[path] = digest(h, path)
+  }
+  save(work + "/manifest/run.json", {
+    "identities_sha256": Json(identities),
+    "rounds": 5,
+    "warmups": 1,
+    "order": "alternate native/node first each measured round; fresh processes",
+    "rss": Json(
+      if h.linux {
+        "GNU time %M KiB converted to bytes; process maximum, not worker sum"
+      } else {
+        "macOS time -lp maximum resident set size bytes; not worker sum"
+      },
+    ),
+    "wall": "time real/elapsed seconds, not user+sys CPU",
+    "statistics": "all five measured samples; median/min/max/MAD; warmup excluded",
+    "node_compression": "API omissions recorded, not asserted equivalent to Native",
+    "range_guard": "separate untimed full-metadata export: identical bodies, complete records, bounded ordered ranges, sampled API source-line coverage",
+  })
+  command(h, "platform", "/usr/bin/uname", ["-a"], work) |> ignore
+  command(h, "native-version", native, ["--version"], work) |> ignore
+  command(
+    h,
+    "source-revision",
+    "git",
+    git_args() + ["rev-parse", "HEAD"],
+    @fs.realpath("."),
+  )
+  |> ignore
+  command(
+    h,
+    "source-status",
+    "git",
+    git_args() + ["status", "--short"],
+    @fs.realpath("."),
+  )
+  |> ignore
+  let rows : Array[Sample] = []
+  let summaries : Array[Json] = []
+  let unfavorable : Array[String] = []
+  let markdown = StringBuilder()
+  markdown.write_string(
+    "# Native / Node benchmark\n\nFive fresh-process rounds after one excluded warmup; normal caches retained.\nWall and RSS are medians. Shared-runner results are descriptive, not a performance gate.\nNode compressed API retention differs; see per-round contracts.\n\n| Case | Native wall s | Node wall s | Node/native wall | Wall | Native RSS bytes | Node RSS bytes | RSS |\n| --- | ---: | ---: | ---: | --- | ---: | ---: | --- |\n",
+  )
+  for repo in corpora() {
+    let root = work + "/inputs/" + repo.id
+    let original = @json.parse(
+      @fs.read_file(work + "/manifest/" + repo.id + "-source.json").text(),
+    )
+    assert_eq(source_manifest(h, root, repo), original)
+    for compressed in [false, true] {
+      let mode = if compressed { "compressed" } else { "raw" }
+      let warmups : Map[String, String] = Map([])
+      for implementation in ["native", "node"] {
+        let sample = measure(
+          h, repo, implementation, native, node_cli, vocabulary, compressed, 0,
+        )
+        warmups[implementation] = sample.output_sha256
+      }
+      if compressed {
+        validate_ranges(h, repo, native, node_cli, vocabulary)
+      }
+      for round in 1..<=5 {
+        for
+          implementation in (if round % 2 == 1 {
+            ["native", "node"]
+          } else {
+            ["node", "native"]
+          }) {
+          let sample = measure(
+            h, repo, implementation, native, node_cli, vocabulary, compressed, round,
+          )
+          assert_eq(sample.output_sha256, warmups[implementation])
+          rows.push(sample)
+        }
+      }
+      let native_rows = rows.filter(r => {
+        r.repo == repo.id && r.mode == mode && r.implementation == "native"
+      })
+      let node_rows = rows.filter(r => {
+        r.repo == repo.id && r.mode == mode && r.implementation == "node"
+      })
+      assert_eq(native_rows.length(), 5)
+      assert_eq(node_rows.length(), 5)
+      let native_wall = median(native_rows.map(r => r.wall_seconds))
+      let node_wall = median(node_rows.map(r => r.wall_seconds))
+      let native_rss = median(native_rows.map(r => r.rss_bytes))
+      let node_rss = median(node_rows.map(r => r.rss_bytes))
+      let wall = if native_wall < node_wall { "better" } else { "not-better" }
+      let rss = if native_rss < node_rss { "better" } else { "not-better" }
+      let case = repo.id + "-" + mode
+      if wall == "not-better" || rss == "not-better" {
+        unfavorable.push(case)
+      }
+      for
+        (implementation, group) in [
+          ("native", native_rows),
+          ("node", node_rows),
+        ] {
+        summaries.push({
+          "case": Json(case),
+          "implementation": Json(implementation),
+          "wall_seconds": stats(group.map(r => r.wall_seconds)),
+          "user_seconds": stats(group.map(r => r.user_seconds)),
+          "sys_seconds": stats(group.map(r => r.sys_seconds)),
+          "rss_bytes": stats(group.map(r => r.rss_bytes)),
+          "api_ok": Json(group.iter().all(r => r.api_ok)),
+        })
+      }
+      save(work + "/report/" + case + "-comparison.json", {
+        "wall": Json(wall),
+        "rss": Json(rss),
+        "node_over_native_wall": Json(node_wall / native_wall),
+        "native_over_node_rss": Json(native_rss / node_rss),
+      })
+      markdown.write_string(
+        "| " +
+        case +
+        " | " +
+        native_wall.to_string() +
+        " | " +
+        node_wall.to_string() +
+        " | " +
+        (node_wall / native_wall).to_string() +
+        " | " +
+        wall +
+        " | " +
+        native_rss.to_string() +
+        " | " +
+        node_rss.to_string() +
+        " | " +
+        rss +
+        " |\n",
+      )
+    }
+    assert_eq(source_manifest(h, root, repo), original)
+  }
+  for path, sha in identities {
+    assert_eq(digest(h, path), sha)
+  }
+  save(work + "/report/rounds.json", Json(rows))
+  save(work + "/report/summary.json", {
+    "statistics": Json(summaries),
+    "unfavorable_cases": Json(unfavorable),
+  })
+  markdown.write_string(
+    "\nUnfavorable cases (wall or RSS not better): " +
+    (if unfavorable.is_empty() { "none" } else { unfavorable.join(", ") }) +
+    ".\n\nAll samples, including slow samples, are retained in summary.json and per-round logs.\nA green correctness run does not imply Native is faster on every platform.\n",
+  )
+  @fs.write_file(
+    work + "/report/REPORT.md",
+    markdown.to_string(),
+    create_mode=CreateNew,
+  )
+  save(work + "/report/complete.json", {
+    "phase": "complete",
+    "measured_processes": 60,
+    "warmup_processes": 12,
+    "untimed_range_checks": 3,
+    "identities_and_inputs_unchanged": true,
+  })
+  println("Report: " + work + "/report/REPORT.md")
+}
+
+///|
+async fn verify(work : String) -> Unit {
+  // Offline contract recheck of retained documents; never reruns or selects timing samples.
+  assert_eq(
+    time_fields("diagnostic\nBENCH_TIME 0.12 0.20 0.03 12345\n", true),
+    (0.12, 0.20, 0.03, 12641280.0),
+  )
+  assert_eq(
+    time_fields(
+      "real 0.12\nuser 0.20\nsys 0.03\n 12345  maximum resident set size\n", false,
+    ),
+    (0.12, 0.20, 0.03, 12345.0),
+  )
+  assert_eq(median([9.0, 1.0, 5.0, 3.0, 7.0]), 5.0)
+  let h = harness(@fs.realpath(work))
+  for repo in corpora() {
+    check_ranges(h, repo) |> ignore
+  }
+  println("Offline range/body/API and GNU/macOS time parser checks passed")
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  match args[1:] {
+    ["prepare", work] => prepare(work, [])
+    ["local", work, node_cli, repomix, express, requests] =>
+      prepare(work, [node_cli, repomix, express, requests])
+    ["run", work, native, vocabulary] => run(work, native, vocabulary)
+    ["verify", work] => verify(work)
+    _ =>
+      fail(
+        "Usage: benchmark.mbtx prepare NEW_ABSOLUTE_WORKSPACE | local NEW_ABSOLUTE_WORKSPACE NODE_CLI REPOMIX_SRC EXPRESS_SRC REQUESTS_SRC | run WORKSPACE NATIVE VOCABULARY | verify WORKSPACE (run from product checkout)",
+      )
+  }
+}
