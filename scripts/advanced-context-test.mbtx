@@ -185,6 +185,24 @@ async fn main {
     ),
     create_mode=CreateNew,
   )
+  let moonbit_body = "  total += 1\n"
+  let moonbit_source = "///|\n/// Inventory totals retain their complete public signature.\n" +
+    "pub(all) struct Inventory {\n  count : Int\n} derive(Debug)\n\n///|\n" +
+    "pub fn Inventory::total(self : Inventory, values : Array[Int]) -> Int {\n" +
+    "  let mut total = self.count\n" +
+    moonbit_body.repeat(80) +
+    "  for value in values { total += value }\n  total\n}\n"
+  let moonbit_interface = "package \"fixture/inventory\"\n\npub(all) struct Inventory {\n  count : Int\n}\n\npub fn Inventory::total(Self, Array[Int]) -> Int\n"
+  @fs.write_file(
+    root + "/src/inventory.mbt",
+    moonbit_source,
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    root + "/src/inventory.mbti",
+    moonbit_interface,
+    create_mode=CreateNew,
+  )
   @fs.write_file(
     root + "/notes.txt",
     "plain context remains exact\r\n",
@@ -265,6 +283,19 @@ async fn main {
   assert_true(skeleton.contains("buildContext"))
   assert_true(skeleton.contains("input: number"))
   assert_false(skeleton.contains(body + body))
+  guard files.get("src/inventory.mbt") is Some(String(moonbit_outline)) else {
+    fail("Missing MoonBit skeleton")
+  }
+  assert_true(moonbit_outline.contains("pub(all) struct Inventory"))
+  assert_true(moonbit_outline.contains("Inventory::total"))
+  assert_true(moonbit_outline.contains("values : Array[Int]"))
+  assert_false(moonbit_outline.contains(moonbit_body + moonbit_body))
+  guard files.get("src/inventory.mbti") is Some(String(interface_outline)) else {
+    fail("Missing MoonBit interface")
+  }
+  assert_true(
+    interface_outline.contains("Inventory::total(Self, Array[Int]) -> Int"),
+  )
   assert_eq(
     files.get("notes.txt"),
     Some(Json("plain context remains exact\r\n")),
@@ -276,7 +307,7 @@ async fn main {
     fail("Missing compression overview")
   }
   assert_eq(file_count, files.length().to_double())
-  assert_true(applied >= 2)
+  assert_true(applied >= 3)
   let (full_ok, detailed, full_report) = run(
     binary,
     common + ["--style=json", "--stdout", "--full-metadata"],
@@ -297,7 +328,44 @@ async fn main {
   assert_eq(detailed_files, files)
   assert_eq(detailed_sections, sections)
   let mut compressed = 0
+  let mut has_moonbit = false
+  let mut has_interface = false
+  let moonbit_lines : Array[StringView] = moonbit_source.split("\n").collect()
   for change in changes {
+    if change
+      is {
+        "path": String("src/inventory.mbt"),
+        "language": String("moonbit"),
+        "applied": True,
+        "ranges": Array(ranges),
+        ..
+      } {
+      has_moonbit = true
+      for range in ranges {
+        guard range is Array([Number(start, ..), Number(end, ..)]) else {
+          fail("Missing MoonBit original line range")
+        }
+        assert_true(
+          start >= 1 &&
+          end >= start &&
+          end <= moonbit_lines.length().to_double(),
+        )
+      }
+    }
+    if change
+      is {
+        "path": String("src/inventory.mbti"),
+        "language": String("moonbit"),
+        "reason": reason,
+        ..
+      } {
+      has_interface = true
+      assert_true(
+        reason == Json::null() ||
+        reason == Json("not-smaller") ||
+        reason == Json("not-fewer-tokens"),
+      )
+    }
     if change
       is {
         "applied": True,
@@ -317,7 +385,8 @@ async fn main {
       compressed += 1
     }
   }
-  assert_true(compressed >= 2)
+  assert_true(compressed >= 3)
+  assert_true(has_moonbit && has_interface)
   let mut staged = false
   let mut unstaged = false
   let mut history = false
@@ -381,6 +450,7 @@ async fn main {
     assert_false(rendered.contains(secret))
     assert_false(err.contains(secret))
     assert_true(rendered.contains("Git commit"))
+    assert_true(rendered.contains("Inventory::total"))
     assert_true(rendered.contains("Git staged diff:"))
     assert_true(rendered.contains("\"files\":"))
     assert_false(rendered.contains("\"ranges\":"))
@@ -417,6 +487,8 @@ async fn main {
     original.get("src/main.ts"),
     Some(Json(source(header, body, "  return input + 2;\n}\n"))),
   )
+  assert_eq(original.get("src/inventory.mbt"), Some(Json(moonbit_source)))
+  assert_eq(original.get("src/inventory.mbti"), Some(Json(moonbit_interface)))
   @fs.write_file(
     root + "/repomix.config.json",
     "{\"remote\":{\"url\":\"https://example.invalid/repository.git\"}}",

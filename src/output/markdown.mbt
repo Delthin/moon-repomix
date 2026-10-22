@@ -39,11 +39,11 @@ fn heading(path : String) -> String {
 ///|
 fn language(path : String) -> String {
   let ext = match path.rev_find(".") {
-    Some(i) => path[i + 1:].to_owned()
+    Some(i) => path[i + 1:].to_owned().to_lower()
     None => ""
   }
   match ext {
-    "mbt" => "moonbit"
+    "mbt" | "mbti" => "moonbit"
     "js" | "mjs" | "cjs" => "javascript"
     "ts" | "tsx" => "typescript"
     "py" => "python"

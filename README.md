@@ -4,7 +4,7 @@
 
 ## 核心功能
 
-- **代码结构压缩**：`--compress` 为 JavaScript/TypeScript（含 JSX/TSX）和 Python 保留声明、类型、注释与嵌套结构，省略实现细节；其他语言保留原文。
+- **代码结构压缩**：`--compress` 支持 MoonBit 源码与接口（`.mbt/.mbti`）、JavaScript/TypeScript（含 JSX/TSX）和 Python，保留声明、类型、注释与嵌套结构，省略实现细节；其他语言保留原文。
 - **远程与 Git 上下文**：获取公开 HTTPS 仓库的指定版本，或把本地源码、暂存/未暂存差异和近期提交组合成评审材料。
 - **四格式导出**：XML、Markdown、JSON 和纯文本均含目录结构，默认展示轻量概览；`--full-metadata` 提供逐文件记录与原始行区间。
 - **筛选与密钥扫描**：组合忽略规则和 glob；源码版还支持 stdin 精确文件列表、NUL 协议和花括号备选。先扫描原始内容，再压缩，命中的文件、补丁或提交整体排除。
@@ -31,7 +31,7 @@ moon run --target native scripts/demo.mbtx
 
 ## 源码版的文件列表与兼容行为
 
-当前主线在 v0.2.0 之后增加了文件列表和筛选兼容能力；安装版用法见 [v0.2.0 文档](https://github.com/Delthin/moon-repomix/tree/v0.2.0)。下列命令用于从当前源码构建并安装的 CLI：
+当前主线在 v0.2.0 之后增加了 MoonBit 结构压缩、文件列表及筛选兼容能力，并优化精确分词与任务调度；安装版用法见 [v0.2.0 文档](https://github.com/Delthin/moon-repomix/tree/v0.2.0)。下列命令用于从当前源码构建并安装的 CLI：
 
 ```sh
 # 只处理 Git 列出的文件，NUL 协议保留文件名中的空格和换行
@@ -103,7 +103,7 @@ moon-repomix ./project --init
 
 - 读取 `.gitignore`、`.ignore`、`.repomixignore`（含嵌套规则），支持 include/ignore glob；按相对路径稳定排序。include 不会绕过忽略规则。
 - 打包有效 UTF-8 普通文件；去掉 UTF-8 BOM，保留原始换行。默认单文件上限为 **50 MiB**；链接、二进制、不可读或超限文件跳过。
-- `--compress` 支持 JavaScript/TypeScript（含 JSX/TSX）和 Python，在原始快照扫描通过后提取语法骨架；其他语言或压缩无收益时保留原文。四种格式默认只带来源和压缩概览，`--full-metadata` 展示逐文件状态与原始行区间；库模型始终保留完整记录。正文排名统计实际输出正文，同时记录原始正文计数。
+- `--compress` 支持 MoonBit（含 `.mbti`）、JavaScript/TypeScript（含 JSX/TSX）和 Python，在原始快照扫描通过后提取语法骨架；其他语言或压缩无收益时保留原文。四种格式默认只带来源和压缩概览，`--full-metadata` 展示逐文件状态与原始行区间；库模型始终保留完整记录。正文排名统计实际输出正文，同时记录原始正文计数。
 - `--include-diffs`、`--include-logs` 导出经过路径筛选的 Git 章节；提交消息和包含删除行的补丁也扫描，命中时排除对应整个补丁或提交。远程输入支持公开 HTTPS 仓库的默认分支及指定 branch/tag/full commit，获取后复用同一处理流程，并清理临时目录。
 - 默认扫描密钥，排除命中的**整个文件**。诊断给出规则、路径、行号和磁盘字节区间，不打印匹配值。
 - 用完整 `o200k_base` 词表计算最终文档的 token 数，默认显示正文 token 数最多的 5 个文件。`--top-files-len` 调整排名数量，`--token-count-tree [N]` 显示带阈值的文件/目录统计；目录值为文件正文计数之和。超预算不截断：仍输出完整文档，CLI 返回 **1**；正常完成且未超预算返回 **0**。配置、资源、扫描或写入错误也返回 **1**，需结合诊断区分。

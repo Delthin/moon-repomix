@@ -62,12 +62,21 @@ test "all renderers summarize metadata and expose complete records on request" {
     "custom": "retained",
   }
   let doc = @document.create(
-    [{ path: "#a\n<script>.mbt", text: "````\n# injected\n```", }],
+    [
+      { path: "#a\n<script>.mbt", text: "````\n# injected\n```", },
+      {
+        path: "inventory.MBTI",
+        text: "pub fn inventory_total(Array[Int]) -> Int\n",
+      },
+    ],
     metadata~,
   )
   let md = @output.markdown(doc)
   assert_true(md.contains("## File: \\#a&#10;&lt;script&gt;.mbt"))
   assert_true(md.contains("`````moonbit\n````\n# injected\n```\n`````\n"))
+  assert_true(
+    md.contains("```moonbit\npub fn inventory_total(Array[Int]) -> Int\n```"),
+  )
   assert_true(md.contains("\"files\":2"))
   assert_true(md.contains("\"applied\":1"))
   assert_true(md.contains("\"originalTokens\":37"))

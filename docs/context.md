@@ -6,9 +6,13 @@
 moon-repomix ./project --compress --style json -o structure.json
 ```
 
-`--compress` 在原始文件通过安全扫描后提取语法骨架。支持 `.js/.jsx/.mjs/.cjs`、`.ts/.mts/.cts/.tsx`、`.py/.pyi`，提取导入、类型、类及函数签名和从属结构，省略实现正文；解析器版本见 [第三方来源](../LICENSES/tree-sitter-sources.md)。运行时使用编译进程序的原生解析器。仅含实现的分支和循环整体省略，围住嵌套声明或成员 API 的控制结构保留；CommonJS 的静态 `require`、导出别名及回调中安装的方法也保留。私有且显式标为宽泛 `Record` 类型的标量表可整表折叠，导出、别名、类型查询、方法、计算键和 spread 会保护相应结构。较短的初始化片段保留原文，避免替换成更长的省略标记。
+`--compress` 在原始文件通过安全扫描后提取语法骨架。支持 MoonBit `.mbt/.mbti`、JavaScript `.js/.jsx/.mjs/.cjs`、TypeScript `.ts/.mts/.cts/.tsx` 和 Python `.py/.pyi`；解析器版本见 [第三方来源](../LICENSES/tree-sitter-sources.md)。解析器编译进原生程序，构建和运行无需安装 Node 或语法生成器。
 
-相邻删除区合并，AST 容器子节点之间的展示空白压缩；字面量、模板字符串和保留注释的内部换行保持原样。整表折叠时，其内部分类注释随表省略。
+MoonBit 保留导入、属性、文档注释、常量、struct/enum/trait/type、derive、impl 和函数的完整参数、默认值、返回/错误类型。函数及测试的实现正文按语法树边界省略，内部命名函数和类型仍保留；外部函数的符号/模块链接字符串保持完整，多行内联实现可以省略。矩阵函数分支属于实现。`.mbti` 通常已经是结构接口，正确解析后按 `not-smaller` 保持原文。固定 grammar 的本地补丁支持 tuple `for`、`..<=` 范围模式和 `errdefer`，原始 CRLF 和源行位置保持不变。
+
+JS/TS/Python 提取导入、类型、类、函数签名和从属结构。仅含实现的分支和循环整体省略，围住嵌套声明或成员 API 的控制结构保留；CommonJS 的静态 `require`、导出别名及回调安装的方法也保留。部分私有索引数据表可整表折叠，导出、别名、类型查询、返回/序列化、枚举键或写入等使用会保护相应结构。较短的初始化片段保留原文，避免替换成更长的省略标记。
+
+JS/TS/Python 的相邻删除区合并，AST 容器子节点之间的展示空白压缩；字面量、模板字符串和保留注释的内部换行保持原样。整表折叠时，其内部分类注释随表省略。MoonBit 使用独立的 AST 正文选择，保留其余原始片段。
 
 每份压缩记录包含 `path`、`language`、`applied`、`reason`、`ranges`、`originalTokens` 和 `outputTokens`。`ranges` 是 `[startLine,endLine]` 数组，从 1 开始、包含两端，回指原文件而非输出行号。相邻或重叠的行区间合并，区间表示保留片段覆盖到的行，不表示整行均被保留；压缩包 API 仍提供逐片段范围。不支持、解析失败或正文 token 数没有减少时保留原文，并记录原因。骨架适合先了解结构；需要实现细节时可用 `--include` 选定路径，再关闭压缩。
 
