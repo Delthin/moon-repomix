@@ -5,14 +5,6 @@
 // and caches with direct OpenAI byte ranks and original-byte span lookups.
 
 ///|
-priv struct Symbol {
-  mut end : Int32
-  mut prev : Int32
-  mut next : Int32
-  mut alive : Bool
-}
-
-///|
 priv struct Merge {
   rank : Int32
   pos : Int32
@@ -32,30 +24,42 @@ impl Compare for Merge with fn compare(self, other) {
 ///|
 fn Encoder::encode_piece(
   self : Encoder,
-  word : Bytes,
-  output : Array[Int32],
-) -> Unit {
+  word : BytesView,
+  output : Array[Int32]?,
+) -> Int32 {
   let n = word.length()
-  if self.ranks.get(word) is Some(id) {
-    output.push(id)
-    return
+  if n == 0 {
+    return 0
   }
-  let symbols : Array[Symbol] = []
+  if self.ranks.get_from_bytes(word) is Some(id) {
+    if output is Some(ids) {
+      ids.push(id)
+    }
+    return 1
+  }
+  // One flat array per link field avoids allocating one object per byte.
+  // next = -2 marks a merged-away symbol; -1 remains the end-of-chain marker.
+  let ends = FixedArray::make(n, 0)
+  let prev = FixedArray::make(n, 0)
+  let next = FixedArray::make(n, 0)
   for i in 0..<n {
-    symbols.push({ end: i + 1, prev: i - 1, next: i + 1, alive: true, })
+    ends[i] = i + 1
+    prev[i] = i - 1
+    next[i] = i + 1
   }
-  symbols[n - 1].next = -1
+  next[n - 1] = -1
+  let mut count = n
   let heap : @pq.PriorityQueue[Merge] = @pq.PriorityQueue([])
   fn try_push(pos : Int32) -> Unit {
-    if pos < 0 || !symbols[pos].alive {
+    if pos < 0 || next[pos] == -2 {
       return
     }
-    let right = symbols[pos].next
+    let right = next[pos]
     if right < 0 {
       return
     }
-    let end = symbols[right].end
-    if self.ranks.get(word[pos:end].to_owned()) is Some(rank) {
+    let end = ends[right]
+    if self.ranks.get_from_bytes(word[pos:end]) is Some(rank) {
       heap.push({ rank, pos, right, end, })
     }
   }
@@ -67,25 +71,26 @@ fn Encoder::encode_piece(
     let right = merge.right
     // Span end changes when the right node grows. Together with the links,
     // this rejects stale candidates without another rank lookup/allocation.
-    if !symbols[pos].alive ||
-      symbols[pos].next != right ||
-      symbols[right].end != merge.end {
+    if next[pos] == -2 || next[pos] != right || ends[right] != merge.end {
       continue
     }
-    symbols[pos].end = symbols[right].end
-    symbols[pos].next = symbols[right].next
-    symbols[right].alive = false
-    if symbols[right].next >= 0 {
-      symbols[symbols[right].next].prev = pos
+    ends[pos] = ends[right]
+    next[pos] = next[right]
+    next[right] = -2
+    count -= 1
+    if next[pos] >= 0 {
+      prev[next[pos]] = pos
     }
-    try_push(symbols[pos].prev)
+    try_push(prev[pos])
     try_push(pos)
   }
-  let mut pos = 0
-  while pos >= 0 {
-    // Resource validation guarantees all single bytes exist; every longer
-    // surviving span was formed only after its rank was found above.
-    output.push(self.ranks[word[pos:symbols[pos].end].to_owned()])
-    pos = symbols[pos].next
+  if output is Some(ids) {
+    let mut pos = 0
+    while pos >= 0 {
+      // Resource validation guarantees every surviving span has a rank.
+      ids.push(self.ranks.get_from_bytes(word[pos:ends[pos]]).unwrap())
+      pos = next[pos]
+    }
   }
+  count
 }

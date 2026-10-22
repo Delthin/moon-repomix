@@ -31,7 +31,7 @@ moon run scripts/tokenizer-install-assets.mbtx --target native /absolute/repo /a
 
 该辅助脚本校验并复制两份运行资源及许可，重跑会覆盖对应文件，保留其他文件。`tokenizer-cases.json`、`tokenizer-golden.json` 是开发夹具。黄金 JSON 将 U+FFFE/U+FFFF 写为 `\ufffe`/`\uffff`，解析后的字符串及 token ID 不变，JSON 文件本身可作为 XML 正文。
 
-最终 token 总数须对完整渲染文档一次编码。BPE 和预切分可能跨拼接边界变化，因此各片段计数相加不能代替总数。`count` 使用与 `encode` 相同的编码过程，目前会在内部分配 ID 数组。
+最终 token 总数须对完整渲染文档一次编码。BPE 和预切分可能跨拼接边界变化，因此各片段计数相加不能代替总数。`count` 与 `encode` 共用预切分、合并顺序和 rank 规则，只累计合并后的符号数，省去完整 ID 数组及最终 rank 回查。
 
 ## Token 分布与排名
 
@@ -51,7 +51,7 @@ CLI 默认在 stderr 显示正文 token 数最多的 5 个文件，包含相对�
 
 ## BPE 与预切分
 
-BPE 核心改编自 `howtomakeaname/tokenizers-moonbit@0.16.3`，保留链接符号、优先队列、过期合并失效及最左优先规则。原公开模型使用 HF pair-merges、字符串词表和字节映射；本项目的 `src/metrics/bpe.mbt` 改为原始 UTF-8 字节区间和 OpenAI `Map[Bytes, Int]` ranks，通过区间端点及链接判断堆记录是否失效。较低 rank 优先，同 rank 时合并最左侧，返回原始 OpenAI rank ID。
+BPE 核心改编自 `howtomakeaname/tokenizers-moonbit@0.16.3`，保留链接符号、优先队列、过期合并失效及最左优先规则。原公开模型使用 HF pair-merges、字符串词表和字节映射；本项目的 `src/metrics/bpe.mbt` 改为原始 UTF-8 字节区间和 OpenAI `Map[Bytes, Int]` ranks，通过区间端点及链接判断堆记录是否失效。链接字段存放于连续整数数组，rank 查询借用同一 UTF-8 快照的区间，省去逐片段和候选合并的字节复制；词表加载按已知条目数预分配哈希表容量。较低 rank 优先，同 rank 时合并最左侧，返回原始 OpenAI rank ID。
 
 `src/metrics/pretokenize.mbt` 实现参考 o200k 正则的有序分支，包括贪婪与回溯、缩写、Unicode 空白、CR/LF 和每组三个数字的限制。使用完整 Unicode 数据中的 Lu/Ll/Lt/Lm/Lo/M/N 类别及补充平面；M 包含 Mn/Mc/Me，N 包含 Nd/Nl/No。不区分大小写的缩写包含长 s（`ſ`），空白采用 Unicode White_Space 属性。
 

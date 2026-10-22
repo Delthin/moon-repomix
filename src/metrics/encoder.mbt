@@ -41,7 +41,7 @@ pub async fn Encoder::load(path : String) -> Encoder {
     unicode_bytes, "7676ab755a41ef82108460238569e60ad65c191ddafe61b36c6765ec1353f293",
     "Unicode categories",
   )
-  let ranks : Map[Bytes, Int32] = Map([])
+  let ranks : Map[Bytes, Int32] = Map([], capacity=199998)
   for line in @utf8.decode(ranks_bytes).split("\n") {
     if line.is_empty() {
       continue
@@ -85,23 +85,48 @@ fn check_digest(
 /// the original OpenAI mergeable ranks, not remapped vocabulary indices.
 pub fn Encoder::encode(self : Encoder, text : String) -> Array[Int32] {
   let result : Array[Int32] = []
+  ignore(self.encode_text(text, Some(result)))
+  result
+}
+
+///|
+fn Encoder::encode_text(
+  self : Encoder,
+  text : String,
+  output : Array[Int32]?,
+) -> Int32 {
   let chars = text.to_array()
+  let bytes = @utf8.encode(text)
   let mut start = 0
+  let mut byte_start = 0
+  let mut count = 0
   while start < chars.length() {
     let end = self.piece_end(chars, start)
-    let builder = StringBuilder()
+    let mut byte_end = byte_start
     for i in start..<end {
-      builder.write_char(chars[i])
+      let cp = chars[i].to_int()
+      byte_end += if cp < 0x80 {
+        1
+      } else if cp < 0x800 {
+        2
+      } else if cp < 0x10000 {
+        3
+      } else {
+        4
+      }
     }
-    self.encode_piece(@utf8.encode(builder.to_string()), result)
+    // The immutable UTF-8 snapshot supplies borrowed slices for every rank
+    // lookup; neither pre-tokenized pieces nor candidate merges copy bytes.
+    count += self.encode_piece(bytes[byte_start:byte_end], output)
     start = end
+    byte_start = byte_end
   }
-  result
+  count
 }
 
 ///|
 /// Count one complete text. Counts of separate fragments are not additive:
 /// callers must count the final rendered document for an exact total.
 pub fn Encoder::count(self : Encoder, text : String) -> Int32 {
-  self.encode(text).length()
+  self.encode_text(text, None)
 }
