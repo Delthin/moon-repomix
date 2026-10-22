@@ -97,7 +97,6 @@ async fn PathFilter::reason(
   let parts = relative.split("/").map(p => p.to_owned()).collect()
   let mut directory = self.root
   let mut inherited = self.inherited
-  let mut partial = ""
   for i in 0..<parts.length() {
     let rules = match self.cache.get(directory) {
       Some(rules) => rules
@@ -108,7 +107,6 @@ async fn PathFilter::reason(
       }
     }
     let part = parts[i]
-    partial = if partial == "" { part } else { partial + "/" + part }
     let path = join(directory, part)
     let is_dir = i < parts.length() - 1
     let kind = optional_kind(path)
@@ -148,10 +146,10 @@ async fn PathFilter::reason(
       return Some("OutputFile")
     }
     let ignored = if is_dir { "IgnoredDirectory" } else { "Ignored" }
-    if self.defaults.any(p => p.matches(partial, is_dir)) {
+    if self.defaults.any(p => p.matches_parts(parts[:i + 1], is_dir)) {
       return Some("\{ignored}:default")
     }
-    if self.custom.any(p => p.matches(partial, is_dir)) {
+    if self.custom.any(p => p.matches_parts(parts[:i + 1], is_dir)) {
       return Some("\{ignored}:custom")
     }
     if ignored_by(rules, path, is_dir) is Some(rule) {
@@ -160,7 +158,7 @@ async fn PathFilter::reason(
     directory = path
     inherited = rules
   }
-  if included(self.includes, relative) {
+  if included_parts(self.includes, parts[:]) {
     None
   } else {
     Some("NotIncluded")

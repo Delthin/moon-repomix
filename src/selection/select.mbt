@@ -44,7 +44,8 @@ async fn Walker::walk(
       self.skip(relative, "OutputFile")
       continue
     }
-    if self.defaults.any(p => p.matches(relative, is_dir)) {
+    let parts = relative.split("/").map(p => p.to_owned()).collect()
+    if self.defaults.any(p => p.matches_parts(parts[:], is_dir)) {
       self.skip(
         relative,
         if is_dir {
@@ -55,7 +56,7 @@ async fn Walker::walk(
       )
       continue
     }
-    if self.custom.any(p => p.matches(relative, is_dir)) {
+    if self.custom.any(p => p.matches_parts(parts[:], is_dir)) {
       self.skip(
         relative,
         if is_dir {
@@ -75,7 +76,7 @@ async fn Walker::walk(
     }
     if is_dir {
       self.walk(path, rules)
-    } else if included(self.includes, relative) {
+    } else if included_parts(self.includes, parts[:]) {
       self.files.push({ path, relative, })
     } else {
       self.skip(relative, "NotIncluded")

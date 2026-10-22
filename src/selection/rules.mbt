@@ -63,10 +63,20 @@ async fn load_rules(base : String, name : String, rules : Array[Rule]) -> Unit {
 ///|
 fn ignored_by(rules : Array[Rule], path : String, is_dir : Bool) -> Rule? {
   let mut matched : Rule? = None
+  let mut base : String? = None
+  let mut parts : Array[String] = []
   for rule in rules {
-    if within(path, rule.base) is Some(relative) &&
-      relative != "" &&
-      rule.pattern.matches(relative, is_dir) {
+    // Rules from one ignore file share a base. Reuse its relative components
+    // while retaining the original rule order (including negations).
+    if base != Some(rule.base) {
+      base = Some(rule.base)
+      parts = match within(path, rule.base) {
+        Some(relative) if relative != "" =>
+          relative.split("/").map(p => p.to_owned()).collect()
+        _ => []
+      }
+    }
+    if !parts.is_empty() && rule.pattern.matches_parts(parts[:], is_dir) {
       matched = if rule.negative { None } else { Some(rule) }
     }
   }

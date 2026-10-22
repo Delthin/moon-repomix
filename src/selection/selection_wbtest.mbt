@@ -40,6 +40,22 @@ async fn put(root : String, path : String, content : String) -> Unit {
 }
 
 ///|
+fn Pattern::matches(self : Pattern, relative : String, is_dir : Bool) -> Bool {
+  self.matches_parts(
+    relative.split("/").map(p => p.to_owned()).collect()[:],
+    is_dir,
+  )
+}
+
+///|
+fn included(patterns : Array[Pattern], relative : String) -> Bool {
+  included_parts(
+    patterns,
+    relative.split("/").map(p => p.to_owned()).collect()[:],
+  )
+}
+
+///|
 fn selected(selection : Selection, path : String) -> Bool {
   selection.files.any(file => file.relative == path)
 }
@@ -93,6 +109,83 @@ test "glob validation, recursive components, classes, directory includes and UTF
   assert_eq(normalize("C:/../../file"), "C:/file")
   assert_eq(normalize("//server/share/../../file"), "//server/share/file")
   assert_eq(within("/root-other/file", "/root"), None)
+}
+
+///|
+test "literal components and reused matching rows preserve Unicode, stars and path views" {
+  let cases : Array[(String, String, Bool, Bool)] = [
+    ("literal", "literal", false, true),
+    ("literal", "prefix-literal", false, false),
+    ("literal", "literal-suffix", false, false),
+    ("a\\*", "a*", false, true),
+    ("a\\?", "a?", false, true),
+    ("a\\[x\\]", "a[x]", false, true),
+    ("a\\\\", "a\\", false, true),
+    ("字/猫😀.txt", "字/猫😀.txt", false, true),
+    ("字/猫😀.txt", "字/猫.txt", false, false),
+    ("a*b*c", "abc", false, true),
+    ("a*b*c", "axbyc", false, true),
+    ("a*b*c", "axbycz", false, false),
+    ("*a?b*", "xaaabyy", false, true),
+    ("*a?b*", "ab", false, false),
+    ("a*[!x-z]?", "abq", false, true),
+    ("a*[!x-z]?", "axy", false, false),
+    ("**/literal/**", "literal", true, false),
+    ("**/literal/**", "x/literal/file", false, true),
+    ("literal/", "x/literal", true, true),
+    ("literal/", "x/literal", false, false),
+    ("/literal", "x/literal", false, false),
+    ("a/**/z", "a/z", false, true),
+    ("a/**/z", "a/b/c/z", false, true),
+    ("a/**/z", "a/b/c/zz", false, false),
+  ]
+  for (raw, path, is_dir, expected) in cases {
+    for custom in [false, true] {
+      // Custom syntax disallows anchored patterns; Git syntax permits them.
+      if custom && raw.has_prefix("/") {
+        continue
+      }
+      let pattern = compile_pattern(raw, "test", 1, custom)
+      let parts = path.split("/").map(p => p.to_owned()).collect()
+      assert_eq(pattern.matches(path, is_dir), expected, msg=raw + ":" + path)
+      assert_eq(pattern.matches_parts(parts[:], is_dir), expected)
+      assert_false(pattern.matches("not/a/match", false))
+      assert_eq(pattern.matches_parts(parts[:], is_dir), expected)
+    }
+  }
+  for custom in [false, true] {
+    let literal = compile_pattern("字/猫😀.txt", "test", 1, custom)
+    let parts = ["字", "猫😀.txt", "unused"]
+    assert_true(literal.matches_parts(parts[:2], false))
+    assert_false(literal.matches_parts(parts[:], false))
+  }
+  assert_true(
+    compile_pattern("?.txt", "test", 1, true).matches("😀.txt", false),
+  )
+  assert_false(
+    compile_pattern("?.txt", "test", 1, false).matches("😀.txt", false),
+  )
+  assert_true(
+    compile_pattern("????.txt", "test", 1, false).matches("😀.txt", false),
+  )
+  let rule = (base : String, raw : String, negative : Bool) => Rule::{
+    base,
+    pattern: compile_pattern(raw, "test", 1, false),
+    negative,
+    source: "test",
+    line: 1,
+  }
+  // Returning to an earlier base must not reuse the intervening relative path.
+  let rules = [
+    rule("/root", "*.txt", false),
+    rule("/root/sub", "keep.txt", true),
+    rule("/elsewhere", "**", false),
+    rule("/root", "sub/keep.txt", false),
+  ]
+  assert_true(ignored_by(rules, "/root/sub/keep.txt", false) is Some(_))
+  assert_true(
+    ignored_by(rules[:2].to_owned(), "/root/sub/keep.txt", false) is None,
+  )
 }
 
 ///|

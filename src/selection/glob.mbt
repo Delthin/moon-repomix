@@ -9,6 +9,7 @@ priv enum Atom {
 ///|
 priv enum Segment {
   Recursive
+  Exact(String)
   Component(Array[Atom])
 }
 
@@ -142,7 +143,22 @@ fn compile_pattern(
       }
       i += 1
     }
-    segments.push(Component(atoms))
+    if atoms.all(atom => atom is Literal(_)) {
+      // Recover the unescaped spelling, not the Git bytewise atom encoding.
+      // Literal equality is identical in Unicode and UTF-8 byte modes.
+      let literal = StringBuilder()
+      let mut index = 0
+      while index < chars.length() {
+        if chars[index] == '\\' {
+          index += 1
+        }
+        literal.write_char(chars[index])
+        index += 1
+      }
+      segments.push(Exact(literal.to_string()))
+    } else {
+      segments.push(Component(atoms))
+    }
   }
   {
     segments,
@@ -175,9 +191,10 @@ fn component_matches(
     text.to_array()
   }
   let mut previous = Array::make(chars.length() + 1, false)
+  let mut next = Array::make(chars.length() + 1, false)
   previous[0] = true
   for atom in atoms {
-    let next = Array::make(chars.length() + 1, false)
+    next.fill(false)
     match atom {
       Star => {
         next[0] = previous[0]
@@ -197,20 +214,26 @@ fn component_matches(
           next[i + 1] = previous[i] && matches
         }
     }
+    let row = previous
     previous = next
+    next = row
   }
   previous[chars.length()]
 }
 
 ///|
-fn Pattern::matches(self : Pattern, relative : String, is_dir : Bool) -> Bool {
+fn Pattern::matches_parts(
+  self : Pattern,
+  parts : ArrayView[String],
+  is_dir : Bool,
+) -> Bool {
   if self.directory && !is_dir {
     return false
   }
-  let parts = relative.split("/").map(p => p.to_owned()).collect()
   if self.basename {
     return match self.segments[0] {
       Recursive => true
+      Exact(text) => text == parts[parts.length() - 1]
       Component(atoms) =>
         component_matches(atoms, parts[parts.length() - 1], self.bytewise)
     }
@@ -229,6 +252,10 @@ fn Pattern::matches(self : Pattern, relative : String, is_dir : Bool) -> Bool {
             (if trailing { previous[i] } else { previous[i + 1] })
         }
       }
+      Exact(text) =>
+        for i in 0..<parts.length() {
+          next[i + 1] = previous[i] && text == parts[i]
+        }
       Component(atoms) =>
         for i in 0..<parts.length() {
           next[i + 1] = previous[i] &&
@@ -241,17 +268,15 @@ fn Pattern::matches(self : Pattern, relative : String, is_dir : Bool) -> Bool {
 }
 
 ///|
-fn included(patterns : Array[Pattern], relative : String) -> Bool {
+fn included_parts(patterns : Array[Pattern], parts : ArrayView[String]) -> Bool {
   if patterns.is_empty() {
     return true
   }
-  if patterns.any(p => p.matches(relative, false)) {
+  if patterns.any(p => p.matches_parts(parts, false)) {
     return true
   }
-  let parts = relative.split("/").map(p => p.to_owned()).collect()
   for i in 1..<parts.length() {
-    let parent = parts[:i].to_owned().join("/")
-    if patterns.any(p => p.matches(parent, true)) {
+    if patterns.any(p => p.matches_parts(parts[:i], true)) {
       return true
     }
   }
