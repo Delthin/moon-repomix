@@ -71,6 +71,20 @@ async test "absolute resources, checksums, IO failure and cancellation" {
   }
   assert_true(rejected)
   let ranks = @fs.read_file(assets + "/tokenizer-o200k_base.tiktoken")
+  @fs.write_file(
+    ranks_path,
+    ranks.binary() + b"\nextra",
+    create_mode=CreateOrTruncate,
+  )
+  rejected = false
+  ignore(@metrics.Encoder::load(ranks_path)) catch {
+    @metrics.ResourceError(message) => {
+      assert_eq(message, "SHA-256 mismatch: o200k ranks")
+      rejected = true
+    }
+    error => raise error
+  }
+  assert_true(rejected)
   @fs.write_file(ranks_path, ranks, create_mode=CreateOrTruncate)
   rejected = false
   ignore(@metrics.Encoder::load(ranks_path)) catch {

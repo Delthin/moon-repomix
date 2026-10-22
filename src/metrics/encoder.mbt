@@ -27,7 +27,7 @@ pub async fn Encoder::load(path : String) -> Encoder {
   if !ranks_path.is_absolute() {
     raise ResourceError("o200k ranks path must be absolute")
   }
-  let ranks_bytes = @fs.read_file(path).binary()
+  let ranks_bytes = read_resource(path, 3613922)
   check_digest(
     ranks_bytes, "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
     "o200k ranks",
@@ -36,36 +36,15 @@ pub async fn Encoder::load(path : String) -> Encoder {
     .dirname()
     .join(@path.Path("tokenizer-unicode-16.0.0.txt"))
     .to_string()
-  let unicode_bytes = @fs.read_file(unicode_path).binary()
+  let unicode_bytes = read_resource(unicode_path, 274423)
   check_digest(
     unicode_bytes, "7676ab755a41ef82108460238569e60ad65c191ddafe61b36c6765ec1353f293",
     "Unicode categories",
   )
-  let ranks : Map[Bytes, Int32] = Map([], capacity=199998)
-  for line in @utf8.decode(ranks_bytes).split("\n") {
-    if line.is_empty() {
-      continue
-    }
-    let fields = line.split(" ").collect()
-    guard fields.length() == 2 else {
-      raise ResourceError("invalid o200k ranks record")
-    }
-    let token = @base64.decode(fields[0])
-    let rank = @string.parse_int(fields[1])
-    if rank != ranks.length() || ranks.contains(token) {
-      raise ResourceError("invalid o200k rank sequence")
-    }
-    ranks[token] = rank
+  {
+    ranks: read_ranks(ranks_bytes),
+    categories: read_categories(@utf8.decode(unicode_bytes)),
   }
-  if ranks.length() != 199998 {
-    raise ResourceError("incomplete o200k ranks")
-  }
-  for b in 0..<256 {
-    if !ranks.contains(Bytes::make(1, b.to_byte())) {
-      raise ResourceError("missing o200k byte token")
-    }
-  }
-  { ranks, categories: read_categories(@utf8.decode(unicode_bytes)), }
 }
 
 ///|

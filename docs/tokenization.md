@@ -21,7 +21,7 @@ pub fn Encoder::count(self : Encoder, text : String) -> Int
   LICENSES/
 ```
 
-`load` 在解析前校验两份资源的 SHA-256。相对路径和校验失败抛出 `ResourceError(String)`；文件系统错误、解码错误和取消向调用者传播。加载后可重复使用同一编码器，`encode`/`count` 不执行 I/O，也不修改共享状态。
+`load` 在解析前校验两份资源的 SHA-256。每份资源通过同一个打开的文件句柄按最多 1 MiB 的块读取，缓冲区上限为原资源字节数加一；短文件及超长文件仍由摘要校验拒绝，解析使用同一份字节快照。读取结束、失败或取消时关闭句柄。词表直接从 ASCII 字节解析 Base64 token 与十进制 rank，验证顺序、重复项、完整条目数和全部 256 个单字节 token。相对路径和校验失败抛出 `ResourceError(String)`；文件系统错误、解码错误和取消向调用者传播。加载后可重复使用同一编码器，`encode`/`count` 不执行 I/O，也不修改共享状态。
 
 库由调用者提供资源路径；CLI 根据可执行文件位置定位安装资源。`moon build` 只构建程序。完整安装使用 `scripts/install.mbtx`；只需复制分词资源和许可时，可运行：
 
@@ -80,6 +80,8 @@ BPE 核心改编自 `howtomakeaname/tokenizers-moonbit@0.16.3`，保留链接符
 - 104 组完整 ID 序列，包括 Cyrillic、多语言与大小写交叠、组合字符、补充字符、Unicode 16 新字符、未分配码点、emoji/ZWJ、全部空白区间、数字、缩写、控制字符、特殊标记、源码和 XML/Markdown 拼接边界。
 - 16,390 个类别区间内外边界探针，八组固定种子的 2,048 标量混合样例，以及 4,096 个空格、8,192 字节 BPE 片段和长换行序列。
 - 编码器复用、片段计数不可相加、相对路径拒绝、两份资源校验失败、缺失文件、资源迁移及初始化取消。
+
+另有一组白盒测试将完整 199,998 条词表逐条与原 UTF-8/split、core Base64 和 `parse_int` 参考路径核对，并检查字节解析器的格式拒绝及有界读取。
 
 期望值由已发布的 tiktoken wheel 生成。`scripts/tokenizer-golden.mbtx` 通过 Python Fire CLI 调用 `tiktoken.get_encoding("o200k_base").encode_ordinary`，先核对参考版本。复现时准备独立的开发工具目录：
 
