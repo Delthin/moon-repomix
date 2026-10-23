@@ -1,0 +1,55 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Delthin/moon_repomix/partition"
+
+import {
+  "Delthin/moon_repomix/document",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn partition(@document.Document, Int, render~ : (@document.Document) -> String raise, count~ : (String) -> Int raise, project_metadata~ : (Array[Int], Array[Int]) -> Json raise) -> Partition raise
+
+// Errors
+pub(all) suberror PartitionError {
+  InvalidCap(Int)
+  DuplicatePath(String)
+  TemplateTooLarge(Int)
+  UnitTooLarge(UnitIdentity, Int)
+  InvalidCount(Int)
+  Overflow(String)
+  InvalidTextEncoding
+} derive(Eq, @debug.Debug)
+pub fn PartitionError::equal(Self, Self) -> Bool
+pub fn PartitionError::not_equal(Self, Self) -> Bool
+pub fn PartitionError::to_repr(Self) -> @debug.Repr
+
+// Types and methods
+pub struct Partition {
+  volumes : Array[Volume]
+  index : Json
+  index_text : String
+  index_tokens : Int
+  total_tokens : Int64
+}
+
+pub(all) enum UnitIdentity {
+  FilePath(String)
+  SectionIndex(Int)
+} derive(Eq, @debug.Debug)
+pub fn UnitIdentity::equal(Self, Self) -> Bool
+pub fn UnitIdentity::not_equal(Self, Self) -> Bool
+pub fn UnitIdentity::to_repr(Self) -> @debug.Repr
+
+pub struct Volume {
+  id : String
+  document : @document.Document
+  text : String
+  tokens : Int
+  bytes : Int
+  file_indices : Array[Int]
+  section_indices : Array[Int]
+}
+
+// Type aliases
+
+// Traits
