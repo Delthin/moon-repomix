@@ -18,6 +18,8 @@ pub(all) struct Document {
   files : Array[File]
   sections : Array[Section]
   metadata : Json
+  header_text : String
+  instruction_text : String
 }
 
 ///|
@@ -31,10 +33,12 @@ pub fn create(
   files : Array[File],
   sections~ : Array[Section] = [],
   metadata~ : Json = Json::null(),
+  header_text~ : String = "",
+  instruction_text~ : String = "",
 ) -> Document {
   let sorted = files.copy()
   sorted.sort_by((a, b) => compare_path(a.path, b.path))
-  { files: sorted, sections, metadata, }
+  { files: sorted, sections, metadata, header_text, instruction_text, }
 }
 
 ///|

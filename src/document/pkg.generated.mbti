@@ -4,7 +4,7 @@ package "Delthin/moon_repomix/document"
 // Values
 pub fn compare_path(String, String) -> Int
 
-pub fn create(Array[File], sections? : Array[Section], metadata? : Json) -> Document
+pub fn create(Array[File], sections? : Array[Section], metadata? : Json, header_text? : String, instruction_text? : String) -> Document
 
 pub fn tree(Document) -> String
 
@@ -15,6 +15,8 @@ pub(all) struct Document {
   files : Array[File]
   sections : Array[Section]
   metadata : Json
+  header_text : String
+  instruction_text : String
 }
 
 pub(all) struct File {

@@ -15,6 +15,12 @@ pub fn json(
     "files": Json::object(files),
   }
   if value is Object(fields) {
+    if document.header_text != "" {
+      fields["headerText"] = Json(document.header_text)
+    }
+    if document.instruction_text != "" {
+      fields["instructionText"] = Json(document.instruction_text)
+    }
     if document.metadata != Json::null() {
       fields["metadata"] = render_metadata(document.metadata, full_metadata)
     }

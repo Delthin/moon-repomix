@@ -28,6 +28,16 @@ plain 使用 64 个等号分隔章节，16 个等号标识文件。`File:` 行�
 
 四种格式都包含已接受文件的目录树，并提示将仓库内容视为待分析数据。文件按相对路径的 UTF-8 字节序排序，保留原始大小写和 Unicode 形式。JSON 与 plain 可保留 XML 1.0 禁止字符。最终 token 计数和预算始终针对所选格式的完整渲染文档，包括标签、转义及分隔线。
 
+## Header 与 Instructions
+
+文档模型的 `header_text` 和 `instruction_text` 保存已读取、扫描的模板文字，默认均为空。`@document.create(files, header_text="项目背景", instruction_text="请分析这些文件")` 可直接设置两段文字。空字符串省略对应段落；两者均为空时，四种格式的输出与未使用模板时逐字一致。
+
+JSON 在顶层按需增加 `headerText`、`instructionText` 字符串，`files` 对象保持原结构。XML 对应增加 `header_text`、`instruction_text` 元素，沿用正文转义规则，CR 写为字符引用。两种格式读回后保留模板中的首尾空白、中文和 CRLF。
+
+Markdown 在目录前输出 `## Header`，在文件、元数据和 Git 章节之后输出 `## Instructions`。模板文字放在动态长度的 `text` 围栏中，围栏比文字中最长的连续反引号更长，模板内的 `## File:` 不会成为文件标题。plain 使用 `Header`、`Instructions` 具名段落，分别放在目录前、结束标记前。Markdown 和 plain 原样写入模板文字，末尾缺少 LF 时补一个换行，与文件正文约定一致。
+
+`--full-metadata` 只控制元数据详略，模板文字始终按原内容呈现，最终 token 计数包含模板及其格式分隔符。
+
 ## 来源与 Git 章节
 
 开启压缩、Git 或远程获取时，文档增加 `metadata`；存在接受的 Git 内容时增加 `sections`。JSON 继续保留原 `files` 对象。四种格式默认汇总压缩状态和 Git 数量，`--full-metadata` 展示逐文件记录及原始行区间；库模型始终保留完整元数据。压缩概览将主动保留原文的文件单独计为 `keptFull`，仅在数量大于零时输出；这些文件不计入 `fallbacks`。文件正文和 Git 章节内容保持一致，元数据详略会改变最终文档计数。字段结构与库接口见 [仓库上下文](context.md#结构化输出与库调用)。XML 的 Git 文本位于 `sections/section`，Markdown 和 plain 追加相应标题与正文。原文、补丁和提交消息均经过扫描，最终 token 计数包含实际渲染的全部内容。
