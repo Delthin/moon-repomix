@@ -1,0 +1,29 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Delthin/moon_repomix/mcp_rpc"
+
+// Values
+pub async fn serve(Info, handler~ : async (String, Json) -> Json, limits? : Limits) -> Unit
+
+// Errors
+pub(all) suberror RpcError {
+  Protocol(code~ : Int, message~ : String, data~ : Json)
+}
+
+// Types and methods
+pub(all) struct Info {
+  name : String
+  version : String
+  capabilities : Json
+  instructions : String
+}
+
+pub(all) struct Limits {
+  max_line_bytes : Int
+  max_in_flight : Int
+  timeout_ms : Int
+}
+pub fn Limits::default() -> Self
+
+// Type aliases
+
+// Traits
