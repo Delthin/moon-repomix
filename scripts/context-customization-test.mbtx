@@ -1,0 +1,1162 @@
+///|
+// Standalone functional unit; never builds the product or uses the network.
+// Preparation (compiles helpers, does not invoke the product):
+//   moon run --target native scripts/context-customization-test.mbtx --prepare
+// After explicit READY:
+//   moon run --target native scripts/context-customization-test.mbtx BINARY VOCABULARY \
+//     --text-error-category NAME --security-error-category NAME \
+//     --log-dir ABSOLUTE_NEW_DIRECTORY [--xml-oracle]
+// Error category names are supplied from the implementation handoff, not guessed.
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+  "moonbitlang/core/encoding/utf8",
+}
+
+///|
+fn check(condition : Bool, message : String) -> Unit raise {
+  // Avoid assertion diagnostics that accidentally echo a rejected template.
+  if !condition {
+    fail(message)
+  }
+}
+
+///|
+async fn git(args : Array[String], cwd : String) -> String {
+  let null = if @env.get_env_var("OS") == Some("Windows_NT") {
+    "NUL"
+  } else {
+    "/dev/null"
+  }
+  let environment = {
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": null,
+    "GIT_CONFIG_SYSTEM": null,
+    "GIT_ATTR_NOSYSTEM": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+  }
+  for
+    key in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR", "PATHEXT"] {
+    if @env.get_env_var(key) is Some(value) {
+      environment[key] = value
+    }
+  }
+  let (input, writer) = @process.write_to_process()
+  writer.close()
+  let (code, out, _) = @process.collect_output(
+    "git",
+    [
+      "-c",
+      "core.hooksPath=" + null,
+      "-c",
+      "core.fsmonitor=false",
+      "-c",
+      "core.attributesFile=" + null,
+    ] +
+    args,
+    cwd~,
+    stdin=input,
+    inherit_env=false,
+    extra_env=environment,
+  )
+  check(code == 0, "fixture Git command failed: " + args[0])
+  out.text()
+}
+
+///|
+// Only call for the exact fresh owned tmpdir created in main. Git clean unlinks
+// symlinks and removes our nested repository; it never traverses link targets.
+async fn cleanup(temp : String) -> Unit {
+  ignore(
+    git(["init", "--quiet", "--template=", "--initial-branch=fixture"], temp),
+  )
+  ignore(git(["clean", "--quiet", "-ffdx", "--", "."], temp))
+  assert_eq(@fs.readdir(temp), [".git"])
+  @fs.rmdir(temp, recursive=true)
+}
+
+///|
+struct Runner {
+  binary : String
+  cwd : String
+  logs : String
+  mut sequence : Int32
+}
+
+///|
+async fn Runner::invoke(
+  self : Runner,
+  label : String,
+  args : Array[String],
+) -> (Int32, String, String) {
+  self.sequence += 1
+  let prefix = self.logs + "/" + self.sequence.to_string() + "-" + label
+  @fs.write_file(
+    prefix + ".args.json",
+    Json(args).stringify(indent=2),
+    create_mode=CreateNew,
+  )
+  println("RUN " + self.sequence.to_string() + " " + label)
+  let result = @async.with_timeout(60000, async fn() {
+    let (input, writer) = @process.write_to_process()
+    writer.close() // Real EOF: do not inherit the agent's stdin.
+    let (code, out, err) = @process.collect_output(
+      self.binary,
+      args,
+      cwd=self.cwd,
+      stdin=input,
+    )
+    (code, out.text(), err.text())
+  })
+  let (code, out, err) = result
+  @fs.write_file(prefix + ".stdout", out, create_mode=CreateNew)
+  @fs.write_file(prefix + ".stderr", err, create_mode=CreateNew)
+  @fs.write_file(
+    prefix + ".exit",
+    code.to_string() + "\n",
+    create_mode=CreateNew,
+  )
+  result
+}
+
+///|
+async fn Runner::ok(
+  self : Runner,
+  label : String,
+  args : Array[String],
+) -> (String, String) {
+  let (code, out, err) = self.invoke(label, args)
+  check(code == 0, label + ": expected exit 0; see recorded stderr")
+  (out, err)
+}
+
+///|
+fn files(text : String) -> Map[String, Json] raise {
+  guard @json.parse(text) is { "files": Object(values), .. } else {
+    fail("missing JSON files map")
+  }
+  values
+}
+
+///|
+fn names(text : String) -> Array[String] raise {
+  let result = files(text).keys().collect()
+  result.sort()
+  result
+}
+
+///|
+fn body(text : String, path : String) -> String raise {
+  guard files(text).get(path) is Some(String(value)) else {
+    fail("missing selected file: " + path)
+  }
+  value
+}
+
+///|
+fn field(text : String, key : String) -> Json? raise {
+  guard @json.parse(text) is Object(values) else { fail("missing JSON object") }
+  values.get(key)
+}
+
+///|
+fn records(text : String) -> Array[Json] raise {
+  guard @json.parse(text)
+    is { "metadata": { "compression": Array(values), .. }, .. } else {
+    fail("missing detailed compression records")
+  }
+  values
+}
+
+///|
+fn tokens(report : String) -> Int32 raise {
+  for word in report.split(" "); previous = "" {
+    if word == "tokens" {
+      break @string.parse_int(previous)
+    }
+    continue word.to_owned()
+  } nobreak {
+    fail("missing final document token count")
+  }
+}
+
+///|
+fn templates(
+  text : String,
+  header : String,
+  instruction : String,
+) -> Unit raise {
+  check(
+    field(text, "headerText") == Some(Json(header)),
+    "header round-trip differs",
+  )
+  check(
+    field(text, "instructionText") == Some(Json(instruction)),
+    "instruction round-trip differs (BOM/CRLF/Unicode)",
+  )
+}
+
+///|
+fn no_templates(text : String) -> Unit raise {
+  check(
+    field(text, "headerText") == None,
+    "empty header must preserve old JSON shape",
+  )
+  check(
+    field(text, "instructionText") == None,
+    "empty instruction must preserve old JSON shape",
+  )
+}
+
+///|
+fn same_files(left : String, right : String) -> Unit raise {
+  check(
+    files(left) == files(right),
+    "templates/full metadata changed selected file bodies",
+  )
+}
+
+///|
+// Independent structural checks: a text fence must enclose the entire original
+// payload, exceed every backtick run, and (for Instructions) finish the document.
+fn markdown_block(
+  text : String,
+  title : String,
+  payload : String,
+  last~ : Bool,
+) -> Unit raise {
+  let marker = "\n## " + title + "\n\n"
+  guard text.find(marker) is Some(position) else {
+    fail("missing Markdown " + title)
+  }
+  let tail = text[position + marker.length():].to_owned()
+  guard tail.find("\n") is Some(line_end) else {
+    fail("missing Markdown opener")
+  }
+  let opener = tail[:line_end].to_owned()
+  check(
+    opener.has_suffix("text"),
+    "template Markdown block must use text language",
+  )
+  let fence = opener[:opener.length() - 4].to_owned()
+  check(fence.length() >= 3, "Markdown template fence too short")
+  for ch in fence {
+    check(ch == '`', "invalid Markdown template delimiter")
+  }
+  check(
+    !payload.contains(fence),
+    "Markdown template fence can be closed by payload",
+  )
+  let expected = payload +
+    (if payload.has_suffix("\n") { "" } else { "\n" }) +
+    fence +
+    "\n"
+  check(
+    tail[line_end + 1:].has_prefix(expected),
+    "Markdown template payload is not a complete fenced block",
+  )
+  if last {
+    check(
+      tail[line_end + 1:].to_owned() == expected,
+      "Instructions must be the final Markdown section",
+    )
+  } else {
+    guard text.find("\n## Directory structure\n") is Some(directory) else {
+      fail("missing Markdown directory section")
+    }
+    check(position < directory, "Header must precede directory structure")
+  }
+}
+
+///|
+fn xml_text(text : String, tag : String) -> String raise {
+  let open = "<" + tag + ">"
+  let close = "</" + tag + ">"
+  guard text.find(open) is Some(start) else {
+    fail("missing XML template element: " + tag)
+  }
+  let tail = text[start + open.length():].to_owned()
+  guard tail.find(close) is Some(end) else {
+    fail("unclosed XML template element")
+  }
+  let encoded = tail[:end].to_owned()
+  check(!encoded.contains("<"), "XML template contains unescaped markup")
+  // Decode only XML predefined entities and CR character references; amp last
+  // avoids double-decoding original literal strings such as '&lt;'.
+  encoded
+  .replace(old="&#13;", new="\r")
+  .replace(old="&#xD;", new="\r")
+  .replace(old="&lt;", new="<")
+  .replace(old="&gt;", new=">")
+  .replace(old="&quot;", new="\"")
+  .replace(old="&apos;", new="'")
+  .replace(old="&amp;", new="&")
+}
+
+///|
+fn rendered_templates(
+  style : String,
+  text : String,
+  header : String,
+  instruction : String,
+) -> Unit raise {
+  match style {
+    "json" => templates(text, header, instruction)
+    "xml" => {
+      check(
+        xml_text(text, "header_text") == header,
+        "XML header escaping differs",
+      )
+      check(
+        xml_text(text, "instruction_text") == instruction,
+        "XML instruction escaping/CRLF differs",
+      )
+    }
+    "markdown" => {
+      markdown_block(text, "Header", header, last=false)
+      markdown_block(text, "Instructions", instruction, last=true)
+    }
+    "plain" => {
+      check(text.contains("\nHeader\n"), "plain Header must be named")
+      check(
+        text.contains("\nInstructions\n"),
+        "plain Instructions must be named",
+      )
+      check(
+        text.contains(header) && text.contains(instruction),
+        "plain templates must preserve complete text",
+      )
+    }
+    _ => fail("unknown renderer")
+  }
+}
+
+///|
+struct Fixture {
+  root : String
+  config : String
+  empty_config : String
+  original : Map[String, String]
+  keep : Array[String]
+  expected : Array[String]
+  secret : String
+  header : String
+  instruction : String
+  inherited_header : String
+  inherited_instruction : String
+  staged_patch : String
+  unstaged_patch : String
+  log_message : String
+}
+
+///|
+async fn make_fixture(temp : String) -> Fixture {
+  let root = temp + "/repo"
+  for dir in ["src", "docs", "keep/deep", "ignored", "outside"] {
+    @fs.mkdir(root + "/" + dir, recursive=true)
+  }
+  @fs.mkdir(temp + "/configuration")
+  @fs.mkdir(temp + "/templates")
+  let mbt = "///|\n/// Unicode 原文 🌓\npub fn total(values : Array[Int]) -> Int {\n  let mut total = 0\n" +
+    "  total += 1\n".repeat(100) +
+    "  for value in values { total += value }\n  total\n}\n"
+  let ts = "// Unicode 原文 🌓\nexport function accumulate(input: number): number {\n" +
+    "  input = input + 1;\n".repeat(100) +
+    "  return input;\n}\n"
+  let original = {
+    "README.md": "# Root README\r\nROOT_README_ORIGINAL 🌓\r\n",
+    "docs/README.md": "# Nested README\r\nNESTED_README_ORIGINAL 🌓\r\n",
+    "keep/deep/manual.ts": ts.replace(old="\n", new="\r\n"),
+    "src/full.mbt": mbt.replace(old="\n", new="\r\n"),
+    "src/full.ts": ts.replace(old="\n", new="\r\n"),
+    "src/skeleton.mbt": mbt,
+    "src/skeleton.ts": ts,
+    "src/tiny.ts": "export const tiny=1;",
+  }
+  for path, text in original {
+    @fs.write_file(root + "/" + path, text, create_mode=CreateNew)
+  }
+  for
+    path in [
+      "ignored/git.ts", "src/dot-hidden.ts", "src/repomix-hidden.ts", "outside/not-included.ts",
+    ] {
+    @fs.write_file(
+      root + "/" + path,
+      "export const excluded = 'EXCLUDED_BODY_SENTINEL';\n",
+      create_mode=CreateNew,
+    )
+  }
+  @fs.write_file(root + "/.gitignore", "ignored/\n", create_mode=CreateNew)
+  @fs.write_file(
+    root + "/.ignore",
+    "src/dot-hidden.ts\n",
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    root + "/.repomixignore",
+    "src/repomix-hidden.ts\n",
+    create_mode=CreateNew,
+  )
+  // Same verified synthetic high-entropy value as advanced-context-test.mbtx;
+  // assemble it so the script source itself is not a credential finding.
+  let secret = "gh" + "p_" + "Ab9Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
+  @fs.write_file(
+    root + "/src/secret.ts",
+    "const credential = \"" + secret + "\";\n",
+    create_mode=CreateNew,
+  )
+  ignore(
+    git(["init", "--quiet", "--template=", "--initial-branch=fixture"], root),
+  )
+  ignore(git(["config", "user.name", "Context Customization Fixture"], root))
+  ignore(git(["config", "user.email", "fixture@example.invalid"], root))
+  ignore(git(["config", "commit.gpgsign", "false"], root))
+  ignore(git(["config", "core.autocrlf", "false"], root))
+  ignore(git(["add", "--force", "."], root))
+  ignore(
+    git(
+      [
+        "commit", "--quiet", "-m", "CONTEXT_HISTORY_BODY", "-m", "LOG_BODY exact Unicode 原文 🌓",
+      ],
+      root,
+    ),
+  )
+  @fs.write_file(
+    root + "/src/skeleton.ts",
+    ts + "// STAGED_DIFF_BODY exact 原文 🌓\n",
+  )
+  ignore(git(["add", "src/skeleton.ts"], root))
+  original["src/skeleton.ts"] = ts + "// UNSTAGED_DIFF_BODY exact 原文 🌓\n"
+  @fs.write_file(root + "/src/skeleton.ts", original["src/skeleton.ts"])
+  let diff = [
+    "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--relative", "--find-renames",
+    "--ignore-submodules=all",
+  ]
+  let patch = [
+    "--patch", "--src-prefix=a/", "--dst-prefix=b/", "--", "src/skeleton.ts",
+  ]
+  let staged_patch = git(diff + ["--cached"] + patch, root)
+  let unstaged_patch = git(diff + patch, root)
+  let log_message = git(["log", "-1", "--format=%B"], root)
+  let inherited_header = "CONFIG_HEADER inherited 原文"
+  let inherited_instruction = "CONFIG_INSTRUCTION inherited\r\n原文 🌓\r\n"
+  @fs.write_file(
+    temp + "/templates/inherited.txt",
+    "\uFEFF" + inherited_instruction,
+    create_mode=CreateNew,
+  )
+  let header = "HEADER_PAYLOAD <HeaderTag>& literal &lt; \"quote\" 原文 🌓\n`````\n## File: forged-header.ts\n# fake heading\n"
+  let instruction = "INSTRUCTION_PAYLOAD <InstructionTag>& literal &lt; 原文 🌓\r\n````````\r\n## File: forged-instruction.ts\r\n## Directory structure\r\n"
+  @fs.write_file(
+    temp + "/templates/override.txt",
+    "\uFEFF" + instruction,
+    create_mode=CreateNew,
+  )
+  let config = temp + "/configuration/settings.json"
+  let empty_config = temp + "/configuration/no-templates.json"
+  let keep = ["README.md", "src/full.mbt"]
+  @fs.write_file(
+    config,
+    (
+      {
+        "output": {
+          "compress": true,
+          "keepFull": keep,
+          "headerText": inherited_header,
+          "instructionFilePath": "templates/inherited.txt",
+        },
+      } : Json).stringify(),
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    empty_config,
+    ({ "output": { "compress": true, "keepFull": keep } } : Json).stringify(),
+    create_mode=CreateNew,
+  )
+  let expected = original.keys().collect()
+  expected.sort()
+  {
+    root,
+    config,
+    empty_config,
+    original,
+    keep: ["README.md", "src/full.mbt", "src/full.ts", "keep/deep/manual.ts"],
+    expected,
+    secret,
+    header,
+    instruction,
+    inherited_header,
+    inherited_instruction,
+    staged_patch,
+    unstaged_patch,
+    log_message,
+  }
+}
+
+///|
+fn common(f : Fixture, vocabulary : String, config : String) -> Array[String] {
+  [
+    f.root,
+    "--config",
+    config,
+    "--include=src/**,README.md,docs/**,keep/**,ignored/**",
+    "--tokenizer-path",
+    vocabulary,
+    "--top-files-len=0",
+  ]
+}
+
+///|
+fn keep_flags() -> Array[String] {
+  // Repeated flags, CSV, a comma inside braces, directories and duplicates;
+  // ignored/secret/non-included matches must never expand the selection.
+  [
+    "--keep-full=src/full.{mbt,ts},keep,ignored,src/secret.ts,outside", "--keep-full=src/full.ts,src/dot-hidden.ts,src/repomix-hidden.ts",
+  ]
+}
+
+///|
+fn clear_templates() -> Array[String] {
+  ["--header-text", "", "--instruction-file-path", ""]
+}
+
+///|
+fn override_templates(f : Fixture) -> Array[String] {
+  [
+    "--header-text",
+    f.header,
+    "--instruction-file-path",
+    "templates/override.txt",
+  ]
+}
+
+///|
+fn check_mixed(f : Fixture, text : String, report : String) -> Unit raise {
+  check(
+    names(text) == f.expected,
+    "keep-full expanded selection or bypassed ignore/security",
+  )
+  for path in f.keep {
+    check(
+      @utf8.encode(body(text, path)) == @utf8.encode(f.original[path]),
+      "kept file is not byte-exact: " + path,
+    )
+  }
+  let mbt = body(text, "src/skeleton.mbt")
+  check(
+    mbt.contains("pub fn total(values : Array[Int]) -> Int"),
+    "MoonBit signature missing",
+  )
+  check(
+    !mbt.contains("  total += 1\n  total += 1\n"),
+    "MoonBit implementation not compressed",
+  )
+  let ts = body(text, "src/skeleton.ts")
+  check(
+    ts.contains("accumulate") && ts.contains("input: number"),
+    "TypeScript signature missing",
+  )
+  check(
+    !ts.contains("  input = input + 1;\n  input = input + 1;\n"),
+    "TypeScript implementation not compressed",
+  )
+  check(
+    !text.contains(f.secret) && !report.contains(f.secret),
+    "source secret leaked",
+  )
+  check(!text.contains("EXCLUDED_BODY_SENTINEL"), "excluded source leaked")
+  check(
+    body(text, "src/tiny.ts") == f.original["src/tiny.ts"],
+    "non-beneficial AST transform must retain the original",
+  )
+  check(
+    report.contains("Security"),
+    "synthetic source secret must actually trigger scanner",
+  )
+}
+
+///|
+fn check_metadata(f : Fixture, summary : String, full : String) -> Unit raise {
+  let changes = records(full)
+  check(
+    changes.length() == f.expected.length(),
+    "one compression record required per selected file",
+  )
+  let seen : Set[String] = Set([])
+  let mut original_total = 0.0
+  let mut output_total = 0.0
+  for change in changes {
+    guard change
+      is {
+        "path": String(path),
+        "applied": applied,
+        "reason": reason,
+        "language": language,
+        "ranges": Array(ranges),
+        "originalTokens": Number(before, ..),
+        "outputTokens": Number(after, ..),
+        ..
+      } else {
+      fail("incomplete compression record")
+    }
+    check(
+      !seen.contains(path),
+      "duplicate keep-full produced duplicate metadata",
+    )
+    seen.add(path)
+    check(before >= after && after > 0, "invalid compression token counts")
+    original_total += before
+    output_total += after
+    if f.keep.contains(path) {
+      check(
+        applied == Json(false) && reason == Json("kept-full"),
+        "kept record applied/reason incorrect: " + path,
+      )
+      check(
+        language == Json::null() && ranges.is_empty(),
+        "kept record must not invent AST language/ranges",
+      )
+      check(before == after, "kept record token counts must be equal")
+    } else if path == "docs/README.md" {
+      check(
+        applied == Json(false) && reason == Json("unsupported"),
+        "README.md keep pattern must be root-relative",
+      )
+    } else if path == "src/tiny.ts" {
+      check(
+        applied == Json(false) && reason == Json("not-smaller"),
+        "non-beneficial transform must use the savings guard",
+      )
+      check(
+        before == after && ranges.is_empty(),
+        "guard fallback must retain exact tokens and clear ranges",
+      )
+    } else {
+      check(
+        applied == Json(true) && reason == Json::null(),
+        "ordinary source must still compress",
+      )
+      check(
+        before > after && !ranges.is_empty(),
+        "ordinary source needs token savings and ranges",
+      )
+      check(
+        language ==
+        Json(if path.has_suffix(".mbt") { "moonbit" } else { "typescript" }),
+        "wrong AST language",
+      )
+      let lines = f.original[path].split("\n").count()
+      for range in ranges {
+        guard range is Array([Number(start, ..), Number(end, ..)]) else {
+          fail("malformed original-line range")
+        }
+        check(
+          start >= 1 && end >= start && end <= lines.to_double(),
+          "range outside original source",
+        )
+      }
+    }
+  }
+  guard @json.parse(summary)
+    is {
+      "metadata": {
+        "compression": {
+          "files": Number(file_count, ..),
+          "applied": Number(applied, ..),
+          "keptFull": Number(kept, ..),
+          "originalTokens": Number(before, ..),
+          "outputTokens": Number(after, ..),
+          "fallbacks": Object(fallbacks),
+          ..
+        },
+        ..
+      },
+      ..
+    } else {
+    fail("missing compression overview including keptFull")
+  }
+  check(
+    file_count == f.expected.length().to_double() && applied == 2 && kept == 4,
+    "incorrect files/applied/keptFull overview",
+  )
+  check(
+    before == original_total && after == output_total,
+    "overview token totals differ from full records",
+  )
+  check(!fallbacks.contains("kept-full"), "kept-full is not a fallback")
+  check(
+    fallbacks == { "unsupported": Json(1), "not-smaller": Json(1) },
+    "unexpected fallback counts",
+  )
+}
+
+///|
+fn check_git(f : Fixture, text : String) -> Unit raise {
+  guard field(text, "sections") is Some(Array(sections)) else {
+    fail("missing selected Git sections")
+  }
+  let mut staged = false
+  let mut unstaged = false
+  let mut history = false
+  for section in sections {
+    guard section is { "kind": String(kind), "text": String(content), .. } else {
+      fail("malformed Git section")
+    }
+    if kind == "git_diff" {
+      staged = staged || content == f.staged_patch
+      unstaged = unstaged || content == f.unstaged_patch
+    }
+    if kind == "git_log" {
+      // Native Git emits an extra format newline; %B itself includes one.
+      check(
+        content.has_suffix(f.log_message.trim_end().to_owned() + "\n"),
+        "selected Git log body changed",
+      )
+      history = content.contains("CONTEXT_HISTORY_BODY") &&
+        content.contains("LOG_BODY exact Unicode 原文 🌓")
+    }
+  }
+  check(
+    sections.length() == 3 && staged && unstaged && history,
+    "Git diff/log正文 must remain complete under compression",
+  )
+  check(
+    names(text) == f.expected,
+    "Git/template options changed the selected file set",
+  )
+  check(
+    !text.contains(f.secret) && !text.contains("EXCLUDED_BODY_SENTINEL"),
+    "Git context leaked excluded content",
+  )
+}
+
+///|
+async fn reject(
+  runner : Runner,
+  label : String,
+  args : Array[String],
+  category : String,
+  output : String,
+  forbidden : Array[String],
+) -> Unit {
+  @fs.write_file(output, "PREVIOUS_OUTPUT 原文\r\n")
+  let (code, stdout, stderr) = runner.invoke(label, args + ["-o", output])
+  check(code != 0, label + ": expected failure")
+  check(stdout == "", label + ": rejected template wrote stdout")
+  check(
+    @fs.read_file(output).text() == "PREVIOUS_OUTPUT 原文\r\n",
+    label + ": previous output changed",
+  )
+  check(
+    stderr.contains("moon-repomix: " + category + "\n"),
+    label + ": wrong error category; see recorded stderr",
+  )
+  for value in forbidden {
+    check(
+      !stdout.contains(value) && !stderr.contains(value),
+      label + ": rejected template leaked content",
+    )
+  }
+}
+
+///|
+fn option(args : Array[String], name : String) -> String raise {
+  for i in 0..<args.length() {
+    if args[i] == name && i + 1 < args.length() {
+      return args[i + 1]
+    }
+  }
+  fail("missing required option " + name)
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  if args.length() == 2 && args[1] == "--prepare" {
+    // Exercise independent assertions and the synthetic Git/cleanup harness.
+    // No product CLI call, product source build, or network in this branch.
+    let header = "head\n`````\n## File: forged.ts\n"
+    let instruction = "tail\r\n````````\r\n# forged\r\n"
+    markdown_block(
+      "# Test\n\n## Header\n\n``````text\n" +
+      header +
+      "``````\n\n## Directory structure\n",
+      "Header",
+      header,
+      last=false,
+    )
+    markdown_block(
+      "# Test\n\n## Instructions\n\n`````````text\n" +
+      instruction +
+      "`````````\n",
+      "Instructions",
+      instruction,
+      last=true,
+    )
+    check(
+      xml_text(
+        "<header_text>&lt;x&gt;&amp;lt;&#13;\n</header_text>", "header_text",
+      ) ==
+      "<x>&lt;\r\n",
+      "XML assertion self-test",
+    )
+    check(
+      tokens("Packed 7 files, 123 tokens total") == 123,
+      "token-report parser self-test",
+    )
+    let temp = @fs.tmpdir(prefix="moon-context-customization-prepare-")
+    {
+      defer @async.protect_from_cancel(() => cleanup(temp))
+      let f = make_fixture(temp)
+      check(
+        f.expected.length() == 8 && f.keep.length() == 4,
+        "fixture cardinality self-test",
+      )
+      check(
+        f.staged_patch.contains("STAGED_DIFF_BODY") &&
+        f.unstaged_patch.contains("UNSTAGED_DIFF_BODY"),
+        "native Git oracle self-test",
+      )
+      check(
+        f.log_message.contains("CONTEXT_HISTORY_BODY"),
+        "native Git log oracle self-test",
+      )
+    }
+    check(!@fs.exists(temp), "owned tmpdir cleanup self-test")
+    println(
+      "PREPARED: compiled; assertions, synthetic Git and cleanup passed; product CLI NOT invoked. Waiting for explicit READY.",
+    )
+    return
+  }
+  check(
+    args.length() >= 3,
+    "Usage: context-customization-test.mbtx BINARY VOCABULARY --text-error-category NAME --security-error-category NAME --log-dir NEW_DIRECTORY [--xml-oracle]",
+  )
+  let text_category = option(args, "--text-error-category")
+  let security_category = option(args, "--security-error-category")
+  let logs = option(args, "--log-dir")
+  check(logs.has_prefix("/"), "log directory must be absolute")
+  check(
+    !@fs.exists(logs),
+    "log directory already exists; choose a fresh owned directory",
+  )
+  let binary = @fs.realpath(args[1])
+  let vocabulary = @fs.realpath(args[2])
+  @fs.mkdir(logs, recursive=true)
+  @fs.write_file(
+    logs + "/run.json",
+    (
+      {
+        "binary": binary,
+        "vocabulary": vocabulary,
+        "textErrorCategory": text_category,
+        "securityErrorCategory": security_category,
+        "xmlOracle": args.contains("--xml-oracle"),
+      } : Json).stringify(indent=2),
+    create_mode=CreateNew,
+  )
+  let temp = @fs.tmpdir(prefix="moon-context-customization-")
+  defer @async.protect_from_cancel(() => cleanup(temp))
+  let runner = Runner::{ binary, cwd: temp, logs, sequence: 0, }
+  let f = make_fixture(temp)
+  let base = common(f, vocabulary, f.config) + keep_flags()
+  let json = ["--style=json", "--stdout"]
+  let empty = clear_templates()
+  let custom = override_templates(f)
+
+  // CLI bool override, inherited JSON templates, and raw original bytes.
+  let (raw, _) = runner.ok(
+    "no-compress-and-inheritance",
+    base + ["--compress", "--no-compress"] + json,
+  )
+  check(names(raw) == f.expected, "no-compress changed selection")
+  for path, original in f.original {
+    check(
+      @utf8.encode(body(raw, path)) == @utf8.encode(original),
+      "no-compress changed original: " + path,
+    )
+  }
+  templates(raw, f.inherited_header, f.inherited_instruction)
+  println("PASS raw originals + CLI no-compress + cwd-relative JSON templates")
+
+  let (summary, report) = runner.ok(
+    "mixed-summary-empty-templates",
+    base + empty + json,
+  )
+  no_templates(summary)
+  check_mixed(f, summary, report)
+  let (full, _) = runner.ok(
+    "mixed-full-metadata",
+    base + empty + json + ["--full-metadata"],
+  )
+  same_files(summary, full)
+  check_metadata(f, summary, full)
+  println(
+    "PASS mixed AST/full byte retention + root-relative globs + filters + metadata",
+  )
+
+  let (templated, _) = runner.ok(
+    "json-cli-template-overrides",
+    base + custom + json,
+  )
+  templates(templated, f.header, f.instruction)
+  same_files(summary, templated)
+  let (templated_full, _) = runner.ok(
+    "json-full-metadata-templates",
+    base + custom + json + ["--full-metadata"],
+  )
+  templates(templated_full, f.header, f.instruction)
+  same_files(summary, templated_full)
+  for style in ["json", "xml", "markdown", "plain"] {
+    let output_flags = ["--style=" + style, "--stdout"]
+    let (cleared, _) = runner.ok(
+      style + "-clear-inherited-templates",
+      base + empty + output_flags,
+    )
+    let (old_shape, _) = runner.ok(
+      style + "-no-template-baseline",
+      common(f, vocabulary, f.empty_config) + keep_flags() + output_flags,
+    )
+    check(
+      cleared == old_shape,
+      style + ": explicit empty templates changed old behavior",
+    )
+    if style == "json" {
+      continue
+    }
+    let (rendered, _) = runner.ok(
+      style + "-templates",
+      base + custom + output_flags,
+    )
+    rendered_templates(style, rendered, f.header, f.instruction)
+    let (detailed, _) = runner.ok(
+      style + "-full-metadata-templates",
+      base + custom + output_flags + ["--full-metadata"],
+    )
+    rendered_templates(style, detailed, f.header, f.instruction)
+    check(
+      rendered.contains("accumulate") && rendered.contains("pub fn total"),
+      style + ": selected code missing",
+    )
+    if style == "xml" && args.contains("--xml-oracle") {
+      let path = temp + "/oracle.xml"
+      for xml in [rendered, detailed] {
+        @fs.write_file(path, xml)
+        let (input, writer) = @process.write_to_process()
+        writer.close()
+        let (code, out, err) = @process.collect_output(
+          "xmllint",
+          ["--noout", path],
+          stdin=input,
+        )
+        @fs.write_file(
+          logs +
+          "/xmllint-" +
+          (if xml == rendered { "overview" } else { "full" }) +
+          ".txt",
+          "exit=" + code.to_string() + "\n" + out.text() + err.text(),
+          create_mode=CreateNew,
+        )
+        check(code == 0, "xmllint rejected XML; see oracle log")
+      }
+    }
+  }
+  println(
+    "PASS four renderers + literal template round-trip + safe Markdown fences + empty clearing",
+  )
+
+  let git_flags = [
+    "--include-diffs", "--include-logs", "--include-logs-count=1",
+  ]
+  let (git_empty, empty_report) = runner.ok(
+    "git-empty-templates",
+    base + empty + json + git_flags,
+  )
+  check_git(f, git_empty)
+  let (git_custom, custom_report) = runner.ok(
+    "git-with-templates",
+    base + custom + json + git_flags,
+  )
+  check_git(f, git_custom)
+  templates(git_custom, f.header, f.instruction)
+  same_files(git_empty, git_custom)
+  check(
+    field(git_empty, "sections") == field(git_custom, "sections"),
+    "templates changed Git section bodies",
+  )
+  check(
+    tokens(custom_report) > tokens(empty_report),
+    "whole-document token count omitted templates",
+  )
+  let count = tokens(custom_report)
+  let output = temp + "/preserved.json"
+  let budget_args = base + custom + git_flags + ["--style=json", "-o", output]
+  let (equal_stdout, _) = runner.ok(
+    "whole-document-budget-equal",
+    budget_args + ["--token-budget=" + count.to_string()],
+  )
+  check(
+    equal_stdout == "" && @fs.read_file(output).text() == git_custom,
+    "equal budget changed complete document",
+  )
+  let (over, over_stdout, over_report) = runner.invoke(
+    "whole-document-budget-low-one",
+    budget_args + ["--token-budget=" + (count - 1).to_string()],
+  )
+  check(over == 1 && over_stdout == "", "low budget must signal exit 1")
+  check(
+    over_report.contains("complete output retained"),
+    "low budget retention report missing",
+  )
+  check(
+    @fs.read_file(output).text() == git_custom,
+    "low budget truncated complete document",
+  )
+  println(
+    "PASS selected Git diff/log exact bodies + whole-document equal/low-one budgets",
+  )
+
+  // Failures are checked by category only, with output preservation and no
+  // content echo. Header oversize uses JSON to avoid host ARG_MAX limits.
+  let failure_base = base + empty + ["--style=json"]
+  let unsafe_header = "DO_NOT_ECHO_HEADER " + f.secret
+  let unsafe_instruction = "DO_NOT_ECHO_INSTRUCTION\r\n" + f.secret
+  @fs.write_file(temp + "/templates/unsafe.txt", unsafe_instruction)
+  reject(
+    runner,
+    "unsafe-header",
+    failure_base + ["--header-text", unsafe_header, "--compress"],
+    security_category,
+    output,
+    [f.secret, "DO_NOT_ECHO_HEADER"],
+  )
+  reject(
+    runner,
+    "unsafe-instruction-stdout",
+    failure_base +
+    ["--instruction-file-path", "templates/unsafe.txt", "--stdout"],
+    security_category,
+    output,
+    [f.secret, "DO_NOT_ECHO_INSTRUCTION"],
+  )
+  let oversize = "界".repeat(349526) // 1,048,578 UTF-8 bytes; not character count.
+  check(@utf8.encode(oversize).length() > 1048576, "bad oversize fixture")
+  let oversize_config = temp + "/configuration/oversize-header.json"
+  @fs.write_file(
+    oversize_config,
+    Json({
+      "output": { "headerText": "DO_NOT_ECHO_OVERSIZE_HEADER " + oversize },
+    }).stringify(),
+  )
+  reject(
+    runner,
+    "oversize-header-utf8-bytes",
+    common(f, vocabulary, oversize_config) + ["--style=json"],
+    text_category,
+    output,
+    ["DO_NOT_ECHO_OVERSIZE_HEADER", "界界界"],
+  )
+  @fs.write_file(
+    temp + "/templates/oversize.txt",
+    "DO_NOT_ECHO_OVERSIZE_INSTRUCTION " + "x".repeat(1048577),
+  )
+  reject(
+    runner,
+    "oversize-instruction",
+    failure_base + ["--instruction-file-path", "templates/oversize.txt"],
+    text_category,
+    output,
+    ["DO_NOT_ECHO_OVERSIZE_INSTRUCTION", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"],
+  )
+  @fs.write_file(
+    temp + "/templates/invalid.txt",
+    b"DO_NOT_ECHO_INVALID_UTF8\xff",
+  )
+  reject(
+    runner,
+    "invalid-utf8-instruction",
+    failure_base + ["--instruction-file-path", "templates/invalid.txt"],
+    text_category,
+    output,
+    ["DO_NOT_ECHO_INVALID_UTF8"],
+  )
+  reject(
+    runner,
+    "missing-instruction-file",
+    failure_base + ["--instruction-file-path", "templates/missing.txt"],
+    text_category,
+    output,
+    [],
+  )
+  reject(
+    runner,
+    "directory-instruction",
+    failure_base + ["--instruction-file-path", "templates"],
+    text_category,
+    output,
+    [],
+  )
+  @fs.symlink(
+    target=temp + "/templates/override.txt",
+    temp + "/templates/final-link.txt",
+  )
+  reject(
+    runner,
+    "final-symlink-instruction",
+    failure_base + ["--instruction-file-path", "templates/final-link.txt"],
+    text_category,
+    output,
+    ["INSTRUCTION_PAYLOAD"],
+  )
+  let illegal = "DO_NOT_ECHO_XML_ILLEGAL\u0001"
+  reject(
+    runner,
+    "xml-illegal-header",
+    failure_base + ["--style=xml", "--header-text", illegal],
+    text_category,
+    output,
+    ["DO_NOT_ECHO_XML_ILLEGAL"],
+  )
+  @fs.write_file(temp + "/templates/xml-illegal.txt", illegal)
+  reject(
+    runner,
+    "xml-illegal-instruction",
+    failure_base +
+    ["--style=xml", "--instruction-file-path", "templates/xml-illegal.txt"],
+    text_category,
+    output,
+    ["DO_NOT_ECHO_XML_ILLEGAL"],
+  )
+  let (unchecked, warning) = runner.ok(
+    "explicit-security-opt-out",
+    failure_base +
+    [
+      "--header-text", unsafe_header, "--instruction-file-path", "templates/unsafe.txt",
+      "--no-security-check", "--stdout",
+    ],
+  )
+  templates(unchecked, unsafe_header, unsafe_instruction)
+  check(
+    warning.contains("Warning") && warning.contains("disabled"),
+    "security opt-out must warn explicitly",
+  )
+  check(
+    files(unchecked).contains("src/secret.ts"),
+    "explicit opt-out should also disable source scanner",
+  )
+  println(
+    "PASS rejected unsafe/oversize/invalid/missing/nonregular/XML templates preserve output without echo; explicit opt-out warns",
+  )
+  @fs.write_file(
+    logs + "/PASS.txt",
+    "All context-customization functional assertions passed. CLI invocations=" +
+    runner.sequence.to_string() +
+    "\n",
+    create_mode=CreateNew,
+  )
+  println("PASS context-customization functional unit; logs=" + logs)
+}
