@@ -7,8 +7,14 @@ import {
   "moonbitlang/core/encoding/utf8",
 }
 
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/os_error",
+} for "wbtest"
+
 supported_targets = "native"
 
 options(
-  "native-stub": [ "platform.c", "owned_tree.c" ],
+  "native-stub": [ "platform.c", "owned_tree.c", "directory.c" ],
 )
