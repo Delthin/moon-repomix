@@ -56,10 +56,42 @@ fn rpc_error(id : Json, code : Int32, message : String, data? : Json) -> Json {
 }
 
 ///|
-fn success(id : Json, result : Json, modern : Bool) -> Json {
+fn cacheable_method(name : String) -> Bool {
+  match name {
+    "server/discover"
+    | "tools/list"
+    | "prompts/list"
+    | "resources/list"
+    | "resources/templates/list"
+    | "resources/read" => true
+    _ => false
+  }
+}
+
+///|
+fn protocol_error_code(modern : Bool, name : String, code : Int32) -> Int32 {
+  if modern && name == "resources/read" && code == -32002 {
+    -32602
+  } else {
+    code
+  }
+}
+
+///|
+fn success(
+  id : Json,
+  result : Json,
+  modern : Bool,
+  cacheable~ : Bool = false,
+) -> Json {
   let result = if modern && result is Object(fields) {
     let copy = fields.copy()
     copy["resultType"] = "complete"
+    if cacheable {
+      // Contexts belong to this fixed authority and may be replaced/released.
+      copy["ttlMs"] = 0
+      copy["cacheScope"] = "private"
+    }
     Json::object(copy)
   } else {
     result

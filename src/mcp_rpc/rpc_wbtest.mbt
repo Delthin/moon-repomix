@@ -62,6 +62,8 @@ test "dispatch versions, lifecycle, envelopes and safe IDs" {
       Json(1),
       {
         "resultType": "complete",
+        "ttlMs": 0,
+        "cacheScope": "private",
         "supportedVersions": ["2026-07-28", "2025-11-25", "2025-06-18"],
         "capabilities": { "tools": {} },
         "_meta": {
@@ -243,6 +245,35 @@ test "dispatch versions, lifecycle, envelopes and safe IDs" {
       is Call(modern=false, ..),
     )
   }
+  for
+    name in [
+      "server/discover", "tools/list", "resources/list", "resources/read", "resources/templates/list",
+      "prompts/list",
+    ] {
+    assert_true(cacheable_method(name))
+    assert_eq(
+      success(Json(1), { "x": 2 }, true, cacheable=cacheable_method(name)),
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "x": 2,
+          "resultType": "complete",
+          "ttlMs": 0,
+          "cacheScope": "private",
+        },
+      },
+    )
+  }
+  assert_false(cacheable_method("tools/call"))
+  assert_eq(success(Json(1), { "x": 2 }, false, cacheable=true), {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": { "x": 2 },
+  })
+  assert_eq(protocol_error_code(true, "resources/read", -32002), -32602)
+  assert_eq(protocol_error_code(false, "resources/read", -32002), -32002)
+  assert_eq(protocol_error_code(true, "tools/call", -32002), -32002)
   assert_eq(success(Json(1), { "x": 2 }, true), {
     "jsonrpc": "2.0",
     "id": 1,

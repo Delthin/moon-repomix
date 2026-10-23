@@ -104,6 +104,7 @@ fn dispatch(value : Json, info : Info, session : Session) -> Action {
             "instructions": Json(info.instructions),
           },
           true,
+          cacheable=true,
         ),
       )
     "ping" => Reply(success(id, Json::empty_object(), modern))

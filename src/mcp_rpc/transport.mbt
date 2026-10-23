@@ -40,12 +40,12 @@ async fn invoke(
 ) -> Json {
   try {
     let result = @async.with_timeout(timeout, () => handler(name, params))
-    success(id, result, modern)
+    success(id, result, modern, cacheable=cacheable_method(name))
   } catch {
     err if @async.is_being_cancelled() || @async.is_cancellation_error(err) =>
       raise err
     RpcError::Protocol(code~, message~, data~) =>
-      rpc_error(id, code, message, data~)
+      rpc_error(id, protocol_error_code(modern, name, code), message, data~)
     @async.TimeoutError => rpc_error(id, -32000, "Request timed out")
     _ => rpc_error(id, -32603, "Internal error")
   }

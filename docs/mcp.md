@@ -70,8 +70,10 @@ moon-repomix /path/to/repository --mcp --compress --mcp-max-tokens 12000
 }
 ```
 
+现代 discover、列表和资源读取结果带 `ttlMs: 0`、`cacheScope: "private"`，按当前授权重新获取，避免旧列表或已释放资源被当成共享缓存。现代资源未找到返回 `-32602`，旧协议保留 `-32002`。
+
 stdio 每行一个 UTF-8 JSON-RPC 对象，stdout 只输出协议；stderr 可有固定安全诊断。单个入站帧最多 1 MiB，最多四个在途请求，单请求默认 60 秒。`notifications/cancelled` 停止对应工作，EOF 结束服务并取消未完成任务。已完成业务提交的上下文仍按缓存规则处理。
 
 首版仅声明 tools/resources；没有 HTTP、订阅、sampling、elicitation 或服务器反向请求。协议错误为 JSON-RPC 固定错误，打包/资源限额为 `isError: true` 的工具结果，不返回任意源文或异常堆栈。
 
-官方协议：[stdio](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio)、[版本](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)、[旧生命周期](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)。
+官方协议：[stdio](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio)、[版本](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)、[缓存](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/caching)、[旧生命周期](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)。

@@ -71,6 +71,17 @@ Handlers must cooperate with cancellation through async IO or periodic
   server-to-client requests. Unknown methods reach the application handler;
   unknown notifications are ignored and receive no response.
 
+## Modern cacheable results
+
+Modern discover, tool/prompt/resource lists and resource reads carry `ttlMs: 0`
+and `cacheScope: "private"`. The fixed-root service's contexts can be replaced
+or released, so these replies do not grant shared or durable client caching.
+Modern `resources/read` translates legacy resource-not-found `-32002` to the
+2026 `-32602`; legacy behavior and other method errors stay unchanged.
+
+Source: https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/caching
+and https://modelcontextprotocol.io/specification/2026-07-28/changelog.
+
 ## Framing, scheduling and shutdown
 
 Native stdin is consumed in bounded chunks, not `read_all`/unbounded
