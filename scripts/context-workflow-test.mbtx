@@ -1,0 +1,899 @@
+///|
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/encoding/hex",
+  "moonbitlang/x@0.5.5/crypto",
+}
+
+///|
+// Bounded aggregate, not a protocol/partition unit-suite replacement.
+// Ordinary CI needs no private corpus. All output lives in a NEW owned directory.
+// Prepare (never starts a product):
+// moon run --target native scripts/context-workflow-test.mbtx -- --prepare-only NEW_DIR [--real-corpus LOCAL_MANIFEST]
+// Only after the implementation owner freezes source/build and says READY:
+// moon run --target native scripts/context-workflow-test.mbtx -- --ready BINARY VOCAB SOURCE_ROOT REV BINARY_SHA ARCHIVE_SHA PREPARED_DIR
+// For a diagnosed harness-only failure, --resume-ready accepts the same arguments
+// plus REUSE_CLI_COUNT. Archived argv/exit/stdout/stderr and snapshots are revalidated;
+// no archived pack is re-executed. Never reuse evidence from another binary/root.
+// Logs/fixtures persist on failure/cancellation. No retry, recursive cleanup, network,
+// installed helper or external SHA executable. crypto is unmodified x@0.5.5.
+struct Run {
+  binary : String
+  vocabulary : String
+  log : String
+  root : String
+  files : Array[Json]
+  cap : Int
+  reuse_cli : Int
+  mut cli_count : Int
+}
+
+///|
+struct Session {
+  input : @process.WriteToProcess
+  output : @process.ReadFromProcess
+  log : String
+  root : String
+  mut id : Int
+  mut pending : Bytes
+}
+
+///|
+fn prop(value : Json, key : String) -> Json raise {
+  guard value is Object(values) && values.get(key) is Some(found) else {
+    fail("missing field: " + key)
+  }
+  found
+}
+
+///|
+fn fields(value : Json) -> Map[String, Json] raise {
+  guard value is Object(values) else { fail("expected object") }
+  values
+}
+
+///|
+fn rows(value : Json) -> Array[Json] raise {
+  guard value is Array(values) else { fail("expected array") }
+  values
+}
+
+///|
+fn text(value : Json) -> String raise {
+  guard value is String(value) else { fail("expected string") }
+  value
+}
+
+///|
+fn integer(value : Json) -> Int raise {
+  guard value is Number(n, ..) && n >= 0 && n <= 2147483647.0 &&
+    n == n.to_int().to_double() else { fail("expected nonnegative integer") }
+  n.to_int()
+}
+
+///|
+fn decimal(value : Json) -> Int raise {
+  let n = @string.parse_int(text(value))
+  assert_true(n >= 0)
+  n
+}
+
+///|
+fn sha(bytes : Bytes) -> String {
+  @hex.encode(Bytes::from_array(@crypto.sha256(bytes)[:]))
+}
+
+///|
+async fn put(path : String, body : String) -> Unit {
+  @fs.write_file(path, body, create_mode=CreateNew)
+}
+
+///|
+fn environment() -> Map[String, String] {
+  let null = if @env.get_env_var("OS") == Some("Windows_NT") { "NUL" } else { "/dev/null" }
+  let result = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": null,
+    "GIT_CONFIG_SYSTEM": null, "GIT_ATTR_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+  // Deliberately do not inherit GIT_DIR/WORK_TREE/INDEX_FILE, config injection,
+  // alternate object stores, trace destinations, credentials or user startup config.
+  for key in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR", "PATHEXT"] {
+    if @env.get_env_var(key) is Some(value) { result[key] = value }
+  }
+  result
+}
+
+///|
+async fn git(root : String, args : Array[String]) -> Bytes {
+  let null = if @env.get_env_var("OS") == Some("Windows_NT") { "NUL" } else { "/dev/null" }
+  let (code, out, err) = @process.collect_output("git",
+    ["-c", "core.hooksPath=" + null, "-c", "core.fsmonitor=false",
+     "-c", "core.attributesFile=" + null] + args, cwd=root,
+    inherit_env=false, extra_env=environment())
+  guard code == 0 else { fail("isolated git failed: " + err.text()) }
+  out.binary()
+}
+
+///|
+async fn snapshot(root : String, revision : String, binary : String) -> Json {
+  {"revision": @utf8.decode(git(root, ["rev-parse", "--verify", revision + "^{commit}"])).trim().to_owned(),
+   "archiveSha256": sha(git(root, ["archive", "--format=tar", revision])),
+   "workingTreeStatus": @utf8.decode(git(root, ["status", "--porcelain", "--untracked-files=normal"])),
+   "binarySha256": sha(@fs.read_file(binary).binary())}
+}
+
+///|
+fn fake_secret() -> String {
+  "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+}
+
+///|
+fn source_record(path : String, body : String, language : String,
+  policy : String, anchors : Array[String]) -> Json {
+  {"path": path, "text": body, "sha256": sha(@utf8.encode(body)),
+   "language": language, "policy": policy, "anchors": Json(anchors), "synthetic": true}
+}
+
+///|
+fn small_fixture() -> Json {
+  let files = [
+    source_record("corpus/api.go", "package api\nfunc Get(value int) int {\n" +
+      "  value += 123456789\n".repeat(50) + "  return value\n}\n", "go", "skeleton",
+      ["package api", "func Get(value int) int"]),
+    source_record("corpus/api.rs", "pub fn get(value: i32) -> i32 {\n" +
+      "  let _ignored = value + 123456789;\n".repeat(50) + "  value\n}\n", "rust", "skeleton",
+      ["pub fn get(value: i32) -> i32"]),
+    source_record("corpus/Api.java", "public class Api {\n  public int get(int value) {\n" +
+      "    value += 123456789;\n".repeat(50) + "    return value;\n  }\n}\n", "java", "skeleton",
+      ["public class Api {", "public int get(int value)"]),
+    source_record("corpus/api.mbt", "///|\npub fn get(value : Int) -> Int {\n" +
+      "  let _ignored = value + 123456789\n".repeat(50) + "  value\n}\n", "moonbit", "skeleton",
+      ["pub fn get(value : Int) -> Int"]),
+    source_record("corpus/keep.go", "package api\n// synthetic complete body\n" +
+      "// FULL_BODY_SENTINEL 0123456789 中文\n".repeat(60), "go", "keep-full", ["package api"]),
+    source_record("corpus/LICENSE", "Synthetic local fixture, not upstream code.\n", "unsupported", "fallback", []),
+  ]
+  {"schemaVersion": 1, "label": "synthetic CI fixture, no private corpus", "files": files, "maxTokens": 2200}
+}
+
+///|
+fn selected_paths(files : Array[Json]) -> Array[String] raise {
+  let paths = files.map(file => text(prop(file, "path")))
+  paths.push("synthetic/secret.txt")
+  paths.push("synthetic/ignored.txt")
+  paths.push("synthetic/missing.txt")
+  paths.push("README.md")
+  // Intentionally unsorted, duplicated and containing literal special characters.
+  paths.rev_in_place()
+  paths.push(text(prop(files[0], "path")))
+  paths
+}
+
+///|
+async fn prepare(log : String, manifest : Json) -> Unit {
+  // mkdir is exclusive. Never overwrite or recursively delete a caller's directory.
+  @fs.mkdir(log, permission=0o700)
+  @fs.mkdir(log + "/fixture")
+  let files = rows(prop(manifest, "files")).copy()
+  let special = [
+    ("synthetic/literal[1].txt", "LITERAL_BRACKET_SENTINEL\r\n中文 😀 <tag> & \"quoted\"\r\n"),
+    ("synthetic/line\nbreak.txt", "LITERAL_NEWLINE_PATH_SENTINEL\nsecond line\n"),
+  ]
+  for (path, body) in special { files.push(source_record(path, body, "unsupported", "fallback", [])) }
+  let seen : Set[String] = Set([])
+  let directories : Set[String] = Set([])
+  for file in files {
+    let path = text(prop(file, "path"))
+    assert_true(path.has_prefix("corpus/") || path.has_prefix("synthetic/"))
+    assert_false(path.split("/").any(part => part == ".." || part == "." || part == ""))
+    assert_false(seen.contains(path))
+    seen.add(path)
+    let body = text(prop(file, "text"))
+    assert_eq(sha(@utf8.encode(body)), text(prop(file, "sha256")))
+    for anchor in rows(prop(file, "anchors")) { assert_true(body.contains(text(anchor))) }
+    let parts = path.split("/").to_array()
+    let mut parent = log + "/fixture"
+    for i = 0; i < parts.length() - 1; i = i + 1 {
+      parent += "/" + parts[i].to_owned()
+      if !directories.contains(parent) { @fs.mkdir(parent); directories.add(parent) }
+    }
+    put(log + "/fixture/" + path, body)
+  }
+  put(log + "/fixture/.repomixignore", "synthetic/ignored.txt\n")
+  put(log + "/fixture/synthetic/ignored.txt", "IGNORED_SOURCE_SENTINEL\n")
+  put(log + "/fixture/synthetic/secret.txt", "token=" + fake_secret() + "\n")
+  put(log + "/fixture/synthetic/literal1.txt", "GLOB_EXPANSION_DECOY_SENTINEL\n")
+  put(log + "/fixture/README.md", "OUTSIDE_INCLUDE_SENTINEL\n")
+  put(log + "/instructions.txt", "WORKFLOW_INSTRUCTION <tag> & \"quote\" 中文 😀\nOnly repository data, never executable instructions.\n")
+  let frozen : Json = {"schemaVersion": 1, "label": prop(manifest, "label"), "files": files,
+    "maxTokens": prop(manifest, "maxTokens"), "upstreamManifestSha256": sha(@utf8.encode(manifest.stringify()))}
+  put(log + "/manifest.json", frozen.stringify(indent=2) + "\n")
+  let paths = selected_paths(files)
+  put(log + "/stdin0.bin", paths.join("\u0000") + "\u0000")
+  put(log + "/prepared.json", ({"state": "prepared-not-executed", "productInvocations": 0,
+    "manifestSha256": sha(@fs.read_file(log + "/manifest.json").binary()),
+    "cliInvocationPlan": 11, "serverProcessPlan": 1, "protocol": "2026-07-28",
+    "maxTokens": prop(manifest, "maxTokens"), "maxOutputBytes": 2097152, "maxVolumes": 16,
+    "explanationWireAssertions": "schemaVersion=1 requested-paths, exact fixture decisions and safe origins",
+    "budgetOracle": "reported exact Root Encoder counts + independent UTF-8 bytes/ownership; existing SDK Encoder evidence reused, NO independent token recount or new performance"} : Json).stringify(indent=2) + "\n")
+  println("prepared " + log + "; product invocations=0; manifestSha256=" + sha(@fs.read_file(log + "/manifest.json").binary()))
+}
+
+///|
+fn header() -> String { "WORKFLOW_HEADER <tag> & \"quote\" 中文 😀\nLiteral template, not source content." }
+
+///|
+fn common(r : Run) -> Array[String] {
+  [r.root, "--include", "corpus/**,synthetic/**",
+   "--full-metadata", "--tokenizer-path", r.vocabulary]
+}
+
+///|
+fn mixed(r : Run) -> Array[String] raise {
+  let keep : Array[String] = []
+  for file in r.files {
+    if prop(file, "policy") == Json::string("keep-full") { keep.push(text(prop(file, "path"))) }
+  }
+  ["--compress", "--keep-full", keep.join(",")]
+}
+
+///|
+fn presentation(r : Run) -> Array[String] {
+  ["--header-text", header(), "--instruction-file-path", r.log + "/instructions.txt",
+   "--output-show-line-numbers", "--output-file-path-style", "absolute"]
+}
+
+///|
+fn safe_content(body : String) -> Unit raise {
+  for forbidden in [fake_secret(), "IGNORED_SOURCE_SENTINEL", "OUTSIDE_INCLUDE_SENTINEL", "GLOB_EXPANSION_DECOY_SENTINEL"] {
+    assert_false(body.contains(forbidden))
+  }
+}
+
+///|
+async fn cli(r : Run, name : String, arguments : Array[String], use_stdin : Bool,
+  expected_code : Int) -> (String, Json) {
+  r.cli_count += 1
+  assert_true(r.cli_count <= 16)
+  let dir = r.log + "/cli-" + r.cli_count.to_string() + "-" + name
+  // Explicit harness-only recovery: preserve and revalidate unchanged evidence.
+  // No retry or automatic recovery from a product error.
+  if r.cli_count <= r.reuse_cli {
+    assert_eq(@json.parse(@fs.read_file(dir + "/argv.json").text()), Json(arguments))
+    assert_eq(prop(@json.parse(@fs.read_file(dir + "/exit.json").text()), "exitCode"), Json(expected_code))
+    let out = @fs.read_file(dir + "/stdout.bin").text()
+    let err = @fs.read_file(dir + "/stderr.bin").text()
+    let report = @json.parse(err.trim())
+    assert_eq(prop(report, "exitCode"), Json(expected_code))
+    safe_content(out)
+    safe_content(err)
+    return (out, report)
+  }
+  @fs.mkdir(dir)
+  put(dir + "/argv.json", Json(arguments).stringify(indent=2) + "\n")
+  let (stdin, writer) = @process.write_to_process()
+  defer writer.close()
+  // Real OS pipe, concurrent producer, then close: not a mocked stream or heredoc.
+  let (code, out, err) = @async.with_task_group(group => {
+    let producer = group.spawn(() => {
+      if use_stdin { writer.write(@fs.read_file(r.log + "/stdin0.bin").binary()) }
+      writer.close()
+    })
+    let result = @async.with_timeout(120000, () => @process.collect_output(r.binary,
+      arguments, cwd=r.root, stdin~, inherit_env=false, extra_env=environment()))
+    producer.wait()
+    result
+  })
+  @fs.write_file(dir + "/stdout.bin", out.binary(), create_mode=CreateNew)
+  @fs.write_file(dir + "/stderr.bin", err.binary(), create_mode=CreateNew)
+  put(dir + "/exit.json", ({"exitCode": code} : Json).stringify() + "\n")
+  assert_eq(code, expected_code)
+  let report = @json.parse(err.text().trim())
+  assert_eq(prop(report, "exitCode"), Json(expected_code))
+  safe_content(out.text())
+  safe_content(err.text())
+  (out.text(), report)
+}
+
+///|
+fn files(document : Json) -> Map[String, String] raise {
+  fields(prop(document, "files")).map((_, value) => text(value))
+}
+
+///|
+fn canonical_display_root(root : String) -> String {
+  // POSIX backslashes are literal filename bytes, NOT separators.
+  if @env.get_env_var("OS") == Some("Windows_NT") { root.replace(old="\\", new="/") } else { root }
+}
+
+///|
+fn numbered(body : String) -> String {
+  // Independent line-array oracle, not the renderer's offset state machine.
+  if body.is_empty() { return "" }
+  let lines = body.split("\n").to_array()
+  let terminated = body.has_suffix("\n")
+  if terminated { ignore(lines.pop()) }
+  lines.mapi((i, line) => (i + 1).to_string() + ": " + line.to_owned()).join("\n") +
+    (if terminated { "\n" } else { "" })
+}
+
+///|
+fn verify_source(r : Run, raw : Json, compressed : Json) -> Unit raise {
+  let raw_files = files(raw)
+  let packed = files(compressed)
+  assert_eq(raw_files.length(), r.files.length())
+  assert_eq(packed.length(), r.files.length())
+  let records = rows(prop(prop(compressed, "metadata"), "compression"))
+  assert_eq(records.length(), r.files.length())
+  let record_paths : Set[String] = Set([])
+  let applied_languages : Set[String] = Set([])
+  for file in r.files {
+    let path = text(prop(file, "path"))
+    let original = text(prop(file, "text"))
+    assert_eq(raw_files.get(path), Some(original))
+    assert_eq(sha(@utf8.encode(raw_files[path])), text(prop(file, "sha256")))
+    guard packed.get(path) is Some(body) else { fail("missing selected file: " + path) }
+    let matches = records.filter(record => prop(record, "path") == Json::string(path))
+    assert_eq(matches.length(), 1)
+    let record = matches[0]
+    assert_false(record_paths.contains(path))
+    record_paths.add(path)
+    let ranges = rows(prop(record, "ranges"))
+    let applied = prop(record, "applied") == Json::boolean(true)
+    if prop(file, "policy") == Json::string("skeleton") {
+      // Frozen corpus presets require real skeletons; do not silently accept fallback.
+      assert_true(applied)
+      assert_eq(prop(record, "language"), prop(file, "language"))
+      assert_true(integer(prop(record, "originalTokens")) > integer(prop(record, "outputTokens")))
+      assert_true(@utf8.encode(body).length() < @utf8.encode(original).length())
+      applied_languages.add(text(prop(file, "language")))
+      assert_false(ranges.is_empty())
+    } else {
+      assert_false(applied)
+      assert_eq(body, original)
+      assert_eq(ranges.length(), 0)
+      if prop(file, "policy") == Json::string("keep-full") {
+        assert_eq(prop(record, "reason"), Json::string("kept-full"))
+      }
+    }
+    let source_lines = original.split("\n").to_array()
+    let mut previous = 0
+    for range in ranges {
+      let pair = rows(range)
+      assert_eq(pair.length(), 2)
+      let start = integer(pair[0])
+      let end = integer(pair[1])
+      assert_true(start >= 1 && end >= start && end <= source_lines.length())
+      assert_true(previous == 0 || start > previous + 1)
+      previous = end
+    }
+    for preset in rows(prop(file, "anchors")) {
+      let anchor = text(preset)
+      assert_true(body.contains(anchor))
+      if applied {
+        let offset = original.find(anchor).unwrap()
+        let start_line = original[:offset].split("\n").to_array().length()
+        let end_line = start_line + anchor.split("\n").to_array().length() - 1
+        assert_true(ranges.any(range => {
+          let pair = rows(range)
+          integer(pair[0]) <= start_line && integer(pair[1]) >= end_line
+        }))
+      }
+    }
+  }
+  for language in ["go", "rust", "java", "moonbit"] { assert_true(applied_languages.contains(language)) }
+}
+
+///|
+async fn verify_display(r : Run, canonical : Json, shown : Json) -> Unit {
+  let original = files(canonical)
+  let displayed = files(shown)
+  assert_eq(displayed.length(), original.length())
+  for path, body in original {
+    assert_eq(displayed.get(canonical_display_root(r.root) + "/" + path), Some(numbered(body)))
+  }
+  assert_eq(prop(shown, "headerText"), Json::string(header()))
+  assert_eq(prop(shown, "instructionText"), Json::string(@fs.read_file(r.log + "/instructions.txt").text()))
+  assert_eq(prop(shown, "metadata"), prop(canonical, "metadata"))
+}
+
+///|
+fn verify_volumes(r : Run, index : Json, volumes : Map[String, String],
+  expected : Json) -> Unit raise {
+  assert_eq(prop(index, "schemaVersion"), Json::number(1))
+  let ownership = fields(prop(index, "files"))
+  let expected_files = files(expected)
+  assert_eq(ownership.length(), r.files.length())
+  let summaries = rows(prop(index, "volumes"))
+  assert_true(summaries.length() >= 2 && summaries.length() <= 16)
+  assert_eq(summaries.length(), volumes.length())
+  assert_eq(fields(prop(index, "sections")).length(), 0)
+  let expected_records = rows(prop(prop(expected, "metadata"), "compression"))
+  let canonical = r.files.map(file => text(prop(file, "path")))
+  canonical.sort_by(utf8_order)
+  let seen : Set[String] = Set([])
+  let seen_indices : Set[Int] = Set([])
+  for summary in summaries {
+    let id = text(prop(summary, "id"))
+    guard volumes.get(id) is Some(body) else { fail("missing volume " + id) }
+    safe_content(body)
+    assert_eq(integer(prop(summary, "bytes")), @utf8.encode(body).length())
+    assert_true(integer(prop(summary, "tokens")) > 0 && integer(prop(summary, "tokens")) <= r.cap)
+    let document = @json.parse(body)
+    let local_files = files(document)
+    let indices = rows(prop(summary, "fileIndices"))
+    assert_eq(indices.length(), local_files.length())
+    assert_eq(rows(prop(summary, "sectionIndices")).length(), 0)
+    let local_records = rows(prop(prop(document, "metadata"), "compression"))
+    assert_eq(local_records.length(), local_files.length())
+    for slot in indices {
+      let i = integer(slot)
+      assert_true(i < canonical.length())
+      assert_false(seen_indices.contains(i))
+      seen_indices.add(i)
+      let path = canonical[i]
+      assert_false(seen.contains(path))
+      seen.add(path)
+      assert_eq(ownership.get(path), Some(Json::string(id)))
+      let displayed_path = canonical_display_root(r.root) + "/" + path
+      assert_eq(local_files.get(displayed_path), expected_files.get(displayed_path))
+      assert_true(local_files.contains(displayed_path))
+      let expected_record = expected_records.filter(record => prop(record, "path") == Json::string(path))
+      let actual_record = local_records.filter(record => prop(record, "path") == Json::string(path))
+      assert_eq(expected_record.length(), 1)
+      assert_eq(actual_record, expected_record)
+    }
+    assert_eq(prop(document, "headerText"), prop(expected, "headerText"))
+    assert_eq(prop(document, "instructionText"), prop(expected, "instructionText"))
+  }
+  assert_eq(seen.length(), r.files.length())
+}
+
+///|
+fn query_paths(r : Run) -> Array[String] raise {
+  let paths = r.files.map(file => text(prop(file, "path")))
+  paths.push("synthetic/secret.txt")
+  paths.push("synthetic/ignored.txt")
+  paths.push("synthetic/missing.txt")
+  paths.push("README.md")
+  paths.push(paths[0])
+  paths.rev_in_place()
+  paths
+}
+
+///|
+fn explain_args(paths : Array[String]) -> Array[String] {
+  let argv : Array[String] = []
+  for path in paths { argv.push("--explain-path"); argv.push(path) }
+  argv
+}
+
+///|
+fn utf8_order(a : String, b : String) -> Int {
+  let left = @utf8.encode(a)
+  let right = @utf8.encode(b)
+  for i = 0; i < left.length() && i < right.length(); i = i + 1 {
+    let order = compare(left[i], right[i])
+    if order != 0 { return order }
+  }
+  compare(left.length(), right.length())
+}
+
+///|
+fn verify_explanation(r : Run, explanation : Json) -> Unit raise {
+  // The fixture manifest, not a second selection engine, supplies the oracle.
+  let expected_paths : Array[Json] = []
+  let mut read_bytes = @utf8.encode("token=" + fake_secret() + "\n").length()
+  for file in r.files {
+    read_bytes += @utf8.encode(text(prop(file, "text"))).length()
+    expected_paths.push({"path": prop(file, "path"), "eligible": true,
+      "status": "accepted", "stage": "complete", "reason": "Accepted", "origin": null,
+      "findingCount": 0, "findingRules": []})
+  }
+  expected_paths.push({"path": "synthetic/secret.txt", "eligible": true,
+    "status": "excluded", "stage": "security", "reason": "SecurityFinding", "origin": null,
+    "findingCount": 1, "findingRules": ["github-token"]})
+  expected_paths.push({"path": "synthetic/ignored.txt", "eligible": false,
+    "status": "excluded", "stage": "selection", "reason": "Ignored",
+    "origin": {"kind": "repomixignore", "source": ".repomixignore", "line": 1, "index": null},
+    "findingCount": 0, "findingRules": []})
+  for (path, reason) in [("synthetic/missing.txt", "MissingFile"), ("README.md", "NotIncluded")] {
+    expected_paths.push({"path": path, "eligible": false, "status": "excluded",
+      "stage": "selection", "reason": reason, "origin": null, "findingCount": 0, "findingRules": []})
+  }
+  let ordered = expected_paths.map(value => (text(prop(value, "path")), value))
+  ordered.sort_by((a, b) => utf8_order(a.0, b.0))
+  let expected : Json = {"schemaVersion": 1, "operation": "explain_selection", "scope": "requested-paths",
+    "style": "json", "security": {"status": "excluded", "enabled": true, "findings": 1},
+    "paths": Json(ordered.map(pair => pair.1)), "counts": {"requestedPaths": r.files.length() + 4,
+      "candidates": r.files.length() + 1, "accepted": r.files.length(), "excluded": 4},
+    "readBytes": read_bytes.to_string(), "limits": {"maxFiles": 20000, "maxTotalSize": "209715200"}}
+  assert_eq(explanation, expected)
+  let encoded = explanation.stringify()
+  for forbidden in [r.root, "/Users/", "/Volumes/", fake_secret(), "LITERAL_BRACKET_SENTINEL",
+    "LITERAL_NEWLINE_PATH_SENTINEL", "IGNORED_SOURCE_SENTINEL", "OUTSIDE_INCLUDE_SENTINEL",
+    "WORKFLOW_HEADER", "WORKFLOW_INSTRUCTION"] { assert_false(encoded.contains(forbidden)) }
+}
+
+///|
+async fn run_cli(r : Run) -> (Json, Map[String, String], Json) {
+  let base = common(r)
+  let stream = ["--stdin0", "--stdout", "--report-json", "--style=json"]
+  let (raw, raw_report) = cli(r, "literal-raw", base + stream + ["--no-compress"], true, 0)
+  assert_eq(integer(prop(prop(raw_report, "counts"), "acceptedFiles")), r.files.length())
+  let (packed, mixed_report) = cli(r, "mixed", base + stream + mixed(r), true, 0)
+  let canonical = @json.parse(packed)
+  verify_source(r, @json.parse(raw), canonical)
+  assert_eq(prop(prop(mixed_report, "security"), "status"), Json::string("excluded"))
+  let (displayed, display_report) = cli(r, "display", base + stream + mixed(r) + presentation(r), true, 0)
+  let shown = @json.parse(displayed)
+  verify_display(r, canonical, shown)
+  assert_eq(decimal(prop(prop(display_report, "bytes"), "documents")), @utf8.encode(displayed).length())
+  let (cleared, _) = cli(r, "display-off", base + stream + mixed(r) + presentation(r) +
+    ["--no-output-show-line-numbers", "--output-file-path-style=target-relative",
+     "--no-file-summary", "--no-directory-structure", "--no-metadata"], true, 0)
+  let no_display = @json.parse(cleared)
+  assert_eq(files(no_display), files(canonical))
+  for key in ["notice", "directoryStructure", "metadata"] { assert_false(fields(no_display).contains(key)) }
+  assert_eq(prop(no_display, "headerText"), Json::string(header()))
+  for style in ["xml", "markdown", "plain"] {
+    let (formatted, _) = cli(r, "template-" + style, base + ["--stdin0", "--stdout", "--report-json",
+      "--style=" + style] + mixed(r) + presentation(r), true, 0)
+    assert_true(formatted.contains("WORKFLOW_HEADER"))
+    assert_true(formatted.contains("WORKFLOW_INSTRUCTION"))
+    assert_true(formatted.contains("1: "))
+    if style == "xml" {
+      // Literal expectations: escaping does not become a second XML renderer.
+      assert_true(formatted.contains("<header_text>WORKFLOW_HEADER &lt;tag&gt; &amp; \"quote\" 中文 😀\nLiteral template, not source content.</header_text>"))
+      assert_true(formatted.contains("1: LITERAL_BRACKET_SENTINEL&#13;\n2: 中文 😀 &lt;tag&gt; &amp; \"quoted\"&#13;\n</file>"))
+      assert_true(formatted.contains("/synthetic/line&#10;break.txt\""))
+    } else {
+      assert_true(formatted.contains(header()))
+      assert_true(formatted.contains(@fs.read_file(r.log + "/instructions.txt").text()))
+      for body in files(shown).values() { assert_true(formatted.contains(body)) }
+    }
+    for file in r.files {
+      for preset in rows(prop(file, "anchors")) {
+        let anchor = text(preset)
+        // XML escaping only affects presentation; canonical bodies checked above.
+        if style != "xml" { assert_true(formatted.contains(anchor)) }
+      }
+    }
+  }
+  let (volume_stdout, volume_report) = cli(r, "volumes", base + mixed(r) + presentation(r) +
+    ["--stdin0", "--style=json", "--report-json", "--split-output", r.cap.to_string(),
+     "--output", r.log + "/volumes"], true, 0)
+  assert_eq(volume_stdout, "")
+  let index_text = @fs.read_file(r.log + "/volumes/index.json").text()
+  let index = @json.parse(index_text)
+  let by_id : Map[String, String] = Map([])
+  let mut sum_tokens = 0
+  let mut sum_bytes = 0
+  for row in rows(prop(volume_report, "volumes")) {
+    let name = text(prop(row, "fileName"))
+    assert_false(name.contains("/") || name.contains("\\") || name == "..")
+    let body = @fs.read_file(r.log + "/volumes/" + name).text()
+    let id = text(prop(row, "id"))
+    assert_false(by_id.contains(id))
+    by_id[id] = body
+    assert_eq(decimal(prop(row, "bytes")), @utf8.encode(body).length())
+    assert_true(decimal(prop(row, "tokens")) <= r.cap)
+    let corresponding = rows(prop(index, "volumes")).filter(item => prop(item, "id") == Json::string(id))
+    assert_eq(corresponding.length(), 1)
+    assert_eq(decimal(prop(row, "tokens")), integer(prop(corresponding[0], "tokens")))
+    assert_eq(integer(prop(row, "files")), rows(prop(corresponding[0], "fileIndices")).length())
+    sum_tokens += decimal(prop(row, "tokens"))
+    sum_bytes += decimal(prop(row, "bytes"))
+  }
+  assert_eq(@fs.readdir(r.log + "/volumes").length(), by_id.length() + 1)
+  let token_report = prop(volume_report, "tokens")
+  assert_eq(decimal(prop(token_report, "limit")), r.cap)
+  assert_eq(decimal(prop(token_report, "documents")), sum_tokens)
+  assert_eq(decimal(prop(token_report, "total")), sum_tokens + decimal(prop(token_report, "index")))
+  let byte_report = prop(volume_report, "bytes")
+  assert_eq(decimal(prop(byte_report, "documents")), sum_bytes)
+  assert_eq(decimal(prop(byte_report, "index")), @utf8.encode(index_text).length())
+  assert_eq(decimal(prop(byte_report, "total")), sum_bytes + @utf8.encode(index_text).length())
+  verify_volumes(r, index, by_id, shown)
+  // These are query-only operations: no tokenizer dependency, no stdin, no pack.
+  let (explained, summary) = cli(r, "explain", base + mixed(r) + presentation(r) +
+    ["--quiet", "--report-json", "--style=json", "--tokenizer-path", r.log + "/does-not-exist.tiktoken"] +
+    explain_args(query_paths(r)), false, 0)
+  let explanation = @json.parse(explained)
+  verify_explanation(r, explanation)
+  let expected_summary = fields(explanation).copy()
+  ignore(expected_summary.remove("paths"))
+  expected_summary["status"] = Json::string("ok")
+  expected_summary["exitCode"] = Json::number(0)
+  expected_summary["publication"] = Json::string("committed")
+  expected_summary["output"] = {"kind": "stdout"}
+  assert_eq(summary, Json::object(expected_summary))
+  let (invalid, _) = cli(r, "explain-traversal", base + ["--quiet", "--report-json",
+    "--explain-path", "../outside"], false, 1)
+  assert_eq(invalid, "")
+  let (quota, _) = cli(r, "explain-byte-limit", base + ["--quiet", "--report-json",
+    "--explain-path", "界".repeat(1366)], false, 1)
+  assert_eq(quota, "")
+  assert_eq(r.cli_count, 11)
+  (index, by_id, explanation)
+}
+
+///|
+async fn rpc(s : Session, rpc_method : String, value : Json) -> Json {
+  s.id += 1
+  let params = fields(value)
+  params["_meta"] = {"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+    "io.modelcontextprotocol/clientCapabilities": {}}
+  let line = ({"jsonrpc": "2.0", "id": s.id, "method": rpc_method, "params": Json::object(params)} : Json).stringify() + "\n"
+  @fs.write_file(s.log + "/stdin.ndjson", line, append=true, create_mode=OpenExisting)
+  s.input.write(line)
+  for ;; {
+    let line = @async.with_timeout(70000, () => {
+      for ;; {
+        if s.pending.find(b"\n") is Some(end) {
+          let line = @utf8.decode(s.pending[:end + 1])
+          s.pending = s.pending[end + 1:].to_owned()
+          break line
+        }
+        guard s.output.read_some() is Some(chunk) else { fail("MCP EOF before response") }
+        @fs.write_file(s.log + "/stdout.ndjson", chunk, append=true, create_mode=OpenExisting)
+        s.pending = s.pending + chunk
+        assert_true(s.pending.length() <= 8388608)
+      }
+    })
+    let result = @json.parse(line)
+    assert_eq(prop(result, "jsonrpc"), Json::string("2.0"))
+    if fields(result).contains("id") {
+      assert_eq(prop(result, "id"), Json(s.id))
+      return result
+    }
+    assert_eq(prop(result, "method"), Json::string("notifications/resources/list_changed"))
+  }
+}
+
+///|
+fn success(envelope : Json) -> Json raise {
+  assert_false(fields(envelope).contains("error"))
+  let result = prop(envelope, "result")
+  assert_eq(prop(result, "resultType"), Json::string("complete"))
+  assert_false(fields(result).get("isError") == Some(Json::boolean(true)))
+  result
+}
+
+///|
+fn cacheable(envelope : Json) -> Json raise {
+  let result = success(envelope)
+  assert_eq(prop(result, "ttlMs"), Json::number(0))
+  assert_eq(prop(result, "cacheScope"), Json::string("private"))
+  result
+}
+
+///|
+fn safe_failure(s : Session, envelope : Json) -> Unit raise {
+  let error = if fields(envelope).contains("error") { prop(envelope, "error") }
+    else { let result = prop(envelope, "result"); assert_eq(prop(result, "isError"), Json::boolean(true)); result }
+  let encoded = error.stringify()
+  for forbidden in [s.root, "/Users/", "/Volumes/", fake_secret(), "SOURCE_SENTINEL", "WORKFLOW_INSTRUCTION"] {
+    assert_false(encoded.contains(forbidden))
+  }
+}
+
+///|
+async fn tool(s : Session, name : String, arguments : Json) -> Json {
+  rpc(s, "tools/call", {"name": name, "arguments": arguments})
+}
+
+///|
+async fn listing(s : Session) -> Set[String] {
+  let result = cacheable(rpc(s, "resources/list", {}))
+  let found : Set[String] = Set([])
+  for resource in rows(prop(result, "resources")) {
+    let uri = text(prop(resource, "uri"))
+    assert_false(uri.has_prefix("file://"))
+    assert_false(found.contains(uri))
+    found.add(uri)
+  }
+  found
+}
+
+///|
+async fn read_resource(s : Session, uri : String) -> String {
+  let result = cacheable(rpc(s, "resources/read", {"uri": uri}))
+  let contents = rows(prop(result, "contents"))
+  assert_eq(contents.length(), 1)
+  assert_eq(prop(contents[0], "uri"), Json::string(uri))
+  text(prop(contents[0], "text"))
+}
+
+///|
+fn collect_uris(value : Json, into : Set[String]) -> Unit raise {
+  match value {
+    String(uri) => if uri.contains("://") { assert_false(uri.has_prefix("file://")); into.add(uri) }
+    Array(values) => for value in values { collect_uris(value, into) }
+    Object(values) => for value in values.values() { collect_uris(value, into) }
+    _ => ()
+  }
+}
+
+///|
+async fn unchanged(s : Session, live : Set[String], texts : Map[String, String]) -> Unit {
+  assert_eq(listing(s), live)
+  for uri in live { assert_eq(read_resource(s, uri), texts[uri]) }
+}
+
+///|
+async fn aggregate(r : Run, s : Session, cli_index : Json,
+  cli_volumes : Map[String, String], cli_explanation : Json) -> Unit {
+  ignore(cacheable(rpc(s, "server/discover", {})))
+  let tools = rows(prop(cacheable(rpc(s, "tools/list", {})), "tools"))
+  assert_eq(tools.length(), 3)
+  for name in ["pack_repository", "release_context", "explain_selection"] {
+    assert_true(tools.any(tool => prop(tool, "name") == Json::string(name)))
+  }
+  assert_eq(listing(s).length(), 0)
+  let result = success(tool(s, "pack_repository", {"filePaths": Json(selected_paths(r.files)), "maxTokens": r.cap}))
+  let returned : Set[String] = Set([])
+  collect_uris(prop(result, "structuredContent"), returned)
+  let live = listing(s)
+  assert_eq(returned, live)
+  assert_eq(live.length(), cli_volumes.length() + 1)
+  let texts : Map[String, String] = Map([])
+  let actual : Map[String, String] = Map([])
+  let mut actual_index : Json? = None
+  let mut bytes = 0
+  for uri in live {
+    let body = read_resource(s, uri)
+    texts[uri] = body
+    assert_true(@utf8.encode(body).length() <= 4194304)
+    bytes += @utf8.encode(body).length()
+    safe_content(body)
+    let value = @json.parse(body)
+    if fields(value).contains("volumes") {
+      assert_true(actual_index is None)
+      actual_index = Some(value)
+      assert_eq(value, cli_index)
+    } else {
+      // Compare complete serialized display/template/metadata bytes, not just bodies.
+      let matches = cli_volumes.keys().filter(id => cli_volumes[id] == body).to_array()
+      assert_eq(matches.length(), 1)
+      assert_false(actual.contains(matches[0]))
+      actual[matches[0]] = body
+    }
+  }
+  assert_true(bytes <= 2097152)
+  assert_true(actual_index is Some(_))
+  assert_eq(actual, cli_volumes)
+  let explanation = prop(success(tool(s, "explain_selection", {"paths": Json(query_paths(r))})), "structuredContent")
+  assert_eq(prop(explanation, "ok"), Json::boolean(true))
+  let root_explanation = fields(explanation).copy()
+  ignore(root_explanation.remove("ok"))
+  verify_explanation(r, Json::object(root_explanation))
+  assert_eq(Json::object(root_explanation), cli_explanation)
+  unchanged(s, live, texts)
+  let too_many : Array[Json] = []
+  for i = 0; i < 257; i = i + 1 { too_many.push(Json::string("synthetic/query-" + i.to_string())) }
+  let too_many_result = tool(s, "explain_selection", {"paths": too_many})
+  safe_failure(s, too_many_result)
+  assert_eq(prop(prop(too_many_result, "error"), "code"), Json::number(-32602))
+  unchanged(s, live, texts)
+  let oversized_result = tool(s, "explain_selection", {"paths": ["界".repeat(1366)]})
+  safe_failure(s, oversized_result)
+  assert_eq(prop(prop(oversized_result, "error"), "code"), Json::number(-32602))
+  unchanged(s, live, texts)
+  ignore(success(tool(s, "release_context", {})))
+  assert_eq(listing(s).length(), 0)
+  for uri in live {
+    let failed = rpc(s, "resources/read", {"uri": uri})
+    safe_failure(s, failed)
+    assert_eq(prop(prop(failed, "error"), "code"), Json::number(-32602))
+  }
+}
+
+///|
+async fn run_mcp(r : Run, index : Json, volumes : Map[String, String], explanation : Json) -> Int {
+  let log = r.log + "/mcp-modern"
+  @fs.mkdir(log)
+  for name in ["stdin.ndjson", "stdout.ndjson", "stderr.bin"] { put(log + "/" + name, "") }
+  let (stdin, input) = @process.write_to_process()
+  let (output, stdout) = @process.read_from_process()
+  let (errors, stderr) = @process.read_from_process()
+  defer input.close()
+  defer output.close()
+  defer errors.close()
+  let s : Session = {input, output, log, root: r.root, id: 0, pending: b""}
+  let argv = common(r) + mixed(r) + presentation(r) + ["--style=json", "--mcp",
+    "--mcp-max-tokens", r.cap.to_string(), "--mcp-max-output-bytes", "2097152", "--mcp-max-volumes", "16"]
+  put(log + "/argv.json", Json(argv).stringify(indent=2) + "\n")
+  let children : Array[@process.Process] = []
+  defer @async.protect_from_cancel(() => {
+    for child in children {
+      let code = child.wait()
+      put(log + "/exit.json", ({"pid": child.pid, "exitCode": code, "requests": s.id} : Json).stringify() + "\n")
+    }
+  })
+  @async.with_task_group(group => {
+    let child = @process.spawn(group, r.binary, argv, stdin~, stdout~, stderr~,
+      cwd=r.root, inherit_env=false, extra_env=environment())
+    children.push(child)
+    let diagnostics = group.spawn(() => {
+      let mut size = 0
+      while errors.read_some() is Some(chunk) {
+        @fs.write_file(log + "/stderr.bin", chunk, append=true, create_mode=OpenExisting)
+        size += chunk.length()
+        assert_true(size <= 1048576)
+      }
+    })
+    aggregate(r, s, index, volumes, explanation)
+    input.close() // Genuine EOF: no protocol shutdown extension, signal or kill.
+    let trailing = @async.with_timeout(5000, () => output.read_all().binary())
+    if !trailing.is_empty() { @fs.write_file(log + "/stdout.ndjson", trailing, append=true, create_mode=OpenExisting) }
+    assert_true(trailing.is_empty() && s.pending.is_empty())
+    assert_eq(@async.with_timeout(5000, () => child.wait()), 0)
+    diagnostics.wait()
+  })
+  safe_content(@fs.read_file(log + "/stderr.bin").text())
+  s.id
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  if (args.length() == 3 || args.length() == 5) && args[1] == "--prepare-only" {
+    let manifest = if args.length() == 5 {
+      assert_eq(args[3], "--real-corpus")
+      @json.parse(@fs.read_file(args[4]).text())
+    } else { small_fixture() }
+    prepare(args[2], manifest)
+    return
+  }
+  let is_recovery = args.length() == 10 && args[1] == "--resume-ready"
+  guard (args.length() == 9 && args[1] == "--ready") || is_recovery else {
+    fail("expected --prepare-only NEW_DIR [--real-corpus LOCAL_MANIFEST] or --ready BINARY VOCAB SOURCE_ROOT REV BINARY_SHA ARCHIVE_SHA PREPARED_DIR; explicit --resume-ready adds REUSE_CLI_COUNT")
+  }
+  let reuse_cli = if is_recovery { @string.parse_int(args[9]) } else { 0 }
+  assert_true(reuse_cli >= 0 && reuse_cli <= 11)
+  let binary = @fs.realpath(args[2])
+  let vocabulary = @fs.realpath(args[3])
+  let source = @fs.realpath(args[4])
+  let revision = args[5]
+  let log = @fs.realpath(args[8])
+  let prepared = @json.parse(@fs.read_file(log + "/prepared.json").text())
+  assert_eq(sha(@fs.read_file(log + "/manifest.json").binary()), text(prop(prepared, "manifestSha256")))
+  let manifest = @json.parse(@fs.read_file(log + "/manifest.json").text())
+  let before = snapshot(source, revision, binary)
+  assert_eq(prop(before, "workingTreeStatus"), Json::string(""))
+  assert_eq(prop(before, "revision"), Json::string(@utf8.decode(git(source, ["rev-parse", "HEAD"])).trim().to_owned()))
+  assert_eq(prop(before, "binarySha256"), Json::string(args[6]))
+  assert_eq(prop(before, "archiveSha256"), Json::string(args[7]))
+  assert_eq(prop(before, "revision"), Json::string(revision))
+  assert_true(@utf8.decode(git(source, ["diff", "--name-only", revision, "--", "src", "vendor", "moon.mod.json", "moon.pkg"])).is_empty())
+  if is_recovery {
+    assert_eq(@json.parse(@fs.read_file(log + "/run-start.json").text()), before)
+    assert_eq(@json.parse(@fs.read_file(log + "/after.json").text()), before)
+    put(log + "/resume-start.json", ({"snapshot": before, "reusedCliInvocations": reuse_cli} : Json).stringify(indent=2) + "\n")
+  } else { put(log + "/run-start.json", before.stringify(indent=2) + "\n") }
+  let vocabulary_sha = sha(@fs.read_file(vocabulary).binary())
+  assert_eq(vocabulary_sha, "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d")
+  defer @async.protect_from_cancel(() => {
+    let after = snapshot(source, revision, binary)
+    put(log + (if is_recovery { "/after-resume.json" } else { "/after.json" }), after.stringify(indent=2) + "\n")
+    assert_eq(after, before)
+    assert_eq(sha(@fs.read_file(vocabulary).binary()), vocabulary_sha)
+  })
+  let r : Run = {binary, vocabulary, log, root: log + "/fixture",
+    files: rows(prop(manifest, "files")), cap: integer(prop(manifest, "maxTokens")), reuse_cli, cli_count: 0}
+  for file in r.files { assert_eq(sha(@fs.read_file(r.root + "/" + text(prop(file, "path"))).binary()), text(prop(file, "sha256"))) }
+  let (index, volumes, explanation) = run_cli(r)
+  let requests = run_mcp(r, index, volumes, explanation)
+  for file in r.files { assert_eq(sha(@fs.read_file(r.root + "/" + text(prop(file, "path"))).binary()), text(prop(file, "sha256"))) }
+  put(log + "/result.json", ({"state": "passed", "cliInvocations": r.cli_count,
+    "executedCliInvocations": r.cli_count - reuse_cli, "reusedCliInvocations": reuse_cli, "serverProcesses": 1,
+    "mcpRequests": requests, "manifestSha256": prop(prepared, "manifestSha256"),
+    "vocabularySha256": vocabulary_sha, "independentTokenRecount": false,
+    "protocol": "2026-07-28", "volumes": volumes.length()} : Json).stringify(indent=2) + "\n")
+  println("PASS context workflow; CLI=" + r.cli_count.to_string() + "; MCP sessions=1; requests=" + requests.to_string())
+}
