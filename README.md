@@ -222,6 +222,8 @@ moon run --target native scripts/self-pack-test.mbtx ../moon-repomix-self-check
 
 展示聚合用例为 `scripts/display-controls-test.mbtx BINARY VOCABULARY [--xml-oracle]`，覆盖四格式章节开关、CRLF 行号、显示路径、配置覆盖、Git 正文和预算；分卷库的聚合用例直接使用真实 Encoder 核对每卷、索引、归属与安全排除。
 
+分卷 CLI 用例为 `scripts/volume-cli-test.mbtx BINARY VOCABULARY --log-dir NEW_ABSOLUTE_DIRECTORY [--xml-oracle]`，覆盖目录保留、输入限额及纯 JSON stderr/正文 stdout，并保存逐命令退出码和原始文档。
+
 格式功能测试覆盖四种格式的文件输出、stdout、预算边界和失败保留；安装了 `jq` 时可追加 `--json-oracle`，独立解析 JSON 并还原每个文件的正文。
 
 自打包检查会新建输出目录，保留 XML、Markdown 和日志；已有目录会报错。安装了 `xmllint` 时可追加 `--xml-oracle`，独立核对黄金数据从 XML 还原后的正文。

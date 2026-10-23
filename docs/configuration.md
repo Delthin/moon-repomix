@@ -119,9 +119,9 @@ stdin 仅由这两个 CLI 参数显式开启，配置文件不会隐式读取终
 
 `tokenizer_path` 通过 CLI 或编程接口设置，不属于 JSON 字段。
 
-`input.maxFiles` / `input.maxTotalSize` 分别限制候选数与实际原始读取量，CLI 与库使用 `max_files` / `max_total_size`，均允许 0。过滤掉的路径不计候选；随后因密钥、二进制或无效 UTF-8 被排除的文件仍计候选和已读取字节，BOM、探测字节也计入。单文件 `maxFileSize` 的静态大小跳过可消耗 0 字节。累计读取至多多探测 1 byte 后以 `InputLimitError` 停止，错误不输出原文；模板、Git 与词表分别受已有独立上限约束。
+`input.maxFiles` / `input.maxTotalSize` 分别限制候选数与实际原始读取量，CLI 与库使用 `max_files` / `max_total_size`，均允许 0。过滤掉的路径不计候选；随后因密钥、二进制或无效 UTF-8 被排除的文件仍计候选和已读取字节，BOM、探测字节也计入。单文件 `maxFileSize` 的静态大小跳过可消耗 0 字节。累计读取至多多探测 1 byte 后以 `InputLimitError` 停止，错误不输出原文；这里累计的是候选源码读取；忽略规则、stdin 列表、模板、Git 与词表按各自已有上限处理，不是远程下载或整个进程 I/O 配额。
 
-`output.splitOutput` 为正整数或 `false`，CLI 可覆盖或关闭。开启分卷且未指定路径时，输出目录为 `moon-repomix-output`。每卷预算、索引与不覆盖发布约定见 [精确 Token 分卷](partition.md)，机器报告见 [报告协议](reports.md)。
+`output.splitOutput` 为正整数或 `false`，CLI 可覆盖或关闭。Root `options(..., split_output=...)` 可构造同一配置；SDK 的单份 `pack` 返回类型保持不变，分卷应显式调用 `pack_volumes(..., max_tokens=...)`。开启分卷且未指定路径时，输出目录为 `moon-repomix-output`。每卷预算、索引与不覆盖发布约定见 [精确 Token 分卷](partition.md)，机器报告见 [报告协议](reports.md)。
 
 `output.keepFull` 是追加去重的字符串数组，CLI 的 `--keep-full` 在 JSON 列表之后合并。开启压缩时仅对最终已选且通过扫描的文件生效；`--no-compress` 时全部文件保留原文。它沿用 include 的根相对和目录后代语义，完整记录以 `reason: "kept-full"` 标识主动保留，概览用 `keptFull` 单独计数。
 
