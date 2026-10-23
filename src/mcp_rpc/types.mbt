@@ -39,8 +39,8 @@ fn supported_versions() -> Json {
 }
 
 ///|
-fn supported(version : String) -> Bool {
-  version == "2026-07-28" || version == "2025-11-25" || version == "2025-06-18"
+fn supported_modern(version : String) -> Bool {
+  version == "2026-07-28"
 }
 
 ///|
@@ -71,7 +71,8 @@ fn success(id : Json, result : Json, modern : Bool) -> Json {
 fn safe_id(id : Json) -> Bool {
   match id {
     String(_) => true
-    Number(n, ..) => n > 0 && n <= 9007199254740991.0 && n.floor() == n
+    Number(n, ..) =>
+      n >= -9007199254740991.0 && n <= 9007199254740991.0 && n.floor() == n
     _ => false
   }
 }
@@ -81,7 +82,7 @@ fn safe_id(id : Json) -> Bool {
 // string/number separation, but never use an untrusted numeric repr as a key.
 fn id_key(id : Json) -> String {
   match id {
-    Number(n, ..) => Json::number(n).stringify()
+    Number(n, ..) => if n == 0 { "0" } else { Json::number(n).stringify() }
     _ => id.stringify()
   }
 }

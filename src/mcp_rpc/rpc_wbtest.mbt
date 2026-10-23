@@ -9,10 +9,10 @@ fn test_info() -> Info {
 }
 
 ///|
-fn modern_params() -> Json {
+fn modern_params(version~ : String = "2026-07-28") -> Json {
   {
     "_meta": {
-      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/protocolVersion": Json(version),
       "io.modelcontextprotocol/clientCapabilities": {},
     },
   }
@@ -43,6 +43,16 @@ fn assert_code(action : Action, code : Int32) -> Unit raise {
 test "dispatch versions, lifecycle, envelopes and safe IDs" {
   let info = test_info()
   let session : Session = { initializing: false, ready: false, }
+  assert_eq(
+    reply(
+      dispatch({ "jsonrpc": "2.0", "id": -1, "method": "ping" }, info, session),
+    ),
+    { "jsonrpc": "2.0", "id": -1, "result": {} },
+  )
+  assert_code(
+    dispatch(request(Json(0), "tools/list", params={}), info, session),
+    -32602,
+  )
   let discover = reply(
     dispatch(request(Json(1), "server/discover"), info, session),
   )
@@ -96,11 +106,7 @@ test "dispatch versions, lifecycle, envelopes and safe IDs" {
     is {
       "error": {
         "code": -32022,
-        "data": {
-          "supported": ["2026-07-28", "2025-11-25", "2025-06-18"],
-          "requested": "2099-01-01",
-          ..
-        },
+        "data": { "supported": ["2026-07-28"], "requested": "2099-01-01", .. },
         ..
       },
       ..
@@ -111,14 +117,53 @@ test "dispatch versions, lifecycle, envelopes and safe IDs" {
       Json::null(),
       Json(true),
       Json::empty_object(),
-      Json(0),
-      Json(-1),
       Json(1.5),
       Json::number(9007199254740992.0),
+      Json::number(-9007199254740992.0),
     ] {
     assert_code(dispatch(request(id, "ping"), info, session), -32600)
   }
-  for id in [Json(""), Json("string-id"), Json::number(9007199254740991.0)] {
+  for version in ["2025-11-25", "2025-06-18"] {
+    assert_eq(
+      reply(
+        dispatch(
+          request(Json(2), "ping", params=modern_params(version~)),
+          info,
+          session,
+        ),
+      ),
+      {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "error": {
+          "code": -32022,
+          "message": "Unsupported protocol version",
+          "data": { "supported": ["2026-07-28"], "requested": Json(version) },
+        },
+      },
+    )
+  }
+  assert_true(
+    dispatch(request(Json(3), "tools/list"), info, session)
+    is Call(modern=true, ..),
+  )
+  assert_code(
+    dispatch(request(Json(4), "tools/list", params={}), info, session),
+    -32602,
+  )
+  assert_true(!session.initializing && !session.ready)
+  assert_eq(id_key(@json.parse("-0")), id_key(@json.parse("0")))
+  assert_eq(id_key(@json.parse("1e0")), id_key(@json.parse("1.0")))
+  for
+    id in [
+      Json(""),
+      Json("string-id"),
+      Json(0),
+      Json(-1),
+      @json.parse("-0"),
+      Json::number(9007199254740991.0),
+      Json::number(-9007199254740991.0),
+    ] {
     assert_true(
       reply(dispatch(request(id, "ping"), info, session))
       is { "result": { "resultType": "complete", .. }, .. },
@@ -136,7 +181,7 @@ test "dispatch versions, lifecycle, envelopes and safe IDs" {
     let legacy : Session = { initializing: false, ready: false, }
     let initialized = reply(
       dispatch(
-        request(Json(1), "initialize", params={
+        request(Json(0), "initialize", params={
           "protocolVersion": Json(version),
           "capabilities": {},
           "clientInfo": { "name": "test", "version": "1" },
@@ -147,8 +192,12 @@ test "dispatch versions, lifecycle, envelopes and safe IDs" {
     )
     let selected = if version == "2025-06-18" { version } else { "2025-11-25" }
     assert_true(
-      initialized is { "result": { "protocolVersion": value, .. }, .. } &&
+      initialized is { "id": 0, "result": { "protocolVersion": value, .. }, .. } &&
       value == Json(selected),
+    )
+    assert_eq(
+      reply(dispatch(request(Json(-1), "ping", params={}), info, legacy)),
+      { "jsonrpc": "2.0", "id": -1, "result": {} },
     )
     assert_code(
       dispatch(request(Json(2), "tools/list", params={}), info, legacy),
@@ -177,9 +226,21 @@ test "dispatch versions, lifecycle, envelopes and safe IDs" {
       ),
       -32602,
     )
+    assert_code(
+      dispatch(
+        request(Json(3), "tools/list", params=modern_params(version~)),
+        info,
+        legacy,
+      ),
+      -32022,
+    )
     assert_true(
       dispatch(request(Json(3), "tools/list"), info, legacy)
       is Call(modern=true, ..),
+    )
+    assert_true(
+      dispatch(request(Json(4), "tools/list", params={}), info, legacy)
+      is Call(modern=false, ..),
     )
   }
   assert_eq(success(Json(1), { "x": 2 }, true), {
@@ -339,6 +400,28 @@ async test "real pipe cancellation, EOF, duplicate, busy, timeout and safe error
         "id": 1,
         "result": { "ok": true, "resultType": "complete" },
       })
+      send(client, request(Json(0), "slow"))
+      send(client, request(@json.parse("-0"), "ping", params={}))
+      assert_true(
+        receive(reader)
+        is {
+          "id": 0,
+          "error": { "code": -32600, "message": "Duplicate request ID", .. },
+          ..
+        },
+      )
+      send(client, {
+        "jsonrpc": "2.0",
+        "method": "notifications/cancelled",
+        "params": { "requestId": 0 },
+      })
+      @async.sleep(5)
+      send(client, request(Json(-1), "fast"))
+      assert_eq(receive(reader), {
+        "jsonrpc": "2.0",
+        "id": -1,
+        "result": { "ok": true, "resultType": "complete" },
+      })
       send(client, request(Json(6), "safe"))
       assert_eq(receive(reader), {
         "jsonrpc": "2.0",
@@ -359,14 +442,14 @@ async test "real pipe cancellation, EOF, duplicate, busy, timeout and safe error
       })
       send(client, request(Json(9), "slow"))
       // Ensure this last task actually entered the handler before closing stdin.
-      while started.val < 6 {
+      while started.val < 7 {
         @async.pause()
       }
       client.close()
       server.wait()
       assert_eq(reader.read_some(), None)
-      assert_eq(started.val, 6)
-      assert_eq(finished.val, 6)
+      assert_eq(started.val, 7)
+      assert_eq(finished.val, 7)
     },
     limits={ max_line_bytes: 1048576, max_in_flight: 4, timeout_ms: 100, },
   )

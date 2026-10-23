@@ -66,6 +66,11 @@ fn dispatch(value : Json, info : Info, session : Session) -> Action {
     Some(_) => true
     None => false
   }
+  // Legacy ping is permitted even before initialize/initialized. It does not
+  // establish a session or authorize any application method.
+  if name == "ping" && !has_modern {
+    return Reply(success(id, Json::empty_object(), false))
+  }
   let modern = has_modern || name == "server/discover" || !session.ready
   if modern {
     guard meta is Some(Object(meta)) &&
@@ -73,10 +78,10 @@ fn dispatch(value : Json, info : Info, session : Session) -> Action {
       meta.get(client_key) is Some(Object(_)) else {
       return Reply(rpc_error(id, -32602, "Invalid params"))
     }
-    if !supported(version) {
+    if !supported_modern(version) {
       return Reply(
         rpc_error(id, -32022, "Unsupported protocol version", data={
-          "supported": supported_versions(),
+          "supported": ["2026-07-28"],
           "requested": Json(version),
         }),
       )

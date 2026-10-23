@@ -50,7 +50,8 @@ Handlers must cooperate with cancellation through async IO or periodic
   `params._meta["io.modelcontextprotocol/protocolVersion"]` as a string and
   `params._meta["io.modelcontextprotocol/clientCapabilities"]` as an object.
   Missing/malformed metadata is `-32602`. Unsupported versions are `-32022`,
-  with `data: {supported: [...], requested: ...}`.
+  with `data: {supported: ["2026-07-28"], requested: ...}`. Only `2026-07-28`
+  is valid in modern per-request metadata; legacy versions require initialize.
 - `server/discover` returns `resultType: "complete"`, `supportedVersions`
   (`2026-07-28`, `2025-11-25`, `2025-06-18`), supplied capabilities,
   `_meta["io.modelcontextprotocol/serverInfo"]` and supplied instructions.
@@ -60,9 +61,12 @@ Handlers must cooperate with cancellation through async IO or periodic
 - Legacy `initialize` requires protocolVersion, capabilities and clientInfo;
   supported legacy versions are `2025-11-25` and `2025-06-18`. Other proposed
   versions negotiate `2025-11-25`. Only after `notifications/initialized` can
-  requests omit modern metadata. Requests containing modern metadata are still
+  application requests omit modern metadata. Legacy `ping` without modern keys
+  is allowed before initialize and during initialization, returning `{}` without
+  authorizing application methods. Requests containing modern metadata are still
   independently validated, even inside a legacy session. Before readiness,
-  missing request metadata is `-32602`. Legacy results do not gain resultType.
+  missing application-request metadata is `-32602`. Legacy results do not gain
+  resultType.
 - There are no subscriptions, logging, sampling, roots, elicitation or
   server-to-client requests. Unknown methods reach the application handler;
   unknown notifications are ignored and receive no response.
@@ -71,9 +75,10 @@ Handlers must cooperate with cancellation through async IO or periodic
 
 Native stdin is consumed in bounded chunks, not `read_all`/unbounded
 `read_until`. Each LF-terminated frame must contain one UTF-8 JSON-RPC 2.0
-object. Batch arrays are unsupported. Request IDs are strings or positive,
-integral JSON numbers no greater than 9,007,199,254,740,991; null, booleans,
-objects, zero and fractional IDs are rejected. Malformed JSON/UTF-8 produces
+object. Batch arrays are unsupported. Request IDs are strings or integral JSON
+numbers in [-9,007,199,254,740,991, 9,007,199,254,740,991], including zero and
+negative integers; null, booleans, objects, fractional and unsafe integers are
+rejected. Malformed JSON/UTF-8 produces
 `-32700`; invalid envelopes/batches produce `-32600`. Error messages never
 include the rejected input (the valid request ID is still echoed).
 
@@ -82,7 +87,8 @@ An oversized line is discarded through its LF with bounded storage, emits
 frame and cancels all outstanding tasks, waiting for cancellation cleanup.
 A duplicate in-flight ID receives `-32600`, `Duplicate request ID`, without
 replacing the original task or changing the lifecycle. Numeric spellings such
-as `1`, `1.0` and `1e0` share an ID, distinct from the string `"1"`. Cancelled IDs remain
+as `1`, `1.0` and `1e0` share an ID, distinct from the string `"1"`; `-0` and `0`
+also share an ID. Cancelled IDs remain
 reserved until their task cleanup completes.
 
 `notifications/cancelled` uses `params.requestId`. Cancelling a running handler
@@ -115,6 +121,7 @@ moon test src/mcp_rpc --target native --deny-warn
 
 Protocol sources (2026-07-28 modern; 2025-11-25 legacy):
 
+- https://modelcontextprotocol.io/specification/2026-07-28/basic/index
 - https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio
 - https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning
 - https://modelcontextprotocol.io/specification/2026-07-28/server/discover
