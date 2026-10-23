@@ -1,6 +1,6 @@
 # 配置与命令行
 
-本页对应当前主线源码；v0.2.0 安装包和库接口请参阅 [该版本文档](https://github.com/Delthin/moon-repomix/blob/v0.2.0/docs/configuration.md)。
+本页对应 v0.3.0 的 CLI、JSON 配置和库接口。
 
 配置按“默认值 → 选定的 JSON 文件 → 显式 CLI 参数”合并。普通字段由后者覆盖；include 和自定义 ignore 列表按 JSON、CLI 的顺序追加，按原字符串去重并保留首次出现的位置。未出现的布尔参数不参与覆盖，因此 JSON 中的 `false` 会保留。
 
