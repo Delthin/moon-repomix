@@ -30,7 +30,7 @@ plain 使用 64 个等号分隔章节，16 个等号标识文件。`File:` 行�
 
 ## 来源与 Git 章节
 
-开启压缩、Git 或远程获取时，文档增加 `metadata`；存在接受的 Git 内容时增加 `sections`。JSON 继续保留原 `files` 对象。四种格式默认汇总压缩状态和 Git 数量，`--full-metadata` 展示逐文件记录及原始行区间；库模型始终保留完整元数据。文件正文和 Git 章节内容保持一致，元数据详略会改变最终文档计数。字段结构与库接口见 [仓库上下文](context.md#结构化输出与库调用)。XML 的 Git 文本位于 `sections/section`，Markdown 和 plain 追加相应标题与正文。原文、补丁和提交消息均经过扫描，最终 token 计数包含实际渲染的全部内容。
+开启压缩、Git 或远程获取时，文档增加 `metadata`；存在接受的 Git 内容时增加 `sections`。JSON 继续保留原 `files` 对象。四种格式默认汇总压缩状态和 Git 数量，`--full-metadata` 展示逐文件记录及原始行区间；库模型始终保留完整元数据。压缩概览将主动保留原文的文件单独计为 `keptFull`，仅在数量大于零时输出；这些文件不计入 `fallbacks`。文件正文和 Git 章节内容保持一致，元数据详略会改变最终文档计数。字段结构与库接口见 [仓库上下文](context.md#结构化输出与库调用)。XML 的 Git 文本位于 `sections/section`，Markdown 和 plain 追加相应标题与正文。原文、补丁和提交消息均经过扫描，最终 token 计数包含实际渲染的全部内容。
 
 ## 文件提交与标准输出
 

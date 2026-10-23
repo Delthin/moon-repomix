@@ -35,6 +35,7 @@ fn compression_summary(value : Json) -> Json {
     return Json::null()
   }
   let mut applied_count = 0
+  let mut kept_full_count = 0
   let mut original_tokens = 0L
   let mut output_tokens = 0L
   let languages : Map[String, Int32] = Map([])
@@ -67,7 +68,11 @@ fn compression_summary(value : Json) -> Json {
           { "reason": String(reason), .. } => reason
           _ => "unknown"
         }
-        fallbacks[reason] = fallbacks.get(reason).unwrap_or(0) + 1
+        if reason == "kept-full" {
+          kept_full_count += 1
+        } else {
+          fallbacks[reason] = fallbacks.get(reason).unwrap_or(0) + 1
+        }
       }
       _ => return value
     }
@@ -79,7 +84,7 @@ fn compression_summary(value : Json) -> Json {
   if original_tokens > 9007199254740991L || output_tokens > 9007199254740991L {
     return value
   }
-  {
+  let summary : Json = {
     "files": records.length(),
     "applied": applied_count,
     "originalTokens": original_tokens.to_double(),
@@ -87,4 +92,8 @@ fn compression_summary(value : Json) -> Json {
     "languages": languages,
     "fallbacks": fallbacks,
   }
+  if kept_full_count > 0 && summary is Object(fields) {
+    fields["keptFull"] = Json(kept_full_count)
+  }
+  summary
 }

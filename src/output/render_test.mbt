@@ -117,6 +117,7 @@ test "all renderers summarize metadata and expose complete records on request" {
     fail("Expected source, aggregate counts and custom metadata")
   }
   assert_false(overview.stringify().contains("\"ranges\""))
+  assert_false(overview.stringify().contains("\"keptFull\""))
   guard @json.parse(@output.json(doc, full_metadata=true))
     is { "metadata": full, "files": full_files, .. } else {
     fail("Expected complete structured metadata")
@@ -130,6 +131,72 @@ test "all renderers summarize metadata and expose complete records on request" {
   )
   assert_eq(doc.metadata, metadata)
   assert_true(@output.xml(@document.create([])).contains("<files>\n  </files>"))
+  guard metadata is Object(original) else {
+    fail("Expected complete metadata object")
+  }
+  guard original.get("compression") is Some(Array(records)) else {
+    fail("Expected complete compression records")
+  }
+  let mixed_records = records.copy()
+  mixed_records.push({
+    "path": "README.md",
+    "language": null,
+    "applied": false,
+    "reason": "kept-full",
+    "ranges": [],
+    "originalTokens": 9,
+    "outputTokens": 9,
+  })
+  let mixed_fields = original.copy()
+  mixed_fields["compression"] = Json(mixed_records)
+  let mixed_metadata = Json(mixed_fields)
+  let mixed = @document.create(doc.files, metadata=mixed_metadata)
+  guard @json.parse(@output.json(mixed))
+    is {
+      "metadata": {
+        "compression": {
+          "files": Number(3, ..),
+          "applied": Number(1, ..),
+          "keptFull": Number(1, ..),
+          "originalTokens": Number(46, ..),
+          "outputTokens": Number(28, ..),
+          "fallbacks": Object(fallbacks),
+          ..
+        },
+        ..
+      },
+      ..
+    } else {
+    fail("Expected separate kept-full count with unchanged token totals")
+  }
+  assert_eq(fallbacks.length(), 1)
+  assert_eq(fallbacks.get("unsupported"), Some(Json(1)))
+  for rendered in [
+    @output.markdown(mixed),
+    @output.plain(mixed),
+    @output.xml(mixed),
+  ] {
+    assert_true(rendered.contains("\"keptFull\":1"))
+    assert_false(rendered.contains("kept-full"))
+  }
+  guard @json.parse(@output.json(mixed, full_metadata=true))
+    is { "metadata": full_mixed, .. } else {
+    fail("Expected complete mixed compression records")
+  }
+  assert_eq(full_mixed, mixed_metadata)
+  assert_eq(mixed.metadata, mixed_metadata)
+  assert_eq(doc.metadata, metadata)
+  let custom_cases : Array[Json] = [
+    { "compression": { "custom": "legacy" } },
+    { "compression": [{ "applied": false, "reason": "kept-full" }] },
+  ]
+  for custom in custom_cases {
+    guard @json.parse(@output.json(@document.create([], metadata=custom)))
+      is { "metadata": actual, .. } else {
+      fail("Expected custom metadata")
+    }
+    assert_eq(actual, custom)
+  }
 }
 
 ///|
