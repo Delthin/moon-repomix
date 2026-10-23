@@ -242,6 +242,8 @@ moon run --target native scripts/self-pack-test.mbtx ../moon-repomix-self-check
 
 分卷 CLI 用例为 `scripts/volume-cli-test.mbtx BINARY VOCABULARY --log-dir NEW_ABSOLUTE_DIRECTORY [--xml-oracle]`，覆盖目录保留、输入限额及纯 JSON stderr/正文 stdout，并保存逐命令退出码和原始文档。
 
+组合用例为 `scripts/context-workflow-test.mbtx --ci ABS_BINARY ABS_VOCAB ABS_SOURCE_ROOT REV NEW_ABSOLUTE_LOG_DIR`。它只创建本地夹具，串联 CLI/MCP 入选查询、字面 NUL 清单、全文/骨架混合、模板、显示路径和分卷，核对资源完整读回、失败后的缓存不变及释放；保留逐命令输出和完整 MCP 报文。
+
 MCP 用例先运行 `scripts/mcp-test.mbtx -- --prepare-only NEW_ABSOLUTE_LOG_DIR`，再运行 `scripts/mcp-test.mbtx -- --ready ABSOLUTE_BINARY ABSOLUTE_VOCABULARY SOURCE_ROOT LOG_DIR`。两个真实管道进程核对现代与旧协议、完整卷正文、权限拒绝、缓存替换和释放；完整原始 NDJSON 与 stderr 随 CI 保存。
 
 格式功能测试覆盖四种格式的文件输出、stdout、预算边界和失败保留；安装了 `jq` 时可追加 `--json-oracle`，独立解析 JSON 并还原每个文件的正文。

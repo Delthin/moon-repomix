@@ -280,8 +280,8 @@ async test "explain safe ancestor and external origins, fatal validation and no-
 
 ///|
 #cfg(platform="windows")
-async fn explain_nofollow(_root : String, _options : SelectionOptions) -> Unit {
-  // Existing native Windows CI covers junctions; no privileged symlink setup.
+fn explain_nofollow(_root : String, _options : SelectionOptions) -> Unit {
+  // The symbolic-link and FIFO fixture below is POSIX-only.
 }
 
 ///|
