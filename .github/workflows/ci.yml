@@ -76,6 +76,12 @@ jobs:
           --security-error-category ContextSecurityError
           --log-dir "${{ runner.temp }}/context-customization"
           ${{ runner.os == 'Linux' && '--xml-oracle' || '' }}
+      - name: Display chapter, line and path functional test
+        run: >-
+          moon run --target native scripts/display-controls-test.mbtx
+          _build/native/release/build/cmd/moon-repomix/moon-repomix.exe
+          assets/tokenizer-o200k_base.tiktoken
+          ${{ runner.os == 'Linux' && '--xml-oracle' || '' }}
       - name: Reproducible demo
         run: moon run --target native scripts/demo.mbtx
       - name: Real repository self-pack

@@ -2,7 +2,7 @@
 
 当前源码提供分卷库接口。已发布 v0.3.0 不包含本接口。CLI 仍输出单份文档；分卷调用返回可保存或作为资源提供的字符串，由调用者选择写入位置。
 
-```mbt
+```moonbit
 let runtime = @repomix.Runtime::load("assets/tokenizer-o200k_base.tiktoken")
 let options = @repomix.options(
   ".",
