@@ -1,0 +1,1569 @@
+///|
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+  "moonbitlang/core/encoding/utf8",
+}
+
+///|
+// Standalone native CLI integration, not an SDK/tokenizer reimplementation.
+// Usage: moon run --target native scripts/volume-cli-test.mbtx BINARY VOCABULARY
+//        --log-dir NEW_ABSOLUTE_DIRECTORY [--xml-oracle] [--prepare-only]
+//        [--real-corpus ABSOLUTE_REPOMIX_1_18_1_DIRECTORY]
+//        [--verify-splits ABSOLUTE_PREVIOUS_LOG_DIRECTORY]
+// --verify-splits rechecks captured successful documents without new CLI calls.
+// Requires local git and shasum. Inputs/outputs are synthetic and locally owned.
+struct Suite {
+  binary : String
+  vocabulary : String
+  temp : String
+  logs : String
+  environment : Map[String, String]
+  mut calls : Int32
+  mut passed : Int32
+}
+
+///|
+fn environment() -> Map[String, String] {
+  let null = if @env.get_env_var("OS") == Some("Windows_NT") {
+    "NUL"
+  } else {
+    "/dev/null"
+  }
+  let values = {
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": null,
+    "GIT_CONFIG_SYSTEM": null,
+    "GIT_ATTR_NOSYSTEM": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_CONFIG_COUNT": "3",
+    "GIT_CONFIG_KEY_0": "core.hooksPath",
+    "GIT_CONFIG_VALUE_0": null,
+    "GIT_CONFIG_KEY_1": "core.fsmonitor",
+    "GIT_CONFIG_VALUE_1": "false",
+    "GIT_CONFIG_KEY_2": "core.attributesFile",
+    "GIT_CONFIG_VALUE_2": null,
+    "LC_ALL": "C",
+  }
+  for
+    key in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR", "PATHEXT"] {
+    if @env.get_env_var(key) is Some(value) {
+      values[key] = value
+    }
+  }
+  values
+}
+
+///|
+async fn capture(
+  command : String,
+  args : Array[String],
+  cwd : String,
+  environment : Map[String, String],
+) -> (Int32, Bytes, Bytes) {
+  let (input, writer) = @process.write_to_process()
+  writer.close() // Every child sees EOF, including Git and the CLI.
+  let (code, out, err) = @process.collect_output(
+    command,
+    args,
+    cwd~,
+    stdin=input,
+    inherit_env=false,
+    extra_env=environment,
+  )
+  (code, out.binary(), err.binary())
+}
+
+///|
+async fn git(s : Suite, args : Array[String], cwd : String) -> String {
+  let (code, out, err) = capture("git", args, cwd, s.environment)
+  guard code == 0 else { fail("fixture git failed: " + @utf8.decode(err)) }
+  @utf8.decode(out)
+}
+
+///|
+async fn sha(s : Suite, path : String) -> String {
+  let (code, out, _) = capture(
+    "shasum",
+    ["-a", "256", path],
+    s.temp,
+    s.environment,
+  )
+  assert_eq(code, 0)
+  let text = @utf8.decode(out)
+  guard text.length() >= 64 else { fail("missing SHA256") }
+  text[:64].to_owned()
+}
+
+///|
+async fn put(path : String, text : String) -> Unit {
+  @fs.write_file(path, text, create_mode=CreateNew)
+}
+
+///|
+fn prop(value : Json, key : String) -> Json raise {
+  guard value is Object(fields) && fields.get(key) is Some(found) else {
+    fail("missing JSON field: " + key)
+  }
+  found
+}
+
+///|
+fn text(value : Json) -> String raise {
+  guard value is String(found) else { fail("expected JSON string") }
+  found
+}
+
+///|
+fn number(value : Json) -> Int32 raise {
+  guard value is Number(found, ..) &&
+    found >= 0 &&
+    found <= 2147483647.0 &&
+    found == found.to_int().to_double() else {
+    fail("expected small nonnegative JSON integer")
+  }
+  found.to_int()
+}
+
+///|
+fn rows(value : Json) -> Array[Json] raise {
+  guard value is Array(found) else { fail("expected JSON array") }
+  found
+}
+
+///|
+fn object(value : Json) -> Map[String, Json] raise {
+  guard value is Object(found) else { fail("expected JSON object") }
+  found
+}
+
+///|
+fn decimal(value : Json) -> Int64 raise {
+  let digits = text(value)
+  assert_false(digits.is_empty())
+  for ch in digits {
+    assert_true(ch >= '0' && ch <= '9')
+  }
+  let parsed = @string.parse_int64(digits)
+  assert_true(parsed >= 0L)
+  assert_eq(parsed.to_string(), digits)
+  parsed
+}
+
+///|
+fn occurrences(value : String, needle : String) -> Int32 {
+  value.split(needle).count() - 1
+}
+
+///|
+async fn archive(s : Suite, source : String, dest : String) -> Json {
+  let bytes = @fs.read_file(source).binary()
+  @fs.write_file(dest, bytes, create_mode=CreateNew)
+  {
+    "file": source,
+    "archive": dest,
+    "bytes": bytes.length().to_string(),
+    "sha256": sha(s, source),
+  }
+}
+
+///|
+// Snapshot the actual installed documents before any assertions; keep raw bytes.
+async fn snapshot(s : Suite, target : String, log : String) -> Unit {
+  if !@fs.exists(target) {
+    return
+  }
+  let kind = @fs.kind(target, follow_symlink=false)
+  if kind == Regular {
+    put(
+      log + "/documents.json",
+      archive(s, target, log + "/output.bin").stringify(indent=2) + "\n",
+    )
+  } else if kind == Directory {
+    @fs.mkdir(log + "/documents")
+    let manifest : Array[Json] = []
+    for name in @fs.readdir(target, sort=true) {
+      assert_false(name.contains("/") || name.contains("\\"))
+      assert_eq(@fs.kind(target + "/" + name, follow_symlink=false), Regular)
+      manifest.push(archive(s, target + "/" + name, log + "/documents/" + name))
+    }
+    put(
+      log + "/documents.json",
+      Json::array(manifest).stringify(indent=2) + "\n",
+    )
+  } else {
+    put(log + "/target-kind.txt", "symlink/junction; not followed\n")
+  }
+}
+
+///|
+async fn invoke(
+  s : Suite,
+  name : String,
+  args : Array[String],
+  target : String,
+) -> (Int32, Json) {
+  s.calls += 1
+  let log = s.logs + "/" + s.calls.to_string() + "-" + name
+  @fs.mkdir(log)
+  let before = @fs.readdir(s.temp + "/outputs", sort=true)
+  let argv = ["--report-json", "--quiet", "--tokenizer-path", s.vocabulary] +
+    args
+  put(
+    log + "/invocation.json",
+    (
+      {
+        "argv": [s.binary] + argv,
+        "cwd": s.temp,
+        "stdin": "EOF",
+        "environment": s.environment,
+      } : Json).stringify(indent=2) +
+    "\n",
+  )
+  put(log + "/parent-before.json", Json(before).stringify() + "\n")
+  let (code, out, err) = capture(s.binary, argv, s.temp, s.environment)
+  @fs.write_file(log + "/stdout.bin", out, create_mode=CreateNew)
+  @fs.write_file(log + "/stderr.bin", err, create_mode=CreateNew)
+  put(log + "/exit.txt", code.to_string() + "\n")
+  let after = @fs.readdir(s.temp + "/outputs", sort=true)
+  put(log + "/parent-after.json", Json(after).stringify() + "\n")
+  if target != "" {
+    snapshot(s, target, log)
+  }
+  assert_eq(out.length(), 0)
+  let report_text = @utf8.decode(err)
+  assert_true(report_text.has_suffix("\n"))
+  // parse the entire stderr, not a trimmed line or a substring of mixed output.
+  let report = @json.parse(report_text)
+  assert_eq(prop(report, "schemaVersion"), Json(1))
+  assert_eq(prop(report, "exitCode"), Json(code))
+  assert_false(report_text.contains(s.temp))
+  assert_false(report_text.contains(s.binary))
+  assert_false(report_text.contains(s.vocabulary))
+  for
+    sentinel in [
+      "SOURCE_BODY_", "HEADER_SENTINEL", "INSTRUCTION_SENTINEL", "ghp_", "DO_NOT_ECHO_",
+    ] {
+    assert_false(report_text.contains(sentinel))
+  }
+  // A failed pre-publication invocation must not create staging or touch siblings.
+  if prop(report, "status") == Json("error") {
+    assert_eq(after, before)
+  } else if target != "" {
+    let target_name = target.split("/").last().unwrap().to_owned()
+    let expected = before.copy()
+    if !expected.contains(target_name) {
+      expected.push(target_name)
+    }
+    expected.sort()
+    assert_eq(after, expected)
+  }
+  (code, report)
+}
+
+///|
+fn ok(report : Json, operation : String, accepted : Int32) -> Unit raise {
+  assert_eq(prop(report, "status"), Json("ok"))
+  assert_eq(prop(report, "publication"), Json("committed"))
+  assert_eq(prop(report, "operation"), Json(operation))
+  assert_eq(prop(prop(report, "counts"), "acceptedFiles"), Json(accepted))
+  for group in ["bytes", "tokens"] {
+    let metrics = prop(report, group)
+    assert_eq(
+      decimal(prop(metrics, "documents")) + decimal(prop(metrics, "index")),
+      decimal(prop(metrics, "total")),
+    )
+  }
+}
+
+///|
+async fn error_case(
+  s : Suite,
+  name : String,
+  args : Array[String],
+  target : String,
+  category : String,
+  field? : String,
+  limit? : String,
+  existing~ : Bool = false,
+) -> Unit {
+  let (code, report) = invoke(s, name, args, target)
+  assert_eq(code, 1)
+  let expected : Json = {
+    "schemaVersion": 1,
+    "status": "error",
+    "exitCode": 1,
+    "publication": "not_started",
+    "error": {
+      "category": category,
+      "field": match field {
+        Some(value) => Json(value)
+        None => Json::null()
+      },
+      "limit": match limit {
+        Some(value) => Json(value)
+        None => Json::null()
+      },
+    },
+  }
+  assert_eq(report, expected)
+  if target != "" && !existing {
+    assert_false(@fs.exists(target))
+  }
+  s.passed += 1
+  println("PASS " + name)
+}
+
+///|
+fn pass(s : Suite, name : String) -> Unit {
+  s.passed += 1
+  println("PASS " + name)
+}
+
+///|
+async fn identity(s : Suite) -> Json {
+  let suffix = "/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe"
+  guard s.binary.has_suffix(suffix) else {
+    fail(
+      "BINARY must be the frozen native build/cmd/moon-repomix/moon-repomix.exe",
+    )
+  }
+  let source = s.binary[:s.binary.length() - suffix.length()].to_owned()
+  {
+    "binary": s.binary,
+    "binarySHA256": sha(s, s.binary),
+    "vocabulary": s.vocabulary,
+    "vocabularySHA256": sha(s, s.vocabulary),
+    "sourceRoot": source,
+    "sourceHEAD": git(s, ["rev-parse", "HEAD"], source),
+    "sourceStatus": git(
+      s,
+      ["status", "--porcelain=v1", "--untracked-files=all"],
+      source,
+    ),
+    "platform": @env.get_env_var("OS").unwrap_or(
+      "POSIX (this run: native host)",
+    ),
+  }
+}
+
+///|
+async fn cleanup(s : Suite) -> Unit {
+  // Fresh parent only: git clean handles read-only Windows objects and unlinks
+  // symlinks/junctions without walking their targets. Never use --log-dir here.
+  let _ = git(
+    s,
+    ["init", "--quiet", "--template=", "--initial-branch=fixture"],
+    s.temp,
+  )
+  let _ = git(s, ["clean", "--quiet", "-ffdx", "--", "."], s.temp)
+  assert_eq(@fs.readdir(s.temp), [".git"])
+  @fs.rmdir(s.temp, recursive=true)
+  assert_false(@fs.exists(s.temp))
+}
+
+///|
+async fn fixtures(s : Suite) -> Map[String, String] {
+  let root = s.temp + "/input"
+  @fs.mkdir(root + "/src", recursive=true)
+  @fs.mkdir(root + "/组 合")
+  @fs.mkdir(s.temp + "/outputs")
+  @fs.mkdir(s.temp + "/empty")
+  @fs.mkdir(s.temp + "/foreign")
+  put(s.temp + "/foreign/keep.txt", "outside target preserved\n")
+  let originals : Map[String, String] = {
+    "src/a.mbt": "///|\npub fn calculate(value : Int) -> Int {\n" +
+    "  // SOURCE_BODY_A keep complete\n  let next = value + 17\n".repeat(45) +
+    "  value + 2\n}\n",
+    "src/b.ts": "export function calculate(value: number): number {\n" +
+    "  // SOURCE_BODY_B keep complete\n  value += 17;\n".repeat(45) +
+    "  return value;\n}\n",
+    "组 合/c.txt": "SOURCE_BODY_C Unicode 文档\r\n" +
+    "Complete untrimmed third body, 12345.\r\n".repeat(70),
+    "empty.txt": "",
+  }
+  let _ = git(
+    s,
+    ["init", "--quiet", "--template=", "--initial-branch=fixture"],
+    root,
+  )
+  for (name, value) in originals {
+    put(root + "/" + name, value)
+  }
+  put(root + "/.gitignore", "ignored.txt\n")
+  put(root + "/ignored.txt", "IGNORED_BODY_DO_NOT_PUBLISH\n")
+  let _ = git(s, ["add", "--", "."], root)
+  let _ = git(
+    s,
+    [
+      "-c", "user.name=Synthetic Fixture", "-c", "user.email=fixture@example.invalid",
+      "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "public synthetic history",
+    ],
+    root,
+  )
+  @fs.write_file(
+    root + "/src/a.mbt",
+    originals["src/a.mbt"].replace(old="value + 2", new="value + 3"),
+    create_mode=TruncateExisting,
+  )
+  let _ = git(s, ["add", "--", "src/a.mbt"], root)
+  @fs.write_file(
+    root + "/src/a.mbt",
+    originals["src/a.mbt"],
+    create_mode=TruncateExisting,
+  )
+  put(
+    root + "/secret.txt",
+    "ghp_" + "Ab9Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2" + "\n",
+  )
+  put(
+    s.temp + "/instruction.txt",
+    "INSTRUCTION_SENTINEL 请保留全文\nsecond instruction line\n",
+  )
+  // Candidate/raw-read boundaries: every excluded content type still counts.
+  let limits = s.temp + "/limits"
+  @fs.mkdir(limits)
+  @fs.write_file(limits + "/a.txt", b"\xef\xbb\xbfhello", create_mode=CreateNew)
+  put(limits + "/b.txt", "ghp_" + "Ab9Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2")
+  @fs.write_file(limits + "/c.txt", b"\xff\xfe", create_mode=CreateNew)
+  @fs.write_file(limits + "/d.txt", b"a\x00b", create_mode=CreateNew)
+  put(limits + "/.gitignore", "ignored.txt\n")
+  put(limits + "/ignored.txt", "ignored bytes must not be read".repeat(100))
+  @fs.mkdir(s.temp + "/small")
+  put(s.temp + "/small/hello.txt", "hello complete original body\n")
+  put(s.temp + "/invalid-vocabulary", "DO_NOT_ECHO_INVALID_VOCABULARY")
+  put(
+    s.temp + "/invalid-config.json",
+    "{\"DO_NOT_ECHO_UNKNOWN_FIELD\":\"DO_NOT_ECHO_VALUE\"}",
+  )
+  // Preserve raw input evidence independent of MoonBit's UTF-8 text conversion.
+  @fs.mkdir(s.logs + "/fixtures")
+  let records : Array[Json] = []
+  for (name, _) in originals {
+    records.push(
+      archive(
+        s,
+        root + "/" + name,
+        s.logs + "/fixtures/" + records.length().to_string() + ".bin",
+      ),
+    )
+  }
+  for name in ["a.txt", "b.txt", "c.txt", "d.txt", ".gitignore", "ignored.txt"] {
+    records.push(
+      archive(
+        s,
+        limits + "/" + name,
+        s.logs + "/fixtures/" + records.length().to_string() + ".bin",
+      ),
+    )
+  }
+  for
+    path in [
+      root + "/.gitignore",
+      root + "/secret.txt",
+      root + "/ignored.txt",
+      s.temp + "/instruction.txt",
+      s.temp + "/small/hello.txt",
+    ] {
+    records.push(
+      archive(
+        s,
+        path,
+        s.logs + "/fixtures/" + records.length().to_string() + ".bin",
+      ),
+    )
+  }
+  put(
+    s.logs + "/fixtures/manifest.json",
+    Json::array(records).stringify(indent=2) + "\n",
+  )
+  originals
+}
+
+///|
+fn canonical_paths(originals : Map[String, String]) -> Array[String] {
+  let paths = originals.keys().collect()
+  // MoonBit String::compare is shortlex, not canonical UTF-8 byte order.
+  paths.sort_by((a, b) => @utf8.encode(a).lexical_compare(@utf8.encode(b)))
+  paths
+}
+
+///|
+fn check_ranges(record : Json, original : String, applied : Bool) -> Unit raise {
+  let ranges = rows(prop(record, "ranges"))
+  assert_eq(prop(record, "applied"), Json(applied))
+  if applied {
+    assert_false(ranges.is_empty())
+  }
+  let lines = original.split("\n").count()
+  let mut previous = 0
+  for item in ranges {
+    let range = rows(item)
+    assert_eq(range.length(), 2)
+    let start = number(range[0])
+    let end = number(range[1])
+    assert_true(start > previous && start >= 1 && end >= start && end <= lines)
+    previous = end
+  }
+}
+
+///|
+async fn verify_volumes(
+  s : Suite,
+  target : String,
+  style : String,
+  report : Json,
+  baseline : Json,
+  originals : Map[String, String],
+  cap : Int32,
+  xml_oracle : Bool,
+) -> Unit {
+  ok(report, "volumes", originals.length())
+  assert_eq(prop(report, "style"), Json(style))
+  assert_eq(prop(prop(report, "security"), "status"), Json("excluded"))
+  assert_eq(prop(prop(report, "limits"), "maxFiles"), Json(20000))
+  assert_eq(decimal(prop(prop(report, "limits"), "maxTotalSize")), 209715200L)
+  let index_text = @fs.read_file(target + "/index.json").text()
+  assert_true(index_text.has_suffix("\n"))
+  let index = @json.parse(index_text)
+  assert_eq(prop(index, "schemaVersion"), Json(1))
+  assert_eq(prop(index, "metadata"), prop(baseline, "metadata"))
+  let iv = rows(prop(index, "volumes"))
+  let rv = rows(prop(report, "volumes"))
+  assert_true(iv.length() >= 2)
+  assert_eq(iv.length(), rv.length())
+  assert_eq(
+    prop(report, "output"),
+    (
+      {
+        "kind": "directory",
+        "documents": iv.length(),
+        "indexFile": "index.json",
+      } : Json),
+  )
+  let files = object(prop(index, "files"))
+  let sections = object(prop(index, "sections"))
+  let base_sections = rows(prop(baseline, "sections"))
+  let paths = canonical_paths(originals)
+  assert_eq(files.length(), paths.length())
+  assert_eq(sections.length(), base_sections.length())
+  let owned_files : Set[Int32] = Set([])
+  let owned_sections : Set[Int32] = Set([])
+  let names : Array[String] = ["index.json"]
+  let extension = match style {
+    "markdown" => "md"
+    "plain" => "txt"
+    other => other
+  }
+  let mut tokens = 0L
+  let mut bytes = 0L
+  for i, row in iv {
+    let name = text(prop(row, "fileName"))
+    let sequence = (i + 1).to_string()
+    let expected_name = "part-" +
+      "0".repeat(4 - sequence.length()) +
+      sequence +
+      "." +
+      extension
+    assert_eq(name, expected_name)
+    assert_false(
+      name.contains("/") || name.contains("\\") || name.contains(".."),
+    )
+    names.push(name)
+    let id = text(prop(row, "id"))
+    let rr = rv[i]
+    assert_eq(prop(rr, "id"), Json(id))
+    assert_eq(prop(rr, "fileName"), Json(name))
+    let count = decimal(prop(rr, "tokens"))
+    assert_true(count > 0L && count <= cap.to_int64())
+    assert_eq(number(prop(row, "tokens")).to_int64(), count)
+    tokens += count
+    let raw = @fs.read_file(target + "/" + name).binary()
+    let rendered = @utf8.decode(raw)
+    assert_eq(decimal(prop(rr, "bytes")), raw.length().to_int64())
+    assert_eq(number(prop(row, "bytes")), raw.length())
+    bytes += raw.length().to_int64()
+    assert_false(
+      rendered.contains("ghp_") ||
+      rendered.contains("IGNORED_BODY_DO_NOT_PUBLISH"),
+    )
+    let fi = rows(prop(row, "fileIndices"))
+    let si = rows(prop(row, "sectionIndices"))
+    assert_eq(prop(rr, "files"), Json(fi.length()))
+    assert_eq(prop(rr, "sections"), Json(si.length()))
+    assert_true(!fi.is_empty() || !si.is_empty())
+    let owned_paths : Set[String] = Set([])
+    for index in fi {
+      let n = number(index)
+      assert_true(n < paths.length())
+      assert_false(owned_files.contains(n))
+      owned_files.add(n)
+      let path = paths[n]
+      owned_paths.add(path)
+      assert_eq(files.get(path), Some(Json(id)))
+      if style != "json" && originals[path] != "" {
+        let expected_body = if style == "xml" {
+          xml_escape(originals[path])
+        } else {
+          originals[path]
+        }
+        assert_eq(occurrences(rendered, expected_body), 1)
+      }
+    }
+    for index in si {
+      let n = number(index)
+      assert_true(n < base_sections.length())
+      assert_false(owned_sections.contains(n))
+      owned_sections.add(n)
+      assert_eq(sections.get(n.to_string()), Some(Json(id)))
+      if style != "json" {
+        let content = text(prop(base_sections[n], "text"))
+        let expected_body = if style == "xml" {
+          xml_escape(content)
+        } else {
+          content
+        }
+        assert_true(rendered.contains(expected_body))
+      }
+    }
+    if style == "json" {
+      let document = @json.parse(rendered)
+      assert_eq(prop(document, "headerText"), prop(baseline, "headerText"))
+      assert_eq(
+        prop(document, "instructionText"),
+        prop(baseline, "instructionText"),
+      )
+      let actual_files = object(prop(document, "files"))
+      assert_eq(actual_files.length(), fi.length())
+      for (path, body) in actual_files {
+        assert_true(owned_paths.contains(path))
+        assert_eq(body, Json(originals[path]))
+      }
+      let actual_sections = match object(document).get("sections") {
+        Some(value) => rows(value)
+        None => []
+      }
+      assert_eq(actual_sections, si.map(n => base_sections[number(n)]))
+      let metadata = prop(document, "metadata")
+      assert_eq(
+        prop(metadata, "source"),
+        prop(prop(baseline, "metadata"), "source"),
+      )
+      let records = rows(prop(metadata, "compression"))
+      assert_eq(records.length(), fi.length())
+      for record in records {
+        let path = text(prop(record, "path"))
+        assert_true(owned_paths.contains(path))
+        check_ranges(record, originals[path], false)
+      }
+      let git_metadata = prop(metadata, "git")
+      assert_eq(
+        rows(prop(git_metadata, "diffs")).length() +
+        rows(prop(git_metadata, "commits")).length(),
+        si.length(),
+      )
+    } else {
+      assert_eq(
+        occurrences(
+          rendered, "HEADER_SENTINEL 完整模板\nheader second line\n",
+        ),
+        1,
+      )
+      assert_eq(
+        occurrences(
+          rendered, "INSTRUCTION_SENTINEL 请保留全文\nsecond instruction line\n",
+        ),
+        1,
+      )
+      let marker = match style {
+        "xml" => "<file path=\""
+        "markdown" => "\n## File: "
+        _ => "\nFile: "
+      }
+      assert_eq(occurrences(rendered, marker), fi.length())
+      for (path, original) in originals {
+        if !owned_paths.contains(path) && original != "" {
+          assert_false(
+            rendered.contains(
+              if style == "xml" {
+                xml_escape(original)
+              } else {
+                original
+              },
+            ),
+          )
+        }
+      }
+    }
+    let metadata = if style == "json" {
+      prop(@json.parse(rendered), "metadata")
+    } else {
+      embedded_metadata(rendered, style)
+    }
+    let base_metadata = prop(baseline, "metadata")
+    assert_eq(prop(metadata, "source"), prop(base_metadata, "source"))
+    let expected_records = rows(prop(base_metadata, "compression")).filter(record => {
+      owned_paths.contains(text(prop(record, "path")))
+    })
+    assert_eq(prop(metadata, "compression"), Json(expected_records))
+    let expected_diffs : Array[Json] = []
+    let expected_commits : Array[Json] = []
+    let mut diff = 0
+    let mut commit = 0
+    let base_git = prop(base_metadata, "git")
+    for n, section in base_sections {
+      let selected = si.contains(Json(n))
+      if prop(section, "kind") == Json("git_diff") {
+        if selected {
+          expected_diffs.push(rows(prop(base_git, "diffs"))[diff])
+        }
+        diff += 1
+      } else {
+        if selected {
+          expected_commits.push(rows(prop(base_git, "commits"))[commit])
+        }
+        commit += 1
+      }
+    }
+    assert_eq(
+      prop(metadata, "git"),
+      ({ "diffs": expected_diffs, "commits": expected_commits } : Json),
+    )
+    if style == "xml" && xml_oracle {
+      let (code, out, err) = capture(
+        "xmllint",
+        ["--noout", target + "/" + name],
+        s.temp,
+        s.environment,
+      )
+      put(
+        s.logs + "/xml-" + name + ".json",
+        (
+          {
+            "exit": code,
+            "stdout": @utf8.decode(out),
+            "stderr": @utf8.decode(err),
+          } : Json).stringify() +
+        "\n",
+      )
+      assert_eq(code, 0)
+    }
+  }
+  names.sort()
+  assert_eq(@fs.readdir(target, sort=true), names)
+  assert_eq(owned_files.length(), paths.length())
+  assert_eq(owned_sections.length(), base_sections.length())
+  let rt = prop(report, "tokens")
+  assert_eq(decimal(prop(rt, "documents")), tokens)
+  assert_true(decimal(prop(rt, "index")) > 0L)
+  assert_eq(decimal(prop(rt, "total")), tokens + decimal(prop(rt, "index")))
+  assert_eq(prop(rt, "limit"), Json(cap.to_string()))
+  assert_eq(prop(rt, "exceeded"), Json(false))
+  let rb = prop(report, "bytes")
+  assert_eq(decimal(prop(rb, "documents")), bytes)
+  assert_eq(decimal(prop(rb, "index")), @fs.file_size(target + "/index.json"))
+  assert_eq(
+    decimal(prop(rb, "total")),
+    bytes + @fs.file_size(target + "/index.json"),
+  )
+}
+
+///|
+fn embedded_metadata(rendered : String, style : String) -> Json raise {
+  if style == "xml" {
+    let pieces = rendered.split("<metadata>").collect()
+    assert_eq(pieces.length(), 2)
+    let encoded = pieces[1].split("</metadata>").next().unwrap().to_owned()
+    let decoded = encoded
+      .replace_all(old="&#13;", new="\r")
+      .replace_all(old="&lt;", new="<")
+      .replace_all(old="&gt;", new=">")
+      .replace_all(old="&amp;", new="&")
+    return @json.parse(decoded)
+  }
+  // Metadata is one compact JSON line; source/template bodies never match it.
+  let candidates = rendered
+    .split("\n")
+    .filter(line => line.has_prefix("{\"source\":"))
+    .collect()
+  assert_eq(candidates.length(), 1)
+  @json.parse(candidates[0])
+}
+
+///|
+fn xml_escape(value : String) -> String {
+  // Replace ALL occurrences with character-wise encoding, never trim source.
+  let out = StringBuilder()
+  for ch in value {
+    match ch {
+      '&' => out.write_string("&amp;")
+      '<' => out.write_string("&lt;")
+      '>' => out.write_string("&gt;")
+      '\r' => out.write_string("&#13;")
+      _ => out.write_char(ch)
+    }
+  }
+  out.to_string()
+}
+
+///|
+async fn exercise(
+  s : Suite,
+  originals : Map[String, String],
+  xml_oracle : Bool,
+) -> Unit {
+  let input = s.temp + "/input"
+  let output = s.temp + "/outputs/"
+  let common = [
+    input,
+    "--compress",
+    "--keep-full=**/*",
+    "--full-metadata",
+    "--header-text",
+    "HEADER_SENTINEL 完整模板\nheader second line\n",
+    "--instruction-file-path",
+    s.temp + "/instruction.txt",
+    "--include",
+    "**/*.mbt,**/*.ts,**/*.txt",
+    "--include-diffs",
+    "--include-logs",
+    "--include-logs-count=1",
+  ]
+  let baseline_path = output + "baseline.json"
+  let (code, baseline_report) = invoke(
+    s,
+    "whole-json-context",
+    common + ["--style=json", "-o", baseline_path],
+    baseline_path,
+  )
+  assert_eq(code, 0)
+  ok(baseline_report, "pack", originals.length())
+  let baseline = @json.parse(@fs.read_file(baseline_path).text())
+  assert_eq(
+    prop(baseline, "files"),
+    Json::object(originals.map((_, value) => Json(value))),
+  )
+  let sections = rows(prop(baseline, "sections"))
+  assert_eq(sections.length(), 3) // staged diff, unstaged diff, one commit
+  assert_eq(
+    sections.filter(v => prop(v, "kind") == Json("git_diff")).length(),
+    2,
+  )
+  assert_eq(
+    sections.filter(v => prop(v, "kind") == Json("git_log")).length(),
+    1,
+  )
+  assert_true(
+    text(prop(sections[2], "text")).contains("public synthetic history"),
+  )
+  pass(s, "whole-json-context")
+  let cap = 2200
+  for style in ["markdown", "xml", "json", "plain"] {
+    let target = output + style
+    let (code, report) = invoke(
+      s,
+      "split-" + style,
+      common +
+      ["--style=" + style, "--split-output", cap.to_string(), "-o", target],
+      target,
+    )
+    assert_eq(code, 0)
+    verify_volumes(
+      s, target, style, report, baseline, originals, cap, xml_oracle,
+    )
+    pass(s, "split-" + style)
+  }
+  // All destination variants must retain their exact previous state.
+  for name in ["nonempty", "empty-dir", "file", "link"] {
+    let target = output + name
+    if name == "nonempty" {
+      @fs.mkdir(target)
+      put(target + "/keep", "original nonempty destination")
+    } else if name == "empty-dir" {
+      @fs.mkdir(target)
+    } else if name == "file" {
+      put(target, "original file destination")
+    } else {
+      @fs.symlink(target=s.temp + "/foreign", target)
+    }
+    error_case(
+      s,
+      "protect-" + name,
+      common + ["--split-output=2200", "-o", target],
+      target,
+      "OutputError",
+      existing=true,
+    )
+    if name == "nonempty" {
+      assert_eq(@fs.readdir(target), ["keep"])
+      assert_eq(
+        @fs.read_file(target + "/keep").text(),
+        "original nonempty destination",
+      )
+    } else if name == "empty-dir" {
+      assert_eq(@fs.readdir(target), [])
+    } else if name == "file" {
+      assert_eq(@fs.read_file(target).text(), "original file destination")
+    } else {
+      assert_eq(@fs.kind(target, follow_symlink=false), SymLink)
+    }
+    assert_eq(
+      @fs.read_file(s.temp + "/foreign/keep.txt").text(),
+      "outside target preserved\n",
+    )
+  }
+  error_case(
+    s,
+    "single-atom-too-large",
+    [input, "--include=src/b.ts", "--split-output=600", "-o", output + "atom"],
+    output + "atom",
+    "SplitError",
+  )
+  error_case(
+    s,
+    "template-too-large",
+    [
+      s.temp + "/empty",
+      "--header-text",
+      "HEADER_SENTINEL oversized template ".repeat(100),
+      "--split-output=100",
+      "-o",
+      output + "template",
+    ],
+    output + "template",
+    "SplitError",
+  )
+  let limited = [s.temp + "/limits", "--include=**/*.txt", "--style=json"]
+  let exact_target = output + "candidates.json"
+  let (code, report) = invoke(
+    s,
+    "candidates-equal-ignored-excluded",
+    limited + ["--max-files=4", "-o", exact_target],
+    exact_target,
+  )
+  assert_eq(code, 0)
+  ok(report, "pack", 1)
+  assert_eq(
+    prop(@json.parse(@fs.read_file(exact_target).text()), "files"),
+    ({ "a.txt": "hello" } : Json),
+  )
+  pass(s, "candidates-equal-ignored-excluded")
+  for limit in [3, 0] {
+    let target = output + "candidates-" + limit.to_string()
+    error_case(
+      s,
+      "candidates-limit-" + limit.to_string(),
+      limited +
+      ["--max-files=" + limit.to_string(), "--split-output=2200", "-o", target],
+      target,
+      "InputLimitError",
+      field="input.maxFiles",
+      limit=limit.to_string(),
+    )
+  }
+  let target = output + "zero-empty"
+  let (code, report) = invoke(
+    s,
+    "zero-limits-empty",
+    [
+      s.temp + "/empty",
+      "--max-files=0",
+      "--max-total-size=0",
+      "--split-output=2200",
+      "-o",
+      target,
+    ],
+    target,
+  )
+  assert_eq(code, 0)
+  ok(report, "volumes", 0)
+  assert_eq(
+    prop(report, "limits"),
+    ({ "maxFiles": 0, "maxTotalSize": "0" } : Json),
+  )
+  pass(s, "zero-limits-empty")
+  let mut raw = 0L
+  for name in ["a.txt", "b.txt", "c.txt", "d.txt"] {
+    raw += @fs.file_size(s.temp + "/limits/" + name)
+  }
+  assert_eq(raw, 53L) // BOM8 + credential40 + invalidUTF8 2 + binary3
+  let target = output + "bytes-equal.json"
+  let (code, report) = invoke(
+    s,
+    "raw-bytes-equal",
+    limited + ["--max-total-size=" + raw.to_string(), "-o", target],
+    target,
+  )
+  assert_eq(code, 0)
+  ok(report, "pack", 1)
+  assert_eq(prop(prop(report, "limits"), "maxTotalSize"), Json(raw.to_string()))
+  assert_eq(
+    prop(@json.parse(@fs.read_file(target).text()), "files"),
+    ({ "a.txt": "hello" } : Json),
+  )
+  pass(s, "raw-bytes-equal")
+  let previous = output + "previous.json"
+  put(previous, "previous complete output must survive")
+  error_case(
+    s,
+    "raw-bytes-one-less-file",
+    limited + ["--max-total-size=" + (raw - 1L).to_string(), "-o", previous],
+    previous,
+    "InputLimitError",
+    field="input.maxTotalSize",
+    limit=(raw - 1L).to_string(),
+    existing=true,
+  )
+  assert_eq(
+    @fs.read_file(previous).text(),
+    "previous complete output must survive",
+  )
+  for limit in [raw - 1L, 0L] {
+    let target = output + "raw-dir-" + limit.to_string()
+    error_case(
+      s,
+      "raw-bytes-directory-" + limit.to_string(),
+      limited +
+      [
+        "--max-total-size=" + limit.to_string(),
+        "--split-output=2200",
+        "-o",
+        target,
+      ],
+      target,
+      "InputLimitError",
+      field="input.maxTotalSize",
+      limit=limit.to_string(),
+    )
+  }
+  let target = output + "disabled.json"
+  let (code, report) = invoke(
+    s,
+    "security-disabled-quiet",
+    limited + ["--no-security-check", "-o", target],
+    target,
+  )
+  assert_eq(code, 0)
+  ok(report, "pack", 2)
+  assert_eq(
+    prop(report, "security"),
+    ({ "status": "disabled", "enabled": false, "findings": 0 } : Json),
+  )
+  assert_eq(
+    prop(prop(@json.parse(@fs.read_file(target).text()), "files"), "b.txt"),
+    Json(@fs.read_file(s.temp + "/limits/b.txt").text()),
+  )
+  pass(s, "security-disabled-quiet")
+  let single = [
+    s.temp + "/small",
+    "--style=json",
+    "--max-total-size=4294967296",
+  ]
+  let target = output + "budget.json"
+  let (code, report) = invoke(
+    s,
+    "single-machine-int64",
+    single + ["-o", target],
+    target,
+  )
+  assert_eq(code, 0)
+  ok(report, "pack", 1)
+  assert_eq(decimal(prop(prop(report, "limits"), "maxTotalSize")), 4294967296L)
+  let complete = @fs.read_file(target).binary()
+  assert_eq(
+    decimal(prop(prop(report, "bytes"), "total")),
+    complete.length().to_int64(),
+  )
+  let count = decimal(prop(prop(report, "tokens"), "total"))
+  assert_true(count > 1L)
+  pass(s, "single-machine-int64")
+  let (code, report) = invoke(
+    s,
+    "ordinary-budget-equal",
+    single + ["--token-budget=" + count.to_string(), "-o", target],
+    target,
+  )
+  assert_eq(code, 0)
+  ok(report, "pack", 1)
+  assert_eq(prop(prop(report, "tokens"), "limit"), Json(count.to_string()))
+  assert_eq(@fs.read_file(target).binary(), complete)
+  pass(s, "ordinary-budget-equal")
+  let (code, report) = invoke(
+    s,
+    "ordinary-budget-one-less",
+    single + ["--token-budget=" + (count - 1L).to_string(), "-o", target],
+    target,
+  )
+  assert_eq(code, 1)
+  assert_eq(prop(report, "status"), Json("over_budget"))
+  assert_eq(prop(report, "publication"), Json("committed"))
+  assert_eq(prop(prop(report, "tokens"), "exceeded"), Json(true))
+  assert_eq(decimal(prop(prop(report, "tokens"), "total")), count)
+  assert_eq(
+    prop(prop(report, "tokens"), "limit"),
+    Json((count - 1L).to_string()),
+  )
+  assert_eq(@fs.read_file(target).binary(), complete)
+  assert_eq(
+    prop(@json.parse(@fs.read_file(target).text()), "files"),
+    ({ "hello.txt": "hello complete original body\n" } : Json),
+  )
+  pass(s, "ordinary-budget-one-less")
+  error_case(
+    s,
+    "config-error-json-quiet",
+    [
+      input,
+      "--config",
+      s.temp + "/invalid-config.json",
+      "-o",
+      output + "bad-config",
+    ],
+    output + "bad-config",
+    "ConfigurationError",
+  )
+  error_case(
+    s,
+    "invalid-resource",
+    [
+      s.temp + "/small",
+      "--tokenizer-path",
+      s.temp + "/invalid-vocabulary",
+      "-o",
+      output + "bad-resource",
+    ],
+    output + "bad-resource",
+    "ResourceError",
+  )
+  error_case(
+    s,
+    "template-security-fixed-field",
+    [
+      s.temp + "/empty",
+      "--header-text",
+      "ghp_" + "Ab9Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2",
+      "-o",
+      output + "secret-template",
+    ],
+    output + "secret-template",
+    "ContextSecurityError",
+    field="output.headerText",
+  )
+  for
+    (name, conflict) in [
+      ("stdout", ["--stdout"]),
+      ("dash", ["-o", "-"]),
+      ("budget", ["--token-budget=2200"]),
+    ] {
+    error_case(
+      s,
+      "split-conflict-" + name,
+      [input, "--split-output=2200"] + conflict,
+      "",
+      "ConfigurationError",
+    )
+  }
+  error_case(
+    s,
+    "max-size-invalid-int64",
+    [input, "--max-total-size=9007199254740992", "-o", output + "bad-size"],
+    output + "bad-size",
+    "ConfigurationError",
+  )
+  let target = output + "compressed.json"
+  let (code, report) = invoke(
+    s,
+    "compression-original-ranges",
+    [
+      input, "--include=**/*.mbt,**/*.ts", "--compress", "--keep-full=**/*.ts", "--full-metadata",
+      "--style=json", "-o", target,
+    ],
+    target,
+  )
+  assert_eq(code, 0)
+  ok(report, "pack", 2)
+  let document = @json.parse(@fs.read_file(target).text())
+  let records = rows(prop(prop(document, "metadata"), "compression"))
+  assert_eq(records.length(), 2)
+  for record in records {
+    let path = text(prop(record, "path"))
+    check_ranges(record, originals[path], path == "src/a.mbt")
+    if path == "src/b.ts" {
+      assert_eq(prop(prop(document, "files"), path), Json(originals[path]))
+      assert_eq(prop(record, "reason"), Json("kept-full"))
+    } else {
+      assert_true(
+        text(prop(prop(document, "files"), path)).contains("calculate"),
+      )
+      assert_true(
+        decimal(Json(number(prop(record, "outputTokens")).to_string())) <
+        decimal(Json(number(prop(record, "originalTokens")).to_string())),
+      )
+    }
+  }
+  pass(s, "compression-original-ranges")
+}
+
+///|
+async fn real_corpus(s : Suite, root : String) -> Unit {
+  let config = s.temp + "/safe-corpus-config.json"
+  put(config, "{}\n") // Never discover configuration from the reference corpus.
+  let common = [
+    root, "--config", config, "--include", "src/**,LICENSE", "--compress", "--style=json",
+  ]
+  let single = s.temp + "/outputs/corpus-single.json"
+  let (code, report) = invoke(
+    s,
+    "real-corpus-single",
+    common + ["-o", single],
+    single,
+  )
+  assert_eq(code, 0)
+  ok(report, "pack", 144)
+  let baseline = @json.parse(@fs.read_file(single).text())
+  let expected = object(prop(baseline, "files"))
+  assert_eq(expected.length(), 144)
+  assert_true(expected.contains("LICENSE"))
+  for path in expected.keys() {
+    assert_true(path == "LICENSE" || path.has_prefix("src/"))
+  }
+  @fs.mkdir(s.logs + "/real-corpus-raw")
+  let raw_records : Array[Json] = []
+  for path in expected.keys() {
+    raw_records.push(
+      archive(
+        s,
+        root + "/" + path,
+        s.logs + "/real-corpus-raw/" + raw_records.length().to_string() + ".bin",
+      ),
+    )
+  }
+  put(
+    s.logs + "/real-corpus-raw/manifest.json",
+    Json(raw_records).stringify(indent=2) + "\n",
+  )
+  pass(s, "real-corpus-single")
+  let target = s.temp + "/outputs/corpus-volumes"
+  let (code, report) = invoke(
+    s,
+    "real-corpus-split",
+    common + ["--split-output=12000", "-o", target],
+    target,
+  )
+  assert_eq(code, 0)
+  verify_real_split(s, target, report, baseline, root, raw_records)
+}
+
+///|
+async fn verify_real_split(
+  s : Suite,
+  target : String,
+  report : Json,
+  baseline : Json,
+  root : String,
+  raw_records : Array[Json],
+) -> Unit {
+  ok(report, "volumes", 144)
+  let expected = object(prop(baseline, "files"))
+  assert_eq(expected.length(), 144)
+  let index_text = @fs.read_file(target + "/index.json").text()
+  assert_true(index_text.has_suffix("\n"))
+  let index = @json.parse(index_text)
+  let index_files = object(prop(index, "files"))
+  assert_eq(index_files.length(), 144)
+  // Index retains full model metadata; ordinary JSON renders its overview.
+  assert_eq(
+    prop(prop(index, "metadata"), "source"),
+    prop(prop(baseline, "metadata"), "source"),
+  )
+  assert_eq(
+    prop(prop(prop(baseline, "metadata"), "compression"), "files"),
+    Json(144),
+  )
+  let records = rows(prop(prop(index, "metadata"), "compression"))
+  assert_eq(records.length(), 144)
+  let metadata_paths : Set[String] = Set([])
+  for record in records {
+    let path = text(prop(record, "path"))
+    assert_true(expected.contains(path))
+    assert_false(metadata_paths.contains(path))
+    metadata_paths.add(path)
+  }
+  assert_eq(object(prop(index, "sections")).length(), 0)
+  let merged : Map[String, Json] = Map([])
+  let seen : Set[Int32] = Set([])
+  let paths = expected.keys().collect()
+  paths.sort_by((a, b) => @utf8.encode(a).lexical_compare(@utf8.encode(b)))
+  let iv = rows(prop(index, "volumes"))
+  let rv = rows(prop(report, "volumes"))
+  assert_eq(iv.length(), rv.length())
+  assert_eq(
+    prop(report, "output"),
+    (
+      {
+        "kind": "directory",
+        "documents": iv.length(),
+        "indexFile": "index.json",
+      } : Json),
+  )
+  assert_true(iv.length() > 1)
+  let mut tokens = 0L
+  let mut bytes = 0L
+  let names : Array[String] = ["index.json"]
+  for i, row in iv {
+    let rr = rv[i]
+    let name = text(prop(row, "fileName"))
+    let sequence = (i + 1).to_string()
+    assert_eq(
+      name,
+      "part-" + "0".repeat(4 - sequence.length()) + sequence + ".json",
+    )
+    names.push(name)
+    assert_eq(prop(row, "id"), prop(rr, "id"))
+    assert_eq(prop(rr, "fileName"), Json(name))
+    let count = decimal(prop(rr, "tokens"))
+    assert_true(count > 0L && count <= 12000L)
+    assert_eq(number(prop(row, "tokens")).to_int64(), count)
+    tokens += count
+    let content = @fs.read_file(target + "/" + name).binary()
+    assert_eq(number(prop(row, "bytes")), content.length())
+    assert_eq(decimal(prop(rr, "bytes")), content.length().to_int64())
+    bytes += content.length().to_int64()
+    let document = @json.parse(@utf8.decode(content))
+    let files = object(prop(document, "files"))
+    let indices = rows(prop(row, "fileIndices"))
+    assert_eq(files.length(), indices.length())
+    assert_eq(prop(rr, "files"), Json(files.length()))
+    assert_eq(rows(prop(row, "sectionIndices")), [])
+    for index in indices {
+      let n = number(index)
+      assert_true(n < paths.length())
+      assert_false(seen.contains(n))
+      seen.add(n)
+      assert_true(files.contains(paths[n]))
+      assert_eq(index_files.get(paths[n]), Some(prop(row, "id")))
+    }
+    for (path, body) in files {
+      assert_false(merged.contains(path))
+      merged[path] = body
+    }
+  }
+  assert_eq(merged, expected) // Complete compressed bodies, not prefixes/trimmed text.
+  assert_eq(seen.length(), 144)
+  names.sort()
+  assert_eq(@fs.readdir(target, sort=true), names)
+  let rt = prop(report, "tokens")
+  assert_eq(decimal(prop(rt, "documents")), tokens)
+  assert_eq(decimal(prop(rt, "limit")), 12000L)
+  assert_eq(prop(rt, "exceeded"), Json(false))
+  assert_true(decimal(prop(rt, "index")) > 0L)
+  assert_eq(decimal(prop(rt, "total")), tokens + decimal(prop(rt, "index")))
+  let rb = prop(report, "bytes")
+  assert_eq(decimal(prop(rb, "documents")), bytes)
+  assert_eq(decimal(prop(rb, "index")), @fs.file_size(target + "/index.json"))
+  assert_eq(
+    decimal(prop(rb, "total")),
+    bytes + @fs.file_size(target + "/index.json"),
+  )
+  put(
+    s.logs + "/real-corpus-distribution.json",
+    (
+      {
+        "input": root,
+        "paths": 144,
+        "volumeCount": iv.length(),
+        "volumes": rv,
+        "tokens": rt,
+        "bytes": rb,
+      } : Json).stringify(indent=2) +
+    "\n",
+  )
+  for record in raw_records {
+    assert_eq(sha(s, text(prop(record, "file"))), text(prop(record, "sha256")))
+    assert_eq(
+      sha(s, text(prop(record, "archive"))),
+      text(prop(record, "sha256")),
+    )
+  }
+  pass(s, "real-corpus-split")
+}
+
+///|
+async fn verify_saved_splits(s : Suite, previous : String) -> Unit {
+  assert_eq(
+    identity(s),
+    @json.parse(@fs.read_file(previous + "/identity-after.json").text()),
+  )
+  let cases = [
+    "1-whole-json-context", "2-split-markdown", "3-split-xml", "4-split-json", "5-split-plain",
+    "32-real-corpus-single", "33-real-corpus-split",
+  ]
+  // Validate archive integrity before evaluating the corrected assertions.
+  for name in cases {
+    let manifest = @json.parse(
+      @fs.read_file(previous + "/" + name + "/documents.json").text(),
+    )
+    let records = match manifest {
+      Array(values) => values
+      Object(_) => [manifest]
+      _ => fail("invalid document manifest")
+    }
+    for record in records {
+      assert_eq(
+        sha(s, text(prop(record, "archive"))),
+        text(prop(record, "sha256")),
+      )
+    }
+  }
+  let baseline = @json.parse(
+    @fs.read_file(previous + "/1-whole-json-context/output.bin").text(),
+  )
+  let originals = object(prop(baseline, "files")).map((_, value) => text(value))
+  for
+    (name, style) in [
+      ("2-split-markdown", "markdown"),
+      ("3-split-xml", "xml"),
+      ("4-split-json", "json"),
+      ("5-split-plain", "plain"),
+    ] {
+    let report = @json.parse(
+      @fs.read_file(previous + "/" + name + "/stderr.bin").text(),
+    )
+    verify_volumes(
+      s,
+      previous + "/" + name + "/documents",
+      style,
+      report,
+      baseline,
+      originals,
+      2200,
+      false,
+    )
+    pass(s, "saved-" + name)
+  }
+  let baseline = @json.parse(
+    @fs.read_file(previous + "/32-real-corpus-single/output.bin").text(),
+  )
+  let report = @json.parse(
+    @fs.read_file(previous + "/33-real-corpus-split/stderr.bin").text(),
+  )
+  let raw_records = rows(
+    @json.parse(
+      @fs.read_file(previous + "/real-corpus-raw/manifest.json").text(),
+    ),
+  )
+  let invocation = @json.parse(
+    @fs.read_file(previous + "/32-real-corpus-single/invocation.json").text(),
+  )
+  // Stored argv includes the executable, unlike invoke's argument array.
+  let root = text(rows(prop(invocation, "argv"))[5])
+  assert_eq(@fs.kind(root), Directory)
+  verify_real_split(
+    s,
+    previous + "/33-real-corpus-split/documents",
+    report,
+    baseline,
+    root,
+    raw_records,
+  )
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() >= 5 && args[3] == "--log-dir" else {
+    fail(
+      "Usage: volume-cli-test.mbtx BINARY VOCABULARY --log-dir NEW_ABSOLUTE_DIRECTORY [--xml-oracle] [--prepare-only] [--real-corpus DIRECTORY] [--verify-splits PREVIOUS_LOG_DIRECTORY]",
+    )
+  }
+  let mut corpus : String? = None
+  let mut previous : String? = None
+  for i = 5; i < args.length(); {
+    if args[i] == "--verify-splits" {
+      assert_true(i + 1 < args.length())
+      previous = Some(@fs.realpath(args[i + 1]))
+      continue i + 2
+    }
+    if args[i] == "--real-corpus" {
+      assert_true(i + 1 < args.length())
+      corpus = Some(@fs.realpath(args[i + 1]))
+      continue i + 2
+    }
+    assert_true(args[i] == "--xml-oracle" || args[i] == "--prepare-only")
+    continue i + 1
+  }
+  let logs = args[4]
+  assert_true(logs.has_prefix("/") || (logs.length() > 2 && logs[1] == ':'))
+  @fs.mkdir(logs) // Exclusive: never reuse, overwrite, or clean a supplied path.
+  let s = {
+    binary: @fs.realpath(args[1]),
+    vocabulary: @fs.realpath(args[2]),
+    temp: @fs.tmpdir(prefix="moon-repomix-volume-cli-"),
+    logs,
+    environment: environment(),
+    calls: 0,
+    passed: 0,
+  }
+  put(logs + "/owned-temp.txt", s.temp + "\n")
+  let before = identity(s)
+  put(logs + "/identity-before.json", before.stringify(indent=2) + "\n")
+  let mut completed = false
+  defer @async.protect_from_cancel(() => {
+    let after = identity(s)
+    put(logs + "/identity-after.json", after.stringify(indent=2) + "\n")
+    put(
+      logs + "/summary.json",
+      (
+        {
+          "completed": completed,
+          "cliInvocations": s.calls,
+          "passed": s.passed,
+          "verifiedPreviousEvidence": match previous {
+            Some(path) => Json(path)
+            None => Json::null()
+          },
+          "fixture": s.temp,
+          "xmlOracle": args.contains("--xml-oracle"),
+          "windowsExecuted": @env.get_env_var("OS") == Some("Windows_NT"),
+        } : Json).stringify(indent=2) +
+      "\n",
+    )
+    assert_eq(before, after)
+    if completed {
+      cleanup(s) // Failures retain the entire owned reproduction.
+    }
+  })
+  if previous is Some(path) {
+    assert_true(corpus is None)
+    verify_saved_splits(s, path)
+    assert_eq(s.calls, 0)
+    assert_eq(s.passed, 5)
+    completed = true
+    println(
+      "PASS 5 captured split groups; zero new CLI invocations; evidence: " +
+      s.logs,
+    )
+    return
+  }
+  let originals = fixtures(s)
+  if args.contains("--prepare-only") {
+    println("Prepared owned fixture: " + s.temp)
+    return
+  }
+  exercise(s, originals, args.contains("--xml-oracle"))
+  if corpus is Some(root) {
+    real_corpus(s, root)
+  }
+  assert_eq(s.calls, s.passed)
+  completed = true
+  println(
+    "PASS: " +
+    s.passed.to_string() +
+    " real CLI invocations; raw evidence at " +
+    logs,
+  )
+}
