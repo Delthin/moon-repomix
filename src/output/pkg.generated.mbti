@@ -3,22 +3,36 @@ package "Delthin/moon_repomix/output"
 
 import {
   "Delthin/moon_repomix/document",
+  "moonbitlang/core/debug",
 }
 
 // Values
-pub fn json(@document.Document, full_metadata? : Bool) -> String
+pub fn json(@document.Document, full_metadata? : Bool, display? : Display) -> String
 
-pub fn markdown(@document.Document, full_metadata? : Bool) -> String
+pub fn markdown(@document.Document, full_metadata? : Bool, display? : Display) -> String
 
-pub fn plain(@document.Document, full_metadata? : Bool) -> String
+pub fn plain(@document.Document, full_metadata? : Bool, display? : Display) -> String
 
-pub fn xml(@document.Document, full_metadata? : Bool) -> String
+pub fn xml(@document.Document, full_metadata? : Bool, display? : Display) -> String
 
 pub fn xml_representable(String) -> Bool
 
 // Errors
 
 // Types and methods
+pub(all) struct Display {
+  file_summary : Bool
+  directory_structure : Bool
+  files : Bool
+  git_sections : Bool
+  metadata : Bool
+  line_numbers : Bool
+  path_prefix : String
+} derive(Eq, @debug.Debug)
+pub fn Display::default() -> Self
+pub fn Display::equal(Self, Self) -> Bool
+pub fn Display::not_equal(Self, Self) -> Bool
+pub fn Display::to_repr(Self) -> @debug.Repr
 
 // Type aliases
 

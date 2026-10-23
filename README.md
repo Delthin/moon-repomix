@@ -10,7 +10,7 @@
 - **筛选与密钥扫描**：组合忽略规则和 glob，支持 stdin 精确文件列表、NUL 协议和花括号备选。先扫描原始内容，再压缩，命中的文件、补丁或提交整体排除。
 - **计数与预算**：精确计算完整输出的 `o200k_base` token 数，提供文件排名、目录统计与预算检查；同一处理流程也可通过库 API 复用。
 
-当前源码在 Apple M4/macOS 的六组固定同输入基准中，端到端耗时比 Repomix 1.18.1 减少约 31%–76%；Linux CI 的同组五轮中位数对照中，原版耗时为本工具的 2.1–4.4 倍，峰值 RSS 也更低。测试方法、输入版本、逐轮证据与平台范围见 [性能测量](docs/performance.md)。MoonBit 项目自身的默认概览 JSON 从 87,133 降至 19,389 tokens，保留完整声明；逐片段原行映射通过 `--full-metadata` 或库模型提供，包含完整映射的输出为 28,186 tokens。
+v0.3.0 在 Apple M4/macOS 的六组固定同输入基准中，端到端耗时比 Repomix 1.18.1 减少约 31%–76%；Linux CI 的同组五轮中位数对照中，原版耗时为本工具的 2.1–4.4 倍，峰值 RSS 也更低。测试方法、输入版本、逐轮证据与平台范围见 [性能测量](docs/performance.md)。该版本 MoonBit 项目固定源码的默认概览 JSON 从 87,133 降至 19,389 tokens，保留完整声明；逐片段原行映射通过 `--full-metadata` 或库模型提供，包含完整映射的输出为 28,186 tokens。
 
 ## 最快上手
 
@@ -57,6 +57,14 @@ moon run src/cmd/moon-repomix --target native --release -- ./project --compress 
 `--header-text '请关注接口与错误处理。'` 添加头部文字，`--instruction-file-path review-instructions.md` 添加准备好的本地指令。两者在进入文档前扫描，四种格式均支持，最终 token 计数包含模板和包装。每段最多 1 MiB；指令路径相对进程 cwd，库入口使用 `header_text` / `instruction_file_path` 选项。
 
 这些是当前源码的新能力；已发布 v0.3.0 的选项见 [固定版本说明](https://github.com/Delthin/moon-repomix/blob/v0.3.0/README.md)。
+
+## 展示控制（当前源码）
+
+```sh
+moon-repomix ./project --style markdown --output-show-line-numbers --output-file-path-style cwd-relative --no-directory-structure -o review.md
+```
+
+说明、目录、文件正文、Git 章节和元数据可分别隐藏；`--no-files` 可生成只含已接受文件目录、模板与概览的材料。四格式共享显示选项，原始库文档、相对源路径和行区间保持不变。最终预算计算显示路径、行号和所有实际段落。参数及正向覆盖见 [配置](docs/configuration.md)，格式和库 renderer 规则见 [输出](docs/output.md)。这些能力同样需要当前源码构建。
 
 ## 安装
 

@@ -61,6 +61,13 @@ pub(all) struct Options {
   header_text : String
   instruction_file_path : String?
   full_metadata : Bool
+  file_summary : Bool
+  directory_structure : Bool
+  include_files : Bool
+  git_sections : Bool
+  metadata : Bool
+  show_line_numbers : Bool
+  output_file_path_style : PathStyle
   include_diffs : Bool
   include_logs : Bool
   include_logs_count : Int
@@ -93,6 +100,13 @@ pub(all) struct Patch {
   mut header_text : String?
   mut instruction_file_path : String?
   mut full_metadata : Bool?
+  mut file_summary : Bool?
+  mut directory_structure : Bool?
+  mut include_files : Bool?
+  mut git_sections : Bool?
+  mut metadata : Bool?
+  mut show_line_numbers : Bool?
+  mut output_file_path_style : PathStyle?
   mut include_diffs : Bool?
   mut include_logs : Bool?
   mut include_logs_count : Int?
@@ -114,6 +128,15 @@ pub(all) struct Patch {
 } derive(@debug.Debug)
 pub fn Patch::empty() -> Self
 pub fn Patch::to_repr(Self) -> @debug.Repr
+
+pub(all) enum PathStyle {
+  TargetRelative
+  CwdRelative
+  Absolute
+} derive(Eq, @debug.Debug)
+pub fn PathStyle::equal(Self, Self) -> Bool
+pub fn PathStyle::not_equal(Self, Self) -> Bool
+pub fn PathStyle::to_repr(Self) -> @debug.Repr
 
 pub(all) enum StdinMode {
   Off

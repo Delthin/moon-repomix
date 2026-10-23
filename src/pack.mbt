@@ -256,12 +256,13 @@ async fn pack_directory(
     header_text=context.header,
     instruction_text=context.instructions,
   )
-  let text = match options.style {
-    Xml => @output.xml(document, full_metadata=options.full_metadata)
-    Markdown => @output.markdown(document, full_metadata=options.full_metadata)
-    Json => @output.json(document, full_metadata=options.full_metadata)
-    Plain => @output.plain(document, full_metadata=options.full_metadata)
-  }
+  let display = display_for(options, selected.root, cwd)
+  let text = render_document(
+    document,
+    options.style,
+    options.full_metadata,
+    display,
+  )
   @async.sleep(0)
   let tokens = runtime.encoder.count(text)
   let budget = match options.token_budget {

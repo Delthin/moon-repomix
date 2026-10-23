@@ -10,7 +10,7 @@ import {
 }
 
 // Values
-pub fn options(String, style? : @config.Style, compress? : Bool, keep_full_patterns? : Array[String], header_text? : String, instruction_file_path? : String?, full_metadata? : Bool, file_paths? : Array[String]?, include_diffs? : Bool, include_logs? : Bool, include_logs_count? : Int, remote? : String?, remote_branch? : String?) -> @config.Options raise
+pub fn options(String, style? : @config.Style, compress? : Bool, keep_full_patterns? : Array[String], header_text? : String, instruction_file_path? : String?, full_metadata? : Bool, file_summary? : Bool, directory_structure? : Bool, include_files? : Bool, git_sections? : Bool, metadata? : Bool, show_line_numbers? : Bool, output_file_path_style? : @config.PathStyle, file_paths? : Array[String]?, include_diffs? : Bool, include_logs? : Bool, include_logs_count? : Int, remote? : String?, remote_branch? : String?) -> @config.Options raise
 
 pub async fn pack(@config.Options, Runtime) -> PackResult
 
@@ -71,6 +71,8 @@ pub using @document {type Document}
 pub using @security {type Finding}
 
 pub using @config {type Options}
+
+pub using @config {type PathStyle}
 
 pub using @document {type Section}
 

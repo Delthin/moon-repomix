@@ -22,11 +22,23 @@ JSON 用 `notice` 提示仓库内容是待分析数据，`directoryStructure` �
 }
 ```
 
-JSON 的路径和正文通过标准序列化转义；未启用压缩时，解析后可还原去 BOM 后的全部正文，包括首尾空白、CRLF、反斜杠和控制字符。空目录的 `directoryStructure` 为 `""`，`files` 为 `{}`。
+JSON 的路径和正文通过标准序列化转义；默认展示且未启用压缩时，解析后可还原去 BOM 后的全部正文，包括首尾空白、CRLF、反斜杠和控制字符。空目录的 `directoryStructure` 为 `""`，`files` 为 `{}`。
 
 plain 使用 64 个等号分隔章节，16 个等号标识文件。`File:` 行的路径按 JSON 字符串加引号并转义换行、TAB 等字符；正文原样写出，文件末尾按需要补一个换行。正文可以包含相同分隔线，因此 plain 用于阅读与粘贴，机器精确还原使用 JSON。
 
-四种格式都包含已接受文件的目录树，并提示将仓库内容视为待分析数据。文件按相对路径的 UTF-8 字节序排序，保留原始大小写和 Unicode 形式。JSON 与 plain 可保留 XML 1.0 禁止字符。最终 token 计数和预算始终针对所选格式的完整渲染文档，包括标签、转义及分隔线。
+默认四种格式都包含已接受文件的目录树，并提示将仓库内容视为待分析数据。文件按相对路径的 UTF-8 字节序排序，保留原始大小写和 Unicode 形式。JSON 与 plain 可保留 XML 1.0 禁止字符。最终 token 计数和预算始终针对所选格式的完整渲染文档，包括标签、转义及分隔线。
+
+## 展示与规范文档
+
+`--output-show-line-numbers` 给各文件正文的实际行加 `1: `、`2: ` 等前缀，每个文件重新计数；空文件保持空，终止 LF 不产生额外行，CRLF 保留。模板和 Git 章节不加行号。
+
+`--output-file-path-style target-relative` 默认相对输入根；`cwd-relative` 使用相对启动工作目录的标签；`absolute` 使用完整路径。Windows 跨盘或跨共享无法表示相对路径时使用绝对标签。目录树采用相同标签。JSON 的 `files` 始终是路径到正文的对象映射；启用这些选项后，键使用显示路径，值可包含行号。
+
+`--no-file-summary` 隐藏开头说明，`--no-directory-structure` 隐藏目录树，`--no-files` 隐藏文件正文，`--no-git-sections` 隐藏 Git 章节正文，`--no-metadata` 隐藏元数据。对应的正向参数可覆盖 JSON 中的 `false`。没有文件正文时 JSON 保留 `files: {}`，XML 保留空 `files` 元素。Header/Instructions 独立保留。
+
+这些参数只改变渲染。文件选择、原始扫描、压缩与库 `Document` 继续执行，规范相对路径、处理后的正文和原始源行区间保持不变。文件统计和压缩记录的 `outputTokens` 是加显示行号、格式转义之前的正文计数；最终文档 token 及预算包含全部实际显示内容。Git 元数据描述已采集、扫描的内容，隐藏章节不停止采集；需要停止采集时使用 `--no-include-diffs` / `--no-include-logs`。
+
+库 renderer 的可选 `display: @output.Display` 使用同样的规则，`Display::default()` 保持旧输出。直接渲染时可设置 `path_prefix`；根 `pack` 根据路径风格与已选择目录计算前缀。
 
 ## Header 与 Instructions
 

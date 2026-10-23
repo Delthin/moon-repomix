@@ -1,6 +1,6 @@
 # 配置与命令行
 
-本页描述当前源码的 CLI、JSON 配置和库接口。新增的混合原文/骨架和头部/指令模板能力需要源码构建；已发布 v0.3.0 的接口见 [该版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/docs/configuration.md)。
+本页描述当前源码的 CLI、JSON 配置和库接口。新增的混合原文/骨架、模板与展示控制需要源码构建；已发布 v0.3.0 的接口见 [该版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/docs/configuration.md)。
 
 配置按“默认值 → 选定的 JSON 文件 → 显式 CLI 参数”合并。普通字段由后者覆盖；include 和自定义 ignore 列表按 JSON、CLI 的顺序追加，按原字符串去重并保留首次出现的位置。未出现的布尔参数不参与覆盖，因此 JSON 中的 `false` 会保留。
 
@@ -21,6 +21,13 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--header-text TEXT` | 添加头部文字，最多 1 MiB UTF-8；空字符串清除 JSON 中的头部 |
 | `--instruction-file-path FILE` | 添加显式本地指令文件，最多 1 MiB；相对进程 cwd，空字符串清除继承值 |
 | `--full-metadata`, `--no-full-metadata` | 四种格式显示完整逐文件元数据，默认使用概览；库模型始终完整 |
+| `--output-show-line-numbers`, `--no-output-show-line-numbers` | 给显示的文件正文加从 1 开始的行号；不改变库模型、模板或 Git 文本 |
+| `--output-file-path-style STYLE` | `target-relative`（默认）、`cwd-relative` 或 `absolute`；控制四格式文件标签与目录树 |
+| `--file-summary`, `--no-file-summary` | 显示或隐藏开头的说明，默认显示 |
+| `--directory-structure`, `--no-directory-structure` | 显示或隐藏目录树，默认显示 |
+| `--files`, `--no-files` | 显示或隐藏文件正文；选择、扫描与库模型仍完整 |
+| `--git-sections`, `--no-git-sections` | 显示或隐藏 Git 章节正文；关闭采集使用 `--no-include-diffs/logs` |
+| `--metadata`, `--no-metadata` | 显示或隐藏元数据段落；库模型仍完整 |
 | `--include-diffs`, `--no-include-diffs` | 开启或关闭 staged/unstaged 差异，默认关闭 |
 | `--include-logs`, `--no-include-logs` | 开启或关闭提交历史，默认关闭 |
 | `--include-logs-count N` | 最近提交数量，默认 50，范围 `1..10000` |
@@ -78,6 +85,13 @@ stdin 仅由这两个 CLI 参数显式开启，配置文件不会隐式读取终
     "headerText": "请关注接口与错误处理。",
     "instructionFilePath": "review-instructions.md",
     "fullMetadata": false,
+    "fileSummary": true,
+    "directoryStructure": true,
+    "files": true,
+    "gitSections": true,
+    "metadata": true,
+    "showLineNumbers": false,
+    "filePathStyle": "target-relative",
     "git": { "includeDiffs": true, "includeLogs": true, "includeLogsCount": 20 }
   },
   "include": ["src/**", "docs/*.md"],
@@ -144,6 +158,10 @@ pub fn Patch::empty() -> Patch
 | `token_count_tree` | `TokenCountTree`，`Disabled`；`Enabled(Int)` 指定非负阈值，供 CLI 报告使用 |
 | `compress`, `include_diffs`, `include_logs` | `Bool`，false |
 | `full_metadata` | `Bool`，false；控制四种格式的逐文件元数据展示 |
+| `file_summary`, `directory_structure`, `include_files` | `Bool`，true；说明、目录与文件正文显示 |
+| `git_sections`, `metadata` | `Bool`，true；Git 正文与元数据段落显示 |
+| `show_line_numbers` | `Bool`，false；只装饰渲染的文件正文 |
+| `output_file_path_style` | `PathStyle`，默认 `TargetRelative`；另有 `CwdRelative`、`Absolute` |
 | `include_logs_count` | `Int`，50，范围 `1..10000` |
 | `max_git_bytes` | `Int`，8,388,608 |
 | `remote`, `remote_branch` | `String?`，`None` |

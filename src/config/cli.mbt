@@ -130,6 +130,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       "-o"
       | "--output"
       | "--style"
+      | "--output-file-path-style"
       | "--include"
       | "--keep-full"
       | "--header-text"
@@ -170,6 +171,8 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
           patch.output = Some(value)
         }
         "--style" => patch.style = Some(parse_style(value))
+        "--output-file-path-style" =>
+          patch.output_file_path_style = Some(parse_path_style(value))
         "--include" =>
           patch.include_patterns = append_unique(
             patch.include_patterns,
@@ -253,6 +256,18 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
         "--no-compress" => patch.compress = Some(false)
         "--full-metadata" => patch.full_metadata = Some(true)
         "--no-full-metadata" => patch.full_metadata = Some(false)
+        "--file-summary" => patch.file_summary = Some(true)
+        "--no-file-summary" => patch.file_summary = Some(false)
+        "--directory-structure" => patch.directory_structure = Some(true)
+        "--no-directory-structure" => patch.directory_structure = Some(false)
+        "--files" => patch.include_files = Some(true)
+        "--no-files" => patch.include_files = Some(false)
+        "--git-sections" => patch.git_sections = Some(true)
+        "--no-git-sections" => patch.git_sections = Some(false)
+        "--metadata" => patch.metadata = Some(true)
+        "--no-metadata" => patch.metadata = Some(false)
+        "--output-show-line-numbers" => patch.show_line_numbers = Some(true)
+        "--no-output-show-line-numbers" => patch.show_line_numbers = Some(false)
         "--include-diffs" => patch.include_diffs = Some(true)
         "--no-include-diffs" => patch.include_diffs = Some(false)
         "--include-logs" => patch.include_logs = Some(true)

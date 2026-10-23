@@ -15,6 +15,41 @@ test "defaults and presence-aware configuration precedence" {
   assert_eq(defaults.token_budget, None)
   assert_eq(defaults.top_files_length, 5)
   assert_false(defaults.full_metadata)
+  assert_true(
+    defaults.file_summary &&
+    defaults.directory_structure &&
+    defaults.include_files,
+  )
+  assert_true(defaults.git_sections && defaults.metadata)
+  assert_false(defaults.show_line_numbers)
+  assert_eq(defaults.output_file_path_style, @config.PathStyle::TargetRelative)
+  let presentation = @config.parse_json(
+    (
+      #|{"output":{"fileSummary":false,"directoryStructure":false,"files":false,"gitSections":false,"metadata":false,"showLineNumbers":true,"filePathStyle":"cwd-relative"}}
+    ),
+  )
+  let hidden = @config.resolve(@config.parse_cli([]), Some(presentation))
+  assert_false(
+    hidden.file_summary || hidden.directory_structure || hidden.include_files,
+  )
+  assert_false(hidden.git_sections || hidden.metadata)
+  assert_true(hidden.show_line_numbers)
+  assert_eq(hidden.output_file_path_style, @config.PathStyle::CwdRelative)
+  let restored = @config.resolve(
+    @config.parse_cli([
+      "--file-summary", "--directory-structure", "--files", "--git-sections", "--metadata",
+      "--no-output-show-line-numbers", "--output-file-path-style=absolute",
+    ]),
+    Some(presentation),
+  )
+  assert_true(
+    restored.file_summary &&
+    restored.directory_structure &&
+    restored.include_files,
+  )
+  assert_true(restored.git_sections && restored.metadata)
+  assert_false(restored.show_line_numbers)
+  assert_eq(restored.output_file_path_style, @config.PathStyle::Absolute)
   assert_eq(defaults.keep_full_patterns, [])
   assert_eq(defaults.file_paths, None)
   let mixed = @config.parse_json(
@@ -220,6 +255,10 @@ test "strict rejection of invalid configuration and CLI" {
       "null",
       "{",
       "{\"remote\":true}",
+      "{\"output\":{\"fileSummary\":1}}",
+      "{\"output\":{\"files\":\"false\"}}",
+      "{\"output\":{\"showLineNumbers\":null}}",
+      "{\"output\":{\"filePathStyle\":\"unknown\"}}",
       (
         #|{"output":{"filePath":null}}
       ),
@@ -287,6 +326,9 @@ test "strict rejection of invalid configuration and CLI" {
   for
     args in [
       ["--remote"],
+      ["--output-file-path-style=unknown"],
+      ["--output-file-path-style"],
+      ["--no-files=true"],
       ["--include-logs-count=0"],
       ["--include-logs-count=10001"],
       ["--max-git-bytes=0"],

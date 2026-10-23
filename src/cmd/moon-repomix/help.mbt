@@ -13,6 +13,13 @@ let help : String =
   #|      --header-text TEXT         Add a scanned header (UTF-8, at most 1 MiB)
   #|      --instruction-file-path FILE  Add a scanned local instruction file (1 MiB)
   #|      --full-metadata            Full per-file records and source maps in any format
+  #|      --output-show-line-numbers Prefix each displayed file line with its number
+  #|      --output-file-path-style STYLE  target-relative|cwd-relative|absolute
+  #|      --no-file-summary          Hide the introductory notice
+  #|      --no-directory-structure   Hide the directory tree
+  #|      --no-files                 Hide file bodies; keep accepted-file context
+  #|      --no-git-sections          Hide Git section bodies, not collection or metadata
+  #|      --no-metadata              Hide the metadata section
   #|      --include-diffs            Export staged and unstaged Git patches
   #|      --include-logs             Export recent Git commit messages and paths
   #|      --include-logs-count N     Commit limit (default: 50; max: 10000)
@@ -45,6 +52,9 @@ let help : String =
   #|Place directory before --token-count-tree, or separate it with --.
   #|Directory token sums are not the final document count used for budgets.
   #|All formats use a metadata overview by default; --full-metadata keeps per-file records.
+  #|Positive chapter flags restore JSON false values; --no-output-show-line-numbers clears numbering.
+  #|Display controls keep canonical library bodies/paths and source maps unchanged.
+  #|Final budgets include displayed paths, line prefixes and all rendered sections.
   #|Stdin modes are exclusive, bounded to 8 MiB, and never bypass ignore/scanning.
   #|Empty stdin selects zero files; paths are literal and relative to the input root.
   #|With --stdout, redirect outside the input root or explicitly ignore the target.

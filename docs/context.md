@@ -26,7 +26,7 @@ moon-repomix ./project --compress --keep-full 'src/core/**,README.md' --style ma
 
 主动保留的完整记录为 `applied: false`、`reason: "kept-full"`、空行区间，原始/输出正文计数相同；`language` 为 null，表示未调用解析器。概览以 `keptFull` 单独计数。关闭全局压缩时全部文件保留原文。此能力需当前源码，v0.3.0 的使用说明见 [固定版本](https://github.com/Delthin/moon-repomix/blob/v0.3.0/docs/context.md)。
 
-终端的 `File-body tokens` 对比接受文件的原始正文与实际输出正文，文件排名和目录树使用后者。最终文档计数还包含目录树、格式包装、来源、压缩记录及 Git 章节，预算以这个完整计数为准。
+终端的 `File-body tokens` 对比接受文件的原始正文与处理后正文，文件排名和目录统计使用后者。处理后计数位于显示行号和格式转义之前；最终文档计数还包含显示路径、行号、目录树、格式包装、来源、压缩记录及 Git 章节，预算以这个完整计数为准。
 
 ## 添加头部和指令（当前源码）
 

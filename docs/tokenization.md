@@ -47,7 +47,7 @@ CLI 默认在 stderr 显示正文 token 数最多的 5 个文件，包含相对�
 
 报告复用打包时的 `FileStats`，不会重新读文件或分词；`--quiet` 隐藏报告，`--stdout` 的正文保持不变。**文件与目录计数用于定位上下文占用，预算仍以最终完整文档的一次编码为准。** 删除一个文件实际减少的 token 数还受包装和拼接边界影响。
 
-库调用者可从 `PackResult.files` 读取逐文件计数：`original_tokens` 是原始正文，`tokens` 是实际输出正文。开启压缩时，排名和目录树采用输出正文计数；最终预算还包含来源、压缩记录和 Git 章节。`Options.top_files_length` 和 `Options.token_count_tree` 只控制 CLI 报告，`pack` 本身返回文档和统计，不向终端写入报告。
+库调用者可从 `PackResult.files` 读取逐文件计数：`original_tokens` 是原始正文，`tokens` 是加显示行号和格式转义之前的处理后正文。开启压缩时，排名和目录统计采用该计数；最终预算还包含实际路径、显示行号、来源、压缩记录和 Git 章节。`Options.top_files_length` 和 `Options.token_count_tree` 只控制 CLI 报告，`pack` 本身返回文档和统计，不向终端写入报告。
 
 ## BPE 与预切分
 

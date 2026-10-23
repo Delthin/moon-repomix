@@ -27,7 +27,7 @@ async fn report(
         rendered += file.tokens.to_int64()
       }
       @stdio.stderr.write(
-        "File-body tokens: \{original} original -> \{rendered} rendered.\n",
+        "File-body tokens: \{original} original -> \{rendered} processed.\n",
       )
     }
     if !result.document.sections.is_empty() {

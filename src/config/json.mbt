@@ -109,6 +109,26 @@ pub fn parse_json(text : String) -> Patch raise ConfigError {
               patch.full_metadata = Some(
                 json_bool(value, "output.fullMetadata"),
               )
+            "fileSummary" =>
+              patch.file_summary = Some(json_bool(value, "output.fileSummary"))
+            "directoryStructure" =>
+              patch.directory_structure = Some(
+                json_bool(value, "output.directoryStructure"),
+              )
+            "files" =>
+              patch.include_files = Some(json_bool(value, "output.files"))
+            "gitSections" =>
+              patch.git_sections = Some(json_bool(value, "output.gitSections"))
+            "metadata" =>
+              patch.metadata = Some(json_bool(value, "output.metadata"))
+            "showLineNumbers" =>
+              patch.show_line_numbers = Some(
+                json_bool(value, "output.showLineNumbers"),
+              )
+            "filePathStyle" =>
+              patch.output_file_path_style = Some(
+                parse_path_style(json_string(value, "output.filePathStyle")),
+              )
             "git" =>
               for key, value in object_fields(value, "output.git") {
                 match key {

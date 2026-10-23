@@ -7,6 +7,23 @@ pub(all) enum Style {
 } derive(Eq, Debug)
 
 ///|
+pub(all) enum PathStyle {
+  TargetRelative
+  CwdRelative
+  Absolute
+} derive(Eq, Debug)
+
+///|
+fn parse_path_style(value : String) -> PathStyle raise ConfigError {
+  match value {
+    "target-relative" => TargetRelative
+    "cwd-relative" => CwdRelative
+    "absolute" => Absolute
+    _ => raise InvalidValue("output.filePathStyle")
+  }
+}
+
+///|
 /// CLI reporting only; thresholds use the sum of accepted file content tokens.
 pub(all) enum TokenCountTree {
   Disabled
@@ -39,6 +56,13 @@ pub(all) struct Patch {
   mut header_text : String?
   mut instruction_file_path : String?
   mut full_metadata : Bool?
+  mut file_summary : Bool?
+  mut directory_structure : Bool?
+  mut include_files : Bool?
+  mut git_sections : Bool?
+  mut metadata : Bool?
+  mut show_line_numbers : Bool?
+  mut output_file_path_style : PathStyle?
   mut include_diffs : Bool?
   mut include_logs : Bool?
   mut include_logs_count : Int32?
@@ -69,6 +93,13 @@ pub fn Patch::empty() -> Patch {
     header_text: None,
     instruction_file_path: None,
     full_metadata: None,
+    file_summary: None,
+    directory_structure: None,
+    include_files: None,
+    git_sections: None,
+    metadata: None,
+    show_line_numbers: None,
+    output_file_path_style: None,
     include_diffs: None,
     include_logs: None,
     include_logs_count: None,
@@ -114,6 +145,13 @@ pub(all) struct Options {
   header_text : String
   instruction_file_path : String?
   full_metadata : Bool
+  file_summary : Bool
+  directory_structure : Bool
+  include_files : Bool
+  git_sections : Bool
+  metadata : Bool
+  show_line_numbers : Bool
+  output_file_path_style : PathStyle
   include_diffs : Bool
   include_logs : Bool
   include_logs_count : Int32
@@ -154,6 +192,12 @@ pub extend Style with Eq::{equal, not_equal}
 
 ///|
 pub extend Style with Debug::{to_repr}
+
+///|
+pub extend PathStyle with Eq::{equal, not_equal}
+
+///|
+pub extend PathStyle with Debug::{to_repr}
 
 ///|
 pub extend TokenCountTree with Eq::{equal, not_equal}
@@ -354,6 +398,25 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
     },
     full_metadata: patch.full_metadata.unwrap_or(
       file.full_metadata.unwrap_or(false),
+    ),
+    file_summary: patch.file_summary.unwrap_or(
+      file.file_summary.unwrap_or(true),
+    ),
+    directory_structure: patch.directory_structure.unwrap_or(
+      file.directory_structure.unwrap_or(true),
+    ),
+    include_files: patch.include_files.unwrap_or(
+      file.include_files.unwrap_or(true),
+    ),
+    git_sections: patch.git_sections.unwrap_or(
+      file.git_sections.unwrap_or(true),
+    ),
+    metadata: patch.metadata.unwrap_or(file.metadata.unwrap_or(true)),
+    show_line_numbers: patch.show_line_numbers.unwrap_or(
+      file.show_line_numbers.unwrap_or(false),
+    ),
+    output_file_path_style: patch.output_file_path_style.unwrap_or(
+      file.output_file_path_style.unwrap_or(TargetRelative),
     ),
     include_diffs: patch.include_diffs.unwrap_or(
       file.include_diffs.unwrap_or(false),

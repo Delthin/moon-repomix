@@ -1,5 +1,5 @@
 ///|
-pub using @config {type Options, type Style}
+pub using @config {type Options, type Style, type PathStyle}
 
 ///|
 pub using @security {type Finding}
@@ -56,6 +56,8 @@ pub(all) enum BudgetStatus {
 }
 
 ///|
+/// Body counts precede presentation line prefixes and format escaping.
+/// PackResult.tokens counts the complete rendered document instead.
 pub(all) struct FileStats {
   path : String
   disk_bytes : Int32
@@ -89,6 +91,13 @@ pub fn options(
   header_text~ : String = "",
   instruction_file_path~ : String? = None,
   full_metadata~ : Bool = false,
+  file_summary~ : Bool = true,
+  directory_structure~ : Bool = true,
+  include_files~ : Bool = true,
+  git_sections~ : Bool = true,
+  metadata~ : Bool = true,
+  show_line_numbers~ : Bool = false,
+  output_file_path_style~ : PathStyle = TargetRelative,
   file_paths~ : Array[String]? = None,
   include_diffs~ : Bool = false,
   include_logs~ : Bool = false,
@@ -103,6 +112,13 @@ pub fn options(
   cli.patch.header_text = Some(header_text)
   cli.patch.instruction_file_path = instruction_file_path
   cli.patch.full_metadata = Some(full_metadata)
+  cli.patch.file_summary = Some(file_summary)
+  cli.patch.directory_structure = Some(directory_structure)
+  cli.patch.include_files = Some(include_files)
+  cli.patch.git_sections = Some(git_sections)
+  cli.patch.metadata = Some(metadata)
+  cli.patch.show_line_numbers = Some(show_line_numbers)
+  cli.patch.output_file_path_style = Some(output_file_path_style)
   cli.patch.include_diffs = Some(include_diffs)
   cli.patch.include_logs = Some(include_logs)
   cli.patch.include_logs_count = Some(include_logs_count)
