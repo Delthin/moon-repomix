@@ -89,6 +89,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
   let mut action = Pack
   let mut stdout = false
   let mut stdin_mode = StdinMode::Off
+  let mut report_json = false
   let mut quiet = false
   let mut verbose = false
   let mut positional_only = false
@@ -139,6 +140,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       | "--ignore"
       | "--token-count-encoding"
       | "--token-budget"
+      | "--split-output"
       | "--top-files-len"
       | "--include-logs-count"
       | "--remote"
@@ -197,6 +199,10 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
           patch.token_budget = Some(
             cli_positive_int(value, "output.tokenBudget"),
           )
+        "--split-output" =>
+          patch.split_output = Some(
+            SplitOutput::Enabled(cli_positive_int(value, "output.splitOutput")),
+          )
         "--top-files-len" =>
           patch.top_files_length = Some(
             nonnegative_int(value, "output.topFilesLength"),
@@ -246,6 +252,9 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
           }
           stdin_mode = Nul
         }
+        "--report-json" => report_json = true
+        "--no-report-json" => report_json = false
+        "--no-split-output" => patch.split_output = Some(SplitOutput::Disabled)
         "--quiet" => quiet = true
         "--verbose" => verbose = true
         "--no-gitignore" => patch.use_gitignore = Some(false)
@@ -296,6 +305,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
     action,
     stdout,
     stdin_mode,
+    report_json,
     quiet,
     verbose,
     patch,

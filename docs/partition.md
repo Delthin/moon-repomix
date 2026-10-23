@@ -1,6 +1,6 @@
 # 精确 Token 分卷
 
-当前源码提供分卷库接口。已发布 v0.3.0 不包含本接口。CLI 仍输出单份文档；分卷调用返回可保存或作为资源提供的字符串，由调用者选择写入位置。
+当前源码提供分卷库接口和 CLI 目录输出。已发布 v0.3.0 不包含本页接口。库调用返回字符串，CLI 可将相同结果发布到一个新目录。
 
 ```moonbit
 let runtime = @repomix.Runtime::load("assets/tokenizer-o200k_base.tiktoken")
@@ -20,6 +20,20 @@ for volume in result.partition.volumes {
 
 `pack_volumes` 复用普通 `pack` 的输入选择、原始内容扫描、压缩、全文例外、模板与 Git 过滤。每个文件只读取一次形成快照，远程目录在准备结束时清理，后续分卷使用已接受的内容。传入的 `max_tokens` 必须为正整数，它是每卷的硬限制；`Options.token_budget` 只用于普通 `pack` 的单文档预算，不替代分卷参数。
 
+## CLI 目录输出
+
+```sh
+moon-repomix ./project --split-output 12000 --style markdown -o review-parts --report-json
+```
+
+`--split-output` 是每卷的正整数 token 上限，JSON 配置为 `output.splitOutput`；值 `false` 或 `--no-split-output` 关闭。未指定输出路径时目录名为 `moon-repomix-output`。它与 `--stdout`、`-o -` 和普通 `--token-budget` 冲突。
+
+输出目录必须不存在，父目录必须已存在且执行期间保持受调用方控制和稳定。CLI 在同父独占私有 staging 中逐文件写入、sync、关闭，再用原生 atomic no-replace 发布。目标在检查后被其他进程创建时也不会覆盖；失败和取消仅清理本次 staging。现有目标，包括文件、空目录和链接，始终拒绝。
+
+原子发布保证一次性可见和不覆盖；崩溃后的父目录持久性取决于文件系统。一旦发布，后续报告失败不会回滚目录；错误报告的 `publication` 字段表示已知输出状态，见 [机器报告](reports.md)。
+
+目录中含与样式对应的 `part-0001.md`、`.xml`、`.json` 或 `.txt` 等文档，以及 `index.json`。卷字符串与库返回值逐字相同，不补换行。索引本身带一个末尾 LF，其计数独立纳入总量。
+
 ## 归属和预算
 
 文件按规范相对路径的 UTF-8 字节序，随后是原顺序的附加章节。文件和章节都是不可拆的原子：包括空文件，每项恰好归属一卷。章节身份采用原下标，两个相同标题仍是两个独立章节。重复文件路径会报错。
@@ -34,8 +48,10 @@ for volume in result.partition.volumes {
 
 - `volumes`：每项有 `id`、规范 `document`、完整 `text`、`tokens`、UTF-8 `bytes`，以及原始文件和章节下标。
 - `index` / `index_text`：版本为 1 的 JSON 索引，ID 从 `part-0001` 起，提供规范路径及原章节下标到卷 ID 的映射；保留整次任务的完整元数据。
-- `index_tokens`：索引字符串本身的精确计数，索引不受每卷上限约束。
+- `index_tokens`：最终索引字符串（含末尾 LF）的精确计数，索引不受每卷上限约束。
 - `total_tokens`：每个独立卷与独立索引计数之和，适用于分别提交这些文档，不是将它们拼接后的计数。
+
+根 SDK 还返回 `file_names: Map[卷 ID, 文件名]`；`index.volumes` 的每项包含对应 `fileName`。加入文件名后重新计数最终索引和总量。底层纯包不推测存储格式，可用 `Partition::with_index(index, count~)` 替换应用索引并重算完整字符串。
 
 索引与文件路径映射可用于按需读取具体卷。展示为绝对路径或 cwd 相对路径时，索引和 `Volume.document` 仍使用规范的输入根相对路径。
 

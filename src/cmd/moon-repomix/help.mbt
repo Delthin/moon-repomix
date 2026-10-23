@@ -34,6 +34,9 @@ let help : String =
   #|      --no-security-check        Disable secret scanning (warns)
   #|      --token-count-encoding NAME  Only o200k_base is supported
   #|      --token-budget N           Positive limit; output is kept if exceeded
+  #|      --split-output N           Exact token cap per volume; -o names a new directory
+  #|      --no-split-output          Disable configured volume output
+  #|      --report-json              One machine-readable report on stderr
   #|      --top-files-len N          Top content-token files (default: 5; 0 hides)
   #|      --token-count-tree [N]     Content-token tree; optional minimum (>= 0)
   #|      --tokenizer-path PATH      Explicit o200k_base.tiktoken resource
@@ -48,7 +51,9 @@ let help : String =
   #|Remote inputs use explicit local config only; filter paths with --include.
   #|Git is required only for diff/log/remote. Remote inputs keep enough log history.
   #|Default output: repomix-output.xml, .md, .json or .txt for the chosen format.
-  #|Token reports use stderr and are hidden by --quiet.
+  #|Token reports use stderr and are hidden by --quiet; --report-json overrides quiet.
+  #|Split output conflicts with --stdout, -o -, and --token-budget; index is counted separately.
+  #|A split target must not exist; its existing parent stays under your control.
   #|Place directory before --token-count-tree, or separate it with --.
   #|Directory token sums are not the final document count used for budgets.
   #|All formats use a metadata overview by default; --full-metadata keeps per-file records.

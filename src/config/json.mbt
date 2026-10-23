@@ -89,6 +89,16 @@ pub fn parse_json(text : String) -> Patch raise ConfigError {
               patch.token_budget = Some(
                 json_positive_int(value, "output.tokenBudget"),
               )
+            "splitOutput" =>
+              patch.split_output = Some(
+                match value {
+                  False => SplitOutput::Disabled
+                  _ =>
+                    SplitOutput::Enabled(
+                      json_positive_int(value, "output.splitOutput"),
+                    )
+                },
+              )
             "topFilesLength" =>
               patch.top_files_length = Some(
                 json_nonnegative_int(value, "output.topFilesLength"),

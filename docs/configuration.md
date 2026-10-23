@@ -1,6 +1,6 @@
 # 配置与命令行
 
-本页描述当前源码的 CLI、JSON 配置和库接口。新增的混合原文/骨架、模板与展示控制需要源码构建；已发布 v0.3.0 的接口见 [该版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/docs/configuration.md)。
+本页描述当前源码的 CLI、JSON 配置和库接口。新增的混合原文/骨架、模板、展示、分卷及机器报告需要源码构建；已发布 v0.3.0 的接口见 [该版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/docs/configuration.md)。
 
 配置按“默认值 → 选定的 JSON 文件 → 显式 CLI 参数”合并。普通字段由后者覆盖；include 和自定义 ignore 列表按 JSON、CLI 的顺序追加，按原字符串去重并保留首次出现的位置。未出现的布尔参数不参与覆盖，因此 JSON 中的 `false` 会保留。
 
@@ -42,6 +42,8 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--no-security-check` | 关闭扫描，记录关闭状态并显示警告 |
 | `--token-count-encoding o200k_base` | 指定当前支持的编码 |
 | `--token-budget N` | 正整数预算；等于预算通过，超限保留完整输出并返回 1 |
+| `--split-output N`, `--no-split-output` | 每卷精确 token 上限，`-o` 是新目录；与 stdout、`-o -` 及普通预算冲突 |
+| `--report-json`, `--no-report-json` | stderr 改为单份 JSON 运行报告，显式报告覆盖 quiet，stdout 仍是文档 |
 | `--top-files-len N` | 按文件正文 token 数降序显示前 N 个文件，默认 5；0 关闭 |
 | `--token-count-tree [N]` | 显示文件和目录的 token 树；省略 N 时为 0，只显示计数 ≥ N 的节点 |
 | `--tokenizer-path PATH` | 显式指定词表文件；加载时校验资源 |
@@ -114,6 +116,8 @@ stdin 仅由这两个 CLI 参数显式开启，配置文件不会隐式读取终
 远程来源可在 `--config` 显式指定的文件中配置为 `"remote": {"url":"https://github.com/octocat/Hello-World.git", "branch":"master"}`。`branch` 可省略，URL 必填；配置中的远程 URL 同样要求目录为 `.`。语法压缩、Git 章节、回退和安全规则详见 [仓库上下文](context.md)。
 
 `tokenizer_path` 通过 CLI 或编程接口设置，不属于 JSON 字段。
+
+`output.splitOutput` 为正整数或 `false`，CLI 可覆盖或关闭。开启分卷且未指定路径时，输出目录为 `moon-repomix-output`。每卷预算、索引与不覆盖发布约定见 [精确 Token 分卷](partition.md)，机器报告见 [报告协议](reports.md)。
 
 `output.keepFull` 是追加去重的字符串数组，CLI 的 `--keep-full` 在 JSON 列表之后合并。开启压缩时仅对最终已选且通过扫描的文件生效；`--no-compress` 时全部文件保留原文。它沿用 include 的根相对和目录后代语义，完整记录以 `reason: "kept-full"` 标识主动保留，概览用 `keptFull` 单独计数。
 

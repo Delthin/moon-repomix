@@ -67,6 +67,8 @@ async test "pack_volumes reuses scanned snapshots and counts independent complet
     let mut total = result.partition.index_tokens.to_int64()
     for volume in result.partition.volumes {
       assert_true(volume.tokens <= limit)
+      let extension = if style is Style::Json { ".json" } else { ".xml" }
+      assert_eq(result.file_names[volume.id], volume.id + extension)
       assert_eq(runtime.encoder.count(volume.text), volume.tokens)
       assert_eq(@utf8.encode(volume.text).length(), volume.bytes)
       assert_eq(volume.document.header_text, "review context")
@@ -106,6 +108,16 @@ async test "pack_volumes reuses scanned snapshots and counts independent complet
     assert_eq(original, complete.document.metadata)
     for path in bodies.keys() {
       assert_true(ownership.contains(path))
+    }
+    guard result.partition.index is { "volumes": Array(rows), .. } else {
+      fail("Missing named volume summaries")
+    }
+    assert_eq(rows.length(), result.partition.volumes.length())
+    for row in rows {
+      guard row is { "id": String(id), "fileName": String(name), .. } else {
+        fail("Missing volume filename")
+      }
+      assert_eq(name, result.file_names[id])
     }
   }
   try pack_volumes(options(temp), runtime, max_tokens=0) catch {

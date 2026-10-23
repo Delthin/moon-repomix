@@ -7,8 +7,8 @@ Public API:
 - `pub async fn commit_directory(target : String, entries : Array[DirectoryEntry]) -> Unit`
 
 `directory_output_path` canonicalizes the **existing parent**, not the final
-component. Ordinary trailing separators are accepted. Empty, root, dot/parent
-components and existing targets (files, directories, links, dangling links) are
+component. Ordinary trailing separators are accepted. Empty paths, roots,
+a final dot/parent component and existing targets (files, directories, links, dangling links) are
 rejected. It does not create the parent. `commit_directory` repeats validation,
 so a previous path check is not a reservation. Relative targets are resolved
 against the process working directory.

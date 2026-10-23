@@ -5,6 +5,54 @@ fn quote(path : String) -> String {
 }
 
 ///|
+async fn report_volumes(
+  result : @repomix.VolumePackResult,
+  options : @config.Options,
+  cap : Int32,
+) -> Unit {
+  if result.files.is_empty() {
+    @stdio.stderr.write("Warning: no files were accepted.\n")
+  }
+  if options.quiet {
+    return
+  }
+  @stdio.stderr.write(
+    "Packed \{result.files.length()} files into \{result.partition.volumes.length()} volumes, \{result.partition.total_tokens} tokens including index (o200k_base); per-volume limit \{cap}.\n",
+  )
+  @stdio.stderr.write(
+    "Skipped \{result.skipped.length()} entries; secret findings: \{result.findings.length()}.\n",
+  )
+  for volume in result.partition.volumes {
+    @stdio.stderr.write(
+      "Volume " +
+      quote(result.file_names[volume.id]) +
+      ": \{volume.bytes} bytes, \{volume.tokens} tokens\n",
+    )
+  }
+  for item in result.skipped {
+    @stdio.stderr.write(
+      "Skipped " + quote(item.path) + ": " + quote(item.reason) + "\n",
+    )
+  }
+  for hit in result.findings {
+    @stdio.stderr.write(
+      "Security " +
+      hit.rule +
+      " " +
+      quote(hit.path) +
+      ":\{hit.line} bytes [\{hit.start}, \{hit.end})\n",
+    )
+  }
+  let top = top_files(result.files, options.top_files_length)
+  if !top.is_empty() {
+    @stdio.stderr.write(top)
+  }
+  if options.token_count_tree is Enabled(threshold) {
+    @stdio.stderr.write(token_tree(result.files, threshold))
+  }
+}
+
+///|
 async fn report(
   result : @repomix.PackResult,
   options : @config.Options,

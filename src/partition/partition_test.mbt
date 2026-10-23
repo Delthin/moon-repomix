@@ -166,6 +166,28 @@ test "four renderers preserve atoms templates metadata and exact independent ind
     let again = run(doc, cap, render~)
     assert_eq(again.index_text, result.index_text)
     assert_eq(again.volumes.map(v => v.text), result.volumes.map(v => v.text))
+    let replacement : Json = {
+      "original": result.index,
+      "fileName": "part-0001.json",
+    }
+    let renamed = result.with_index(replacement, count=text => bytes(text))
+    assert_eq(renamed.index, replacement)
+    assert_eq(renamed.index_text, replacement.stringify() + "\n")
+    assert_eq(renamed.index_tokens, bytes(renamed.index_text))
+    assert_eq(
+      renamed.total_tokens,
+      result.total_tokens -
+      result.index_tokens.to_int64() +
+      renamed.index_tokens.to_int64(),
+    )
+    assert_eq(renamed.volumes.map(v => v.text), result.volumes.map(v => v.text))
+    assert_eq(result.index_text, result.index.stringify() + "\n")
+    try result.with_index(replacement, count=_ => -1) catch {
+      @partition.PartitionError::InvalidCount(-1) => ()
+      _ => fail("wrong reindex counter failure")
+    } noraise {
+      _ => fail("negative reindex count accepted")
+    }
   }
 }
 

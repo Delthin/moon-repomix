@@ -1,5 +1,5 @@
 ///|
-pub using @config {type Options, type Style, type PathStyle}
+pub using @config {type Options, type Style, type PathStyle, type SplitOutput}
 
 ///|
 pub using @security {type Finding}
@@ -91,6 +91,7 @@ pub struct PackResult {
 /// Prepared, scanned input split into separately bounded documents and an index.
 pub struct VolumePackResult {
   partition : Partition
+  file_names : Map[String, String]
   files : Array[FileStats]
   skipped : Array[Skipped]
   findings : Array[Finding]
@@ -104,6 +105,7 @@ pub struct VolumePackResult {
 pub fn options(
   directory : String,
   style~ : Style = Xml,
+  split_output~ : SplitOutput = SplitOutput::Disabled,
   compress~ : Bool = false,
   keep_full_patterns~ : Array[String] = [],
   header_text~ : String = "",
@@ -125,6 +127,7 @@ pub fn options(
 ) -> Options raise {
   let cli = @config.parse_cli([directory])
   cli.patch.style = Some(style)
+  cli.patch.split_output = Some(split_output)
   cli.patch.compress = Some(compress)
   cli.patch.keep_full_patterns = keep_full_patterns.copy()
   cli.patch.header_text = Some(header_text)

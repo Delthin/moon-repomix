@@ -31,6 +31,7 @@ pub struct Partition {
   index_tokens : Int
   total_tokens : Int64
 }
+pub fn Partition::with_index(Self, Json, count~ : (String) -> Int raise) -> Self raise
 
 pub(all) enum UnitIdentity {
   FilePath(String)

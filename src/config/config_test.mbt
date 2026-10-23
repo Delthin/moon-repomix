@@ -13,6 +13,43 @@ test "defaults and presence-aware configuration precedence" {
   assert_true(defaults.security_check)
   assert_eq(defaults.max_file_size, 52428800)
   assert_eq(defaults.token_budget, None)
+  assert_eq(defaults.split_output, @config.SplitOutput::Disabled)
+  assert_false(cli.report_json)
+  let split_config = @config.parse_json("{\"output\":{\"splitOutput\":1200}}")
+  let split = @config.resolve(
+    @config.parse_cli(["--report-json"]),
+    Some(split_config),
+  )
+  assert_eq(split.split_output, @config.SplitOutput::Enabled(1200))
+  assert_eq(split.output, "moon-repomix-output")
+  assert_true(@config.parse_cli(["--report-json"]).report_json)
+  assert_false(
+    @config.parse_cli(["--report-json", "--no-report-json"]).report_json,
+  )
+  let split_override = @config.resolve(
+    @config.parse_cli(["--split-output=900"]),
+    Some(split_config),
+  )
+  assert_eq(split_override.split_output, @config.SplitOutput::Enabled(900))
+  let unsplit = @config.resolve(
+    @config.parse_cli(["--no-split-output"]),
+    Some(split_config),
+  )
+  assert_eq(unsplit.split_output, @config.SplitOutput::Disabled)
+  assert_eq(unsplit.output, "repomix-output.xml")
+  for
+    args in [
+      ["--split-output=10", "--stdout"],
+      ["--split-output=10", "-o", "-"],
+      ["--split-output=10", "--token-budget=1"],
+    ] {
+    try @config.resolve(@config.parse_cli(args), None) catch {
+      @config.ConfigError::Conflict(_) => ()
+      _ => fail("unexpected split conflict")
+    } noraise {
+      _ => fail("expected split conflict")
+    }
+  }
   assert_eq(defaults.top_files_length, 5)
   assert_false(defaults.full_metadata)
   assert_true(
@@ -311,6 +348,15 @@ test "strict rejection of invalid configuration and CLI" {
         #|{"output":{"fullMetadata":"true"}}
       ),
       (
+        #|{"output":{"splitOutput":true}}
+      ),
+      (
+        #|{"output":{"splitOutput":0}}
+      ),
+      (
+        #|{"output":{"splitOutput":1.5}}
+      ),
+      (
         #|{"include":[false]}
       ),
     ] {
@@ -326,6 +372,11 @@ test "strict rejection of invalid configuration and CLI" {
   for
     args in [
       ["--remote"],
+      ["--split-output=0"],
+      ["--split-output=1.5"],
+      ["--split-output=2147483648"],
+      ["--split-output"],
+      ["--report-json=false"],
       ["--output-file-path-style=unknown"],
       ["--output-file-path-style"],
       ["--no-files=true"],

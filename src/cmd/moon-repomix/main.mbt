@@ -40,11 +40,13 @@ suberror CliError {
 }
 
 ///|
-async fn run() -> Int32 {
-  let argv = @env.args()
-  let cli = @config.parse_cli(argv[1:].to_owned()) catch {
-    _ => raise Configuration
-  }
+priv struct RunState {
+  mut report_json : Bool
+  mut publication : String
+}
+
+///|
+async fn run(cli : @config.Cli, state : RunState) -> Int32 {
   match cli.action {
     Help => {
       @stdio.stdout.write(help)
@@ -69,23 +71,57 @@ async fn run() -> Int32 {
           "repomix.config.json",
         )
     }
+    state.publication = "unknown"
     @platform.create_new(
       path, "{\n  \"output\": { \"style\": \"xml\" },\n  \"security\": { \"enableSecurityCheck\": true }\n}\n",
     ) catch {
-      _ => raise Write
+      err => {
+        if @async.is_cancellation_error(err) {
+          raise err
+        }
+        raise Write
+      }
     }
-    if !cli.quiet {
-      @stdio.stderr.write("Created configuration.\n")
-    }
+    state.publication = "committed"
+    @async.protect_from_cancel(
+      () => {
+        if cli.report_json {
+          write_json_report({
+            "schemaVersion": 1,
+            "status": "ok",
+            "operation": "init",
+            "publication": "committed",
+            "exitCode": 0,
+          })
+        } else if !cli.quiet {
+          @stdio.stderr.write("Created configuration.\n")
+        }
+      },
+      resume_on_cancel=false,
+    )
     return 0
   }
   let patch = read_config(cli, cwd)
   let resolved = @config.resolve(cli, patch) catch { _ => raise Configuration }
+  let directory_target = match resolved.split_output {
+    Disabled => None
+    Enabled(_) =>
+      Some(
+        @platform.directory_output_path(resolved.output, cwd) catch {
+          err => {
+            if @async.is_cancellation_error(err) {
+              raise err
+            }
+            raise Write
+          }
+        },
+      )
+  }
   let options = match read_stdin(cli.stdin_mode) {
     None => resolved
     Some(paths) => { ..resolved, file_paths: Some(paths), }
   }
-  if !options.security_check {
+  if !options.security_check && !cli.report_json {
     @stdio.stderr.write("Warning: secret scanning is disabled.\n")
   }
   let resource = match options.tokenizer_path {
@@ -93,20 +129,78 @@ async fn run() -> Int32 {
     None => @platform.tokenizer_path() catch { _ => raise Resource }
   }
   let runtime = @repomix.Runtime::load(resource)
+  if options.split_output is Enabled(cap) {
+    let target = directory_target.unwrap()
+    let split_options = { ..options, output: target, }
+    let result = @repomix.pack_volumes(split_options, runtime, max_tokens=cap)
+    let entries : Array[@platform.DirectoryEntry] = []
+    for volume in result.partition.volumes {
+      entries.push({ name: result.file_names[volume.id], text: volume.text, })
+    }
+    entries.push({ name: "index.json", text: result.partition.index_text, })
+    state.publication = "unknown"
+    @platform.commit_directory(target, entries) catch {
+      err => {
+        if @async.is_cancellation_error(err) {
+          raise err
+        }
+        raise Write
+      }
+    }
+    state.publication = "committed"
+    @async.protect_from_cancel(
+      () => {
+        if cli.report_json {
+          write_json_report(volumes_report(result, split_options, cap))
+        } else {
+          report_volumes(result, split_options, cap)
+        }
+      },
+      resume_on_cancel=false,
+    )
+    return 0
+  }
   let result = @repomix.pack(options, runtime)
   if options.stdout {
+    state.publication = "unknown"
     @stdio.stdout.write(result.text) catch {
-      _ => raise Write
+      err => {
+        if @async.is_cancellation_error(err) {
+          raise err
+        }
+        raise Write
+      }
     }
   } else {
     let path = @platform.output_path(options.output, cwd) catch {
-      _ => raise Write
+      err => {
+        if @async.is_cancellation_error(err) {
+          raise err
+        }
+        raise Write
+      }
     }
+    state.publication = "unknown"
     @platform.commit(path, result.text) catch {
-      _ => raise Write
+      err => {
+        if @async.is_cancellation_error(err) {
+          raise err
+        }
+        raise Write
+      }
     }
   }
-  report(result, options)
+  state.publication = "committed"
+  @async.protect_from_cancel(
+    () => {
+      if cli.report_json {
+        write_json_report(single_report(result, options))
+      } else {
+        report(result, options)
+      }
+    },
+    resume_on_cancel=false,
+  )
   if result.budget is Exceeded(_) {
     1
   } else {
@@ -116,8 +210,34 @@ async fn run() -> Int32 {
 
 ///|
 async fn main {
-  let code = run() catch {
+  let argv = @env.args()
+  // Preserve machine diagnostics even when a later option fails to parse.
+  let state = { report_json: false, publication: "not_started", }
+  for arg in argv[1:] {
+    if arg == "--" {
+      break
+    }
+    if arg == "--report-json" {
+      state.report_json = true
+    }
+    if arg == "--no-report-json" {
+      state.report_json = false
+    }
+  }
+  let code = try {
+    let cli = @config.parse_cli(argv[1:].to_owned()) catch {
+      _ => raise Configuration
+    }
+    state.report_json = cli.report_json
+    run(cli, state)
+  } catch {
     err => {
+      let mut field : String? = None
+      match err {
+        @repomix.ContextTextError(value)
+        | @repomix.ContextSecurityFinding(value) => field = Some(value)
+        _ => ()
+      }
       let category = if @async.is_cancellation_error(err) {
         "Cancelled"
       } else {
@@ -130,16 +250,48 @@ async fn main {
           @repomix.ScanError => "ScanError"
           @repomix.GitError => "GitError"
           @repomix.RemoteError => "RemoteError"
+          @repomix.PartitionError::InvalidCap(_)
+          | @repomix.PartitionError::DuplicatePath(_)
+          | @repomix.PartitionError::TemplateTooLarge(_)
+          | @repomix.PartitionError::UnitTooLarge(_, _)
+          | @repomix.PartitionError::InvalidCount(_)
+          | @repomix.PartitionError::Overflow(_)
+          | @repomix.PartitionError::InvalidTextEncoding => "SplitError"
           Resource | @repomix.ResourceError => "ResourceError"
           Write => "OutputError"
           InputList => "InputError"
-          _ => "OperationError"
+          _ =>
+            if state.publication == "not_started" {
+              "OperationError"
+            } else {
+              "OutputError"
+            }
         }
       }
       @async.protect_from_cancel(
         () => {
-          @stdio.stderr.write("moon-repomix: " + category + "\n") catch {
-            _ => ()
+          if state.report_json {
+            let safe_category = match err {
+              @repomix.ContextTextError(_) => "ContextTextError"
+              @repomix.ContextSecurityFinding(_) => "ContextSecurityError"
+              _ => category
+            }
+            write_json_report(
+              error_report(safe_category, field, None, state.publication),
+            ) catch {
+              _ => ()
+            }
+          } else {
+            let output_note = match state.publication {
+              "committed" => "; complete output already published"
+              "unknown" => "; output publication state unknown"
+              _ => ""
+            }
+            @stdio.stderr.write(
+              "moon-repomix: " + category + output_note + "\n",
+            ) catch {
+              _ => ()
+            }
           }
         },
         resume_on_cancel=false,

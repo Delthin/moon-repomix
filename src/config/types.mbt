@@ -14,6 +14,18 @@ pub(all) enum PathStyle {
 } derive(Eq, Debug)
 
 ///|
+pub(all) enum SplitOutput {
+  Disabled
+  Enabled(Int32)
+} derive(Eq, Debug)
+
+///|
+pub extend SplitOutput with Eq::{equal, not_equal}
+
+///|
+pub extend SplitOutput with Debug::{to_repr}
+
+///|
 fn parse_path_style(value : String) -> PathStyle raise ConfigError {
   match value {
     "target-relative" => TargetRelative
@@ -51,6 +63,7 @@ pub(all) enum Action {
 pub(all) struct Patch {
   mut output : String?
   mut style : Style?
+  mut split_output : SplitOutput?
   mut compress : Bool?
   mut keep_full_patterns : Array[String]
   mut header_text : String?
@@ -88,6 +101,7 @@ pub fn Patch::empty() -> Patch {
   {
     output: None,
     style: None,
+    split_output: None,
     compress: None,
     keep_full_patterns: [],
     header_text: None,
@@ -129,6 +143,7 @@ pub(all) struct Cli {
   action : Action
   stdout : Bool
   stdin_mode : StdinMode
+  report_json : Bool
   quiet : Bool
   verbose : Bool
   patch : Patch
@@ -140,6 +155,7 @@ pub(all) struct Options {
   output : String
   stdout : Bool
   style : Style
+  split_output : SplitOutput
   compress : Bool
   keep_full_patterns : Array[String]
   header_text : String
@@ -277,6 +293,9 @@ fn validate_patch(patch : Patch) -> Unit raise ConfigError {
   if patch.token_budget is Some(value) && value <= 0 {
     raise InvalidValue("output.tokenBudget")
   }
+  if patch.split_output is Some(SplitOutput::Enabled(value)) && value <= 0 {
+    raise InvalidValue("output.splitOutput")
+  }
   if patch.top_files_length is Some(value) && value < 0 {
     raise InvalidValue("output.topFilesLength")
   }
@@ -353,16 +372,28 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
   }
   let patch = cli.patch
   let style = patch.style.unwrap_or(file.style.unwrap_or(Xml))
-  let output = patch.output.unwrap_or(
-    file.output.unwrap_or(
-      match style {
-        Xml => "repomix-output.xml"
-        Markdown => "repomix-output.md"
-        Json => "repomix-output.json"
-        Plain => "repomix-output.txt"
-      },
-    ),
+  let split_output = patch.split_output.unwrap_or(
+    file.split_output.unwrap_or(SplitOutput::Disabled),
   )
+  let default_output = if split_output is SplitOutput::Enabled(_) {
+    "moon-repomix-output"
+  } else {
+    match style {
+      Xml => "repomix-output.xml"
+      Markdown => "repomix-output.md"
+      Json => "repomix-output.json"
+      Plain => "repomix-output.txt"
+    }
+  }
+  let output = patch.output.unwrap_or(file.output.unwrap_or(default_output))
+  let token_budget = match patch.token_budget {
+    Some(_) as value => value
+    None => file.token_budget
+  }
+  if split_output is SplitOutput::Enabled(_) &&
+    (cli.stdout || output == "-" || token_budget is Some(_)) {
+    raise Conflict("splitOutput/stdout/tokenBudget")
+  }
   let instruction_file_path = match patch.instruction_file_path {
     Some(_) as explicit => explicit
     None => file.instruction_file_path
@@ -386,6 +417,7 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
     output,
     stdout: cli.stdout || output == "-",
     style,
+    split_output,
     compress: patch.compress.unwrap_or(file.compress.unwrap_or(false)),
     keep_full_patterns: append_unique(
       file.keep_full_patterns,
@@ -451,10 +483,7 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
       file.security_check.unwrap_or(true),
     ),
     encoding: patch.encoding.unwrap_or(file.encoding.unwrap_or("o200k_base")),
-    token_budget: match patch.token_budget {
-      Some(_) as value => value
-      None => file.token_budget
-    },
+    token_budget,
     top_files_length: patch.top_files_length.unwrap_or(
       file.top_files_length.unwrap_or(5),
     ),

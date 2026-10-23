@@ -45,6 +45,7 @@ pub(all) struct Cli {
   action : Action
   stdout : Bool
   stdin_mode : StdinMode
+  report_json : Bool
   quiet : Bool
   verbose : Bool
   patch : Patch
@@ -56,6 +57,7 @@ pub(all) struct Options {
   output : String
   stdout : Bool
   style : Style
+  split_output : SplitOutput
   compress : Bool
   keep_full_patterns : Array[String]
   header_text : String
@@ -95,6 +97,7 @@ pub fn Options::to_repr(Self) -> @debug.Repr
 pub(all) struct Patch {
   mut output : String?
   mut style : Style?
+  mut split_output : SplitOutput?
   mut compress : Bool?
   mut keep_full_patterns : Array[String]
   mut header_text : String?
@@ -137,6 +140,14 @@ pub(all) enum PathStyle {
 pub fn PathStyle::equal(Self, Self) -> Bool
 pub fn PathStyle::not_equal(Self, Self) -> Bool
 pub fn PathStyle::to_repr(Self) -> @debug.Repr
+
+pub(all) enum SplitOutput {
+  Disabled
+  Enabled(Int)
+} derive(Eq, @debug.Debug)
+pub fn SplitOutput::equal(Self, Self) -> Bool
+pub fn SplitOutput::not_equal(Self, Self) -> Bool
+pub fn SplitOutput::to_repr(Self) -> @debug.Repr
 
 pub(all) enum StdinMode {
   Off
