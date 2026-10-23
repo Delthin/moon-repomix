@@ -203,6 +203,16 @@ async fn main {
     moonbit_interface,
     create_mode=CreateNew,
   )
+  let go_body = "  total += value\n"
+  let go_source = "package fixture\n\ntype Counter struct { total int }\n\nfunc (c *Counter) Add(value int) (int, error) {\n  total := c.total\n" +
+    go_body.repeat(80) +
+    "  return total, nil\n}\n"
+  let rust_body = "        total += value;\n"
+  let rust_source = "pub struct Counter { total: i64 }\n\nimpl Counter {\n    pub fn add(&self, value: i64) -> Result<i64, &'static str> {\n        let mut total = self.total;\n" +
+    rust_body.repeat(80) +
+    "        Ok(total)\n    }\n}\n"
+  @fs.write_file(root + "/src/counter.go", go_source, create_mode=CreateNew)
+  @fs.write_file(root + "/src/counter.rs", rust_source, create_mode=CreateNew)
   @fs.write_file(
     root + "/notes.txt",
     "plain context remains exact\r\n",
@@ -296,6 +306,24 @@ async fn main {
   assert_true(
     interface_outline.contains("Inventory::total(Self, Array[Int]) -> Int"),
   )
+  guard files.get("src/counter.go") is Some(String(go_outline)) else {
+    fail("Missing Go skeleton")
+  }
+  assert_true(go_outline.contains("type Counter struct { total int }"))
+  assert_true(
+    go_outline.contains("func (c *Counter) Add(value int) (int, error)"),
+  )
+  assert_false(go_outline.contains(go_body + go_body))
+  guard files.get("src/counter.rs") is Some(String(rust_outline)) else {
+    fail("Missing Rust skeleton")
+  }
+  assert_true(rust_outline.contains("pub struct Counter { total: i64 }"))
+  assert_true(
+    rust_outline.contains(
+      "pub fn add(&self, value: i64) -> Result<i64, &'static str>",
+    ),
+  )
+  assert_false(rust_outline.contains(rust_body + rust_body))
   assert_eq(
     files.get("notes.txt"),
     Some(Json("plain context remains exact\r\n")),
@@ -307,7 +335,7 @@ async fn main {
     fail("Missing compression overview")
   }
   assert_eq(file_count, files.length().to_double())
-  assert_true(applied >= 3)
+  assert_true(applied >= 5)
   let (full_ok, detailed, full_report) = run(
     binary,
     common + ["--style=json", "--stdout", "--full-metadata"],
@@ -330,8 +358,36 @@ async fn main {
   let mut compressed = 0
   let mut has_moonbit = false
   let mut has_interface = false
+  let systems : Map[String, (String, String)] = {
+    "src/counter.go": ("go", go_source),
+    "src/counter.rs": ("rust", rust_source),
+  }
+  let systems_seen : Set[String] = Set([])
   let moonbit_lines : Array[StringView] = moonbit_source.split("\n").collect()
   for change in changes {
+    if change
+      is {
+        "path": String(path),
+        "language": String(language),
+        "applied": True,
+        "ranges": Array(ranges),
+        ..
+      } {
+      if systems.get(path) is Some((expected_language, source_text)) {
+        assert_eq(language, expected_language)
+        assert_false(ranges.is_empty())
+        let lines : Array[StringView] = source_text.split("\n").collect()
+        for range in ranges {
+          guard range is Array([Number(start, ..), Number(end, ..)]) else {
+            fail("Missing Go/Rust original line range")
+          }
+          assert_true(
+            start >= 1 && end >= start && end <= lines.length().to_double(),
+          )
+        }
+        systems_seen.add(path)
+      }
+    }
     if change
       is {
         "path": String("src/inventory.mbt"),
@@ -385,7 +441,8 @@ async fn main {
       compressed += 1
     }
   }
-  assert_true(compressed >= 3)
+  assert_true(compressed >= 5)
+  assert_eq(systems_seen.length(), 2)
   assert_true(has_moonbit && has_interface)
   let mut staged = false
   let mut unstaged = false
@@ -489,6 +546,8 @@ async fn main {
   )
   assert_eq(original.get("src/inventory.mbt"), Some(Json(moonbit_source)))
   assert_eq(original.get("src/inventory.mbti"), Some(Json(moonbit_interface)))
+  assert_eq(original.get("src/counter.go"), Some(Json(go_source)))
+  assert_eq(original.get("src/counter.rs"), Some(Json(rust_source)))
   @fs.write_file(
     root + "/repomix.config.json",
     "{\"remote\":{\"url\":\"https://example.invalid/repository.git\"}}",

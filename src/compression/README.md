@@ -137,10 +137,10 @@ and byte mask, and frees them before returning a MoonBit-managed byte plan.
 
 Package-local C translation units include vendored resources using relative
 paths; `moon.pkg` needs no platform-specific include/link flags. The upstream
-runtime includes Windows clock/endian support. The original seven compression
-groups have passed native CI on Windows, Linux and macOS. The MoonBit groups and
-scanner adapter, and the Go/Rust groups, have been verified on macOS native with
-`moonc v0.10.15+943464bfa`; MoonBit/Go/Rust Windows/Linux execution is not yet claimed.
+runtime includes Windows clock/endian support. The original nine compression
+groups, including MoonBit, passed native CI on Windows, Linux and macOS for
+v0.3.0. The four new Go/Rust groups have been verified on macOS native with
+`moonc v0.10.15+943464bfa`; Go/Rust Windows/Linux execution is not yet claimed.
 All adapters use portable C and need no platform-specific flags.
 
 With the project toolchain selected:
