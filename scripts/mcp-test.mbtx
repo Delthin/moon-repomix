@@ -287,6 +287,29 @@ fn success(s : Session, envelope : Json) -> Json raise {
 }
 
 ///|
+fn cacheable(s : Session, envelope : Json) -> Json raise {
+  let result = success(s, envelope)
+  if s.modern {
+    assert_eq(prop(result, "ttlMs"), Json::number(0))
+    assert_eq(prop(result, "cacheScope"), Json::string("private"))
+  } else {
+    assert_false(fields(result).contains("ttlMs"))
+    assert_false(fields(result).contains("cacheScope"))
+  }
+  result
+}
+
+///|
+fn resource_not_found(s : Session, envelope : Json) -> Unit raise {
+  safe_failure(s, envelope)
+  let code = if s.modern { -32602 } else { -32002 }
+  assert_eq(
+    prop(prop(envelope, "error"), "code"),
+    Json::number(code.to_double()),
+  )
+}
+
+///|
 fn safe_failure(s : Session, envelope : Json) -> Unit raise {
   let error = if fields(envelope).contains("error") {
     prop(envelope, "error")
@@ -331,9 +354,14 @@ fn collect_uris(value : Json, into : Set[String]) -> Unit raise {
 
 ///|
 async fn listing(s : Session) -> Set[String] {
-  let result = success(
+  let result = cacheable(
     s,
-    request(s, "resources/list", {}, "only live in-process resource URIs"),
+    request(
+      s,
+      "resources/list",
+      {},
+      "only live resource URIs; era-specific cache hints",
+    ),
   )
   let found : Set[String] = Set([])
   for row in rows(prop(result, "resources")) {
@@ -347,7 +375,7 @@ async fn listing(s : Session) -> Set[String] {
 
 ///|
 async fn read_resource(s : Session, uri : String) -> String {
-  let result = success(
+  let result = cacheable(
     s,
     request(
       s,
@@ -461,13 +489,13 @@ async fn pack(s : Session, arguments : Json, expected : String) -> Json {
 async fn aggregate(s : Session) -> Unit {
   if s.modern {
     ignore(
-      success(
+      cacheable(
         s,
         request(
           s,
           "server/discover",
           {},
-          "modern discovery with resultType=complete",
+          "modern discovery with resultType=complete, ttlMs=0, cacheScope=private",
         ),
       ),
     )
@@ -497,13 +525,13 @@ async fn aggregate(s : Session) -> Unit {
   }
   let tools = rows(
     prop(
-      success(
+      cacheable(
         s,
         request(
           s,
           "tools/list",
           {},
-          "pack_repository and release_context advertised",
+          "pack_repository and release_context advertised; era-specific cache hints",
         ),
       ),
       "tools",
@@ -556,13 +584,13 @@ async fn aggregate(s : Session) -> Unit {
     uri in [
       "file:///MCP_INVALID_VALUE_SENTINEL", "moon-repomix://MCP_INVALID_VALUE_SENTINEL/missing",
     ] {
-    safe_failure(
+    resource_not_found(
       s,
       request(
         s,
         "resources/read",
         { "uri": uri },
-        "unregistered URI rejected without reflecting input",
+        "unregistered URI rejected; modern -32602 / legacy -32002; no reflected input",
       ),
     )
   }
@@ -613,13 +641,13 @@ async fn aggregate(s : Session) -> Unit {
   }
   assert_true(saw_alpha)
   for uri in live {
-    safe_failure(
+    resource_not_found(
       s,
       request(
         s,
         "resources/read",
         { "uri": uri },
-        "successful replacement invalidates old run URI",
+        "replacement invalidates old URI; modern -32602 / legacy -32002",
       ),
     )
   }
@@ -636,9 +664,14 @@ async fn aggregate(s : Session) -> Unit {
   )
   assert_eq(listing(s).length(), 0)
   for uri in after {
-    safe_failure(
+    resource_not_found(
       s,
-      request(s, "resources/read", { "uri": uri }, "released URI is invalid"),
+      request(
+        s,
+        "resources/read",
+        { "uri": uri },
+        "released URI: modern -32602 / legacy -32002",
+      ),
     )
   }
 }
