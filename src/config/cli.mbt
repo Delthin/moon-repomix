@@ -109,6 +109,10 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
   let mut stdout = false
   let mut stdin_mode = StdinMode::Off
   let mut report_json = false
+  let mut mcp = false
+  let mut mcp_max_tokens = 16000
+  let mut mcp_max_output_bytes = 16777216
+  let mut mcp_max_volumes = 64
   let mut quiet = false
   let mut verbose = false
   let mut positional_only = false
@@ -167,6 +171,9 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       | "--max-git-bytes"
       | "--max-files"
       | "--max-total-size"
+      | "--mcp-max-tokens"
+      | "--mcp-max-output-bytes"
+      | "--mcp-max-volumes"
       | "-c"
       | "--config"
       | "--tokenizer-path" => true
@@ -242,6 +249,20 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
           patch.max_total_size = Some(
             nonnegative_size(value, "input.maxTotalSize"),
           )
+        "--mcp-max-tokens" =>
+          mcp_max_tokens = cli_positive_int(value, "mcp.maxTokens")
+        "--mcp-max-output-bytes" => {
+          mcp_max_output_bytes = cli_positive_int(value, "mcp.maxOutputBytes")
+          if mcp_max_output_bytes > 268435456 {
+            raise InvalidValue("mcp.maxOutputBytes")
+          }
+        }
+        "--mcp-max-volumes" => {
+          mcp_max_volumes = cli_positive_int(value, "mcp.maxVolumes")
+          if mcp_max_volumes > 256 {
+            raise InvalidValue("mcp.maxVolumes")
+          }
+        }
         "--remote" => {
           validate_path(value, "remote.url")
           patch.remote = Some(value)
@@ -266,6 +287,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
         raise InvalidValue(key)
       }
       match key {
+        "--mcp" => mcp = true
         "--stdout" => stdout = true
         "--stdin" => {
           if stdin_mode == Nul {
@@ -325,6 +347,9 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
   if action == Init && stdin_mode != Off {
     raise Conflict("stdin/init")
   }
+  if mcp && (stdin_mode != Off || stdout || report_json || action == Init) {
+    raise Conflict("mcp")
+  }
   validate_patch(patch)
   {
     directory: directory.unwrap_or("."),
@@ -333,6 +358,10 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
     stdout,
     stdin_mode,
     report_json,
+    mcp,
+    mcp_max_tokens,
+    mcp_max_output_bytes,
+    mcp_max_volumes,
     quiet,
     verbose,
     patch,

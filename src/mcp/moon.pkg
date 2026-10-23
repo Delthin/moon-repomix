@@ -1,0 +1,11 @@
+import {
+  "Delthin/moon_repomix" @repomix,
+  "Delthin/moon_repomix/config",
+  "Delthin/moon_repomix/mcp_rpc" @rpc,
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/env",
+}
+
+supported_targets = "native"

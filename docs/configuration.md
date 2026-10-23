@@ -1,10 +1,10 @@
 # 配置与命令行
 
-本页描述当前源码的 CLI、JSON 配置和库接口。新增的混合原文/骨架、模板、展示、分卷及机器报告需要源码构建；已发布 v0.3.0 的接口见 [该版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/docs/configuration.md)。
+本页描述当前源码的 CLI、JSON 配置和库接口。新增的混合原文/骨架、模板、展示、分卷、机器报告及 MCP 需要源码构建；已发布 v0.3.0 的接口见 [该版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/docs/configuration.md)。
 
 配置按“默认值 → 选定的 JSON 文件 → 显式 CLI 参数”合并。普通字段由后者覆盖；include 和自定义 ignore 列表按 JSON、CLI 的顺序追加，按原字符串去重并保留首次出现的位置。未出现的布尔参数不参与覆盖，因此 JSON 中的 `false` 会保留。
 
-CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 `repomix.config.json`。远程模式仅加载显式指定的本地配置。显式配置路径、输出路径以启动时的工作目录为基准；include/ignore 以输入根目录为基准。默认配置文件不存在时使用默认值，显式指定的文件不存在则报错。
+CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 `repomix.config.json`。远程与 MCP 模式仅加载显式指定的本地配置。显式配置路径、输出路径以启动时的工作目录为基准；include/ignore 以输入根目录为基准。默认配置文件不存在时使用默认值，显式指定的文件不存在则报错。
 
 ## 命令行参数
 
@@ -44,6 +44,10 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--token-budget N` | 正整数预算；等于预算通过，超限保留完整输出并返回 1 |
 | `--split-output N`, `--no-split-output` | 每卷精确 token 上限，`-o` 是新目录；与 stdout、`-o -` 及普通预算冲突 |
 | `--report-json`, `--no-report-json` | stderr 改为单份 JSON 运行报告，显式报告覆盖 quiet，stdout 仍是文档 |
+| `--mcp` | 固定本地根目录，启动 stdio 服务；工具、资源与兼容版本见 [MCP](mcp.md) |
+| `--mcp-max-tokens N` | 主机授权的每卷 cap，默认 16,000；请求不能提高 |
+| `--mcp-max-output-bytes N` | 派生缓存上限，默认 16 MiB，主机最大 256 MiB |
+| `--mcp-max-volumes N` | 卷数上限，默认 64，最大 256；另有一个索引 |
 | `--max-files N` | 非负；过滤后、读取前的普通候选数上限，默认 20,000 |
 | `--max-total-size N` | 非负原始读取字节上限，默认 209,715,200（200 MiB）；最大 2^53−1 |
 | `--top-files-len N` | 按文件正文 token 数降序显示前 N 个文件，默认 5；0 关闭 |

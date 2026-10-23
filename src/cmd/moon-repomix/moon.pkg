@@ -1,6 +1,7 @@
 import {
   "Delthin/moon_repomix" @repomix,
   "Delthin/moon_repomix/config",
+  "Delthin/moon_repomix/mcp",
   "Delthin/moon_repomix/platform",
   "moonbitlang/async",
   "moonbitlang/async/fs",

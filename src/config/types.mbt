@@ -148,6 +148,10 @@ pub(all) struct Cli {
   stdout : Bool
   stdin_mode : StdinMode
   report_json : Bool
+  mcp : Bool
+  mcp_max_tokens : Int32
+  mcp_max_output_bytes : Int32
+  mcp_max_volumes : Int32
   quiet : Bool
   verbose : Bool
   patch : Patch

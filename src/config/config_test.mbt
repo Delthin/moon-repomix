@@ -37,6 +37,17 @@ test "defaults and presence-aware configuration precedence" {
   assert_eq(defaults.token_budget, None)
   assert_eq(defaults.split_output, @config.SplitOutput::Disabled)
   assert_false(cli.report_json)
+  assert_false(cli.mcp)
+  assert_eq(cli.mcp_max_tokens, 16000)
+  assert_eq(cli.mcp_max_output_bytes, 16777216)
+  assert_eq(cli.mcp_max_volumes, 64)
+  let server = @config.parse_cli([
+    "--mcp", "--mcp-max-tokens=12000", "--mcp-max-output-bytes=8388608", "--mcp-max-volumes=32",
+  ])
+  assert_true(server.mcp)
+  assert_eq(server.mcp_max_tokens, 12000)
+  assert_eq(server.mcp_max_output_bytes, 8388608)
+  assert_eq(server.mcp_max_volumes, 32)
   let split_config = @config.parse_json("{\"output\":{\"splitOutput\":1200}}")
   let split = @config.resolve(
     @config.parse_cli(["--report-json"]),
@@ -401,6 +412,18 @@ test "strict rejection of invalid configuration and CLI" {
   for
     args in [
       ["--remote"],
+      ["--mcp=true"],
+      ["--mcp", "--stdout"],
+      ["--mcp", "--stdin"],
+      ["--mcp", "--stdin0"],
+      ["--mcp", "--report-json"],
+      ["--mcp", "--init"],
+      ["--mcp-max-tokens=0"],
+      ["--mcp-max-tokens=2147483648"],
+      ["--mcp-max-output-bytes=0"],
+      ["--mcp-max-output-bytes=268435457"],
+      ["--mcp-max-volumes=0"],
+      ["--mcp-max-volumes=257"],
       ["--split-output=0"],
       ["--split-output=1.5"],
       ["--split-output=2147483648"],

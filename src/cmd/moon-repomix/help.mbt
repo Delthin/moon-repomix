@@ -37,6 +37,10 @@ let help : String =
   #|      --split-output N           Exact token cap per volume; -o names a new directory
   #|      --no-split-output          Disable configured volume output
   #|      --report-json              One machine-readable report on stderr
+  #|      --mcp                      Serve authorized local context over MCP stdio
+  #|      --mcp-max-tokens N         Host per-volume cap (default: 16000)
+  #|      --mcp-max-output-bytes N   Cached context cap (default: 16777216)
+  #|      --mcp-max-volumes N        Cached volume count (default: 64; max: 256)
   #|      --max-files N              Nonnegative candidate limit (default: 20000)
   #|      --max-total-size N         Nonnegative raw-read byte limit (default: 209715200)
   #|      --top-files-len N          Top content-token files (default: 5; 0 hides)
@@ -50,7 +54,9 @@ let help : String =
   #|  -v, --version                  Show version without loading resources
   #|
   #|Default config: <directory>/repomix.config.json.
-  #|Remote inputs use explicit local config only; filter paths with --include.
+  #|Remote inputs and MCP use explicit local config only; filter paths with --include.
+  #|MCP fixes the startup root and limits; clients only read derived in-memory resources.
+  #|MCP conflicts with stdin/stdout/report-json, remote, split output and single budgets.
   #|Git is required only for diff/log/remote. Remote inputs keep enough log history.
   #|Default output: repomix-output.xml, .md, .json or .txt for the chosen format.
   #|Token reports use stderr and are hidden by --quiet; --report-json overrides quiet.

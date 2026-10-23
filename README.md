@@ -44,6 +44,14 @@ moon-repomix ./project --include 'src/**/*.{mbt,ts,py}' -o -
 
 `--stdin` 每行一个相对路径，`--stdin0` 使用 NUL 分隔；空输入选零文件，重复项去重，列表仍受 ignore、原始内容扫描和 Git 路径筛选约束。`-o -`、`--output=-` 和配置中的 `output.filePath: "-"` 均输出到 stdout；`-o ./-` 写入普通文件。`--no-dot-ignore` 仅关闭 `.ignore`，`.repomixignore` 始终生效。详细规则见 [配置文档](docs/configuration.md)。
 
+## MCP 本地入口（当前源码）
+
+```sh
+moon-repomix /path/to/repository --mcp --compress --mcp-max-tokens 12000
+```
+
+客户端调用 `pack_repository` 生成受限的上下文卷，再按返回 URI 读取。根目录、扫描与输入限额由启动参数固定；资源只存内存，失败保留上一份成功结果，`release_context` 可释放缓存。支持当前每请求版本协议及旧 initialize 客户端，配置示例和限制见 [MCP stdio](docs/mcp.md)。这是当前源码能力，正式 v0.3.0 尚不包含该入口。
+
 ## 混合上下文与模板（当前源码）
 
 关键文件可保留完整实现，其他文件生成骨架：

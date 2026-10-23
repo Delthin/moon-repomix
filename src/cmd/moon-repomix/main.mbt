@@ -4,6 +4,9 @@ extern "c" fn exit(code : Int32) -> Unit = "exit"
 ///|
 async fn read_config(cli : @config.Cli, cwd : String) -> @config.Patch? {
   let explicit = cli.config_path is Some(_)
+  if cli.mcp && !explicit {
+    return None
+  }
   if !explicit && cli.patch.remote is Some(_) {
     return None
   }
@@ -103,6 +106,15 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
   }
   let patch = read_config(cli, cwd)
   let resolved = @config.resolve(cli, patch) catch { _ => raise Configuration }
+  if cli.mcp &&
+    (
+      resolved.remote is Some(_) ||
+      resolved.stdout ||
+      resolved.split_output is Enabled(_) ||
+      resolved.token_budget is Some(_)
+    ) {
+    raise Configuration
+  }
   let directory_target = match resolved.split_output {
     Disabled => None
     Enabled(_) =>
@@ -129,6 +141,16 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
     None => @platform.tokenizer_path() catch { _ => raise Resource }
   }
   let runtime = @repomix.Runtime::load(resource)
+  if cli.mcp {
+    @mcp.serve(
+      options,
+      runtime,
+      max_tokens=cli.mcp_max_tokens,
+      max_output_bytes=cli.mcp_max_output_bytes,
+      max_volumes=cli.mcp_max_volumes,
+    )
+    return 0
+  }
   if options.split_output is Enabled(cap) {
     let target = directory_target.unwrap()
     let split_options = { ..options, output: target, }
