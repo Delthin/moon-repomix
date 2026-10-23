@@ -6,11 +6,13 @@
 moon-repomix ./project --compress --style json -o structure.json
 ```
 
-`--compress` 在原始文件通过安全扫描后提取语法骨架。支持 MoonBit `.mbt/.mbti`、JavaScript `.js/.jsx/.mjs/.cjs`、TypeScript `.ts/.mts/.cts/.tsx`、Python `.py/.pyi`，以及当前源码新增的 Go `.go`、Rust `.rs`；解析器版本见 [第三方来源](../LICENSES/tree-sitter-sources.md)。解析器编译进原生程序，构建和运行无需安装 Node 或语法生成器。
+`--compress` 在原始文件通过安全扫描后提取语法骨架。支持 MoonBit `.mbt/.mbti`、JavaScript `.js/.jsx/.mjs/.cjs`、TypeScript `.ts/.mts/.cts/.tsx`、Python `.py/.pyi`，以及当前源码新增的 Go `.go`、Rust `.rs`、Java `.java`；解析器版本见 [第三方来源](../LICENSES/tree-sitter-sources.md)。解析器编译进原生程序，构建和运行无需安装 Node 或语法生成器。
 
 MoonBit 保留导入、属性、文档注释、常量、struct/enum/trait/type、derive、impl 和函数的完整参数、默认值、返回/错误类型。函数及测试的实现正文按语法树边界省略，内部命名函数和类型仍保留；外部函数的符号/模块链接字符串保持完整，多行内联实现可以省略。矩阵函数分支属于实现。`.mbti` 通常已经是结构接口，正确解析后按 `not-smaller` 保持原文。固定 grammar 的本地补丁支持 tuple `for`、`..<=` 范围模式和 `errdefer`，原始 CRLF 和源行位置保持不变。
 
-Go 保留 package/import、构建注释、泛型、receiver、struct/interface/type 和完整参数/返回类型，按函数、方法及函数字面量的 AST body 边界省略实现。Rust 保留 use/mod、属性、struct/enum/trait/impl、生命周期、where 约束及完整签名；嵌套声明仍保留，宏、extern、常量及未知结构保持原片段。这两种语言不做初始化值折叠或展示空白压缩，宏密集文件可能仅有少量收益；v0.3.0 尚未包含 Go/Rust。
+Go 保留 package/import、构建注释、泛型、receiver、struct/interface/type 和完整参数/返回类型，按函数、方法及函数字面量的 AST body 边界省略实现。Rust 保留 use/mod、属性、struct/enum/trait/impl、生命周期、where 约束及完整签名；嵌套声明仍保留，宏、extern、常量及未知结构保持原片段。这两种语言不做初始化值折叠或展示空白压缩，宏密集文件可能仅有少量收益。
+
+Java 保留类/接口/枚举/record、字段和 schema、annotations、泛型、继承关系、完整参数/返回/throws、嵌套及匿名类 API，按 AST 删除已知方法、构造、lambda 和初始化实现区。未知节点及声明值保持保守；输出用于理解结构，不承诺可重新编译。v0.3.0 尚未包含 Go/Rust/Java。
 
 JS/TS/Python 提取导入、类型、类、函数签名和从属结构。仅含实现的分支和循环整体省略，围住嵌套声明或成员 API 的控制结构保留；CommonJS 的静态 `require`、导出别名及回调安装的方法也保留。部分私有索引数据表可整表折叠，导出、别名、类型查询、返回/序列化、枚举键或写入等使用会保护相应结构。较短的初始化片段保留原文，避免替换成更长的省略标记。
 

@@ -10,6 +10,7 @@ const TSLanguage *tree_sitter_python(void);
 const TSLanguage *tree_sitter_moonbit(void);
 const TSLanguage *tree_sitter_go(void);
 const TSLanguage *tree_sitter_rust(void);
+const TSLanguage *tree_sitter_java(void);
 
 typedef struct {
   SCPlan plan;
@@ -740,6 +741,58 @@ static void systems_walk(Selection *s, TSNode node, unsigned depth, int rust) {
     systems_walk(s, ts_node_named_child(node, i), depth + 1, rust);
 }
 
+/* Java declarations and field/schema values start selected. Only known
+ * implementation regions are removed; visibility is not a safe API filter
+ * (interface members and package-private enclosing types can expose APIs). */
+static void java_walk(Selection *, TSNode, unsigned);
+
+static void java_nested(Selection *s, TSNode node, unsigned depth) {
+  if (s->plan.status || ts_node_is_null(node)) return;
+  if (depth > 512) { s->plan.status = 3; return; }
+  int type = is(node, "class_declaration") || is(node, "interface_declaration") ||
+    is(node, "enum_declaration") || is(node, "record_declaration") ||
+    is(node, "annotation_type_declaration");
+  /* An anonymous class has no name, but its implemented method signatures are
+   * useful even in a returned/local instance. Retain its creation header too. */
+  int anonymous = 0;
+  if (is(node, "object_creation_expression"))
+    for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+      if (is(ts_node_named_child(node, i), "class_body")) anonymous = 1;
+  if (type || anonymous) {
+    select_node(s, node, 1);
+    java_walk(s, node, depth + 1);
+    return;
+  }
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    java_nested(s, ts_node_named_child(node, i), depth + 1);
+}
+
+static void java_walk(Selection *s, TSNode node, unsigned depth) {
+  if (s->plan.status || ts_node_is_null(node)) return;
+  if (depth > 512) { s->plan.status = 3; return; }
+  if (is(node, "method_declaration") || is(node, "constructor_declaration") ||
+      is(node, "compact_constructor_declaration") || is(node, "lambda_expression")) {
+    TSNode body = field(node, "body");
+    if (is(body, "block") || is(body, "constructor_body")) {
+      for (uint32_t i = 0; i < ts_node_named_child_count(body); ++i)
+        remove_statement(s, ts_node_named_child(body, i));
+    } else {
+      select_node(s, body, 0);
+    }
+    java_nested(s, body, depth + 1);
+    return;
+  }
+  if (is(node, "static_initializer") ||
+      (is(node, "block") && (is(ts_node_parent(node), "class_body") ||
+                              is(ts_node_parent(node), "enum_body_declarations")))) {
+    select_node(s, node, 0);
+    java_nested(s, node, depth + 1);
+    return;
+  }
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    java_walk(s, ts_node_named_child(node, i), depth + 1);
+}
+
 SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
                uint64_t timeout_micros) {
   Selection s = {{NULL, length, 0}, language == 3, source};
@@ -753,6 +806,7 @@ SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
     case 4: grammar = tree_sitter_moonbit(); break;
     case 5: grammar = tree_sitter_go(); break;
     case 6: grammar = tree_sitter_rust(); break;
+    case 7: grammar = tree_sitter_java(); break;
     default: s.plan.status = 4; return s.plan;
   }
   TSParser *parser = ts_parser_new();
@@ -774,7 +828,8 @@ SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
       s.plan.status = 3;
     } else {
       memset(s.plan.keep, 1, length);
-      if (language == 4) moonbit_walk(&s, ts_tree_root_node(tree), 0);
+      if (language == 7) java_walk(&s, ts_tree_root_node(tree), 0);
+      else if (language == 4) moonbit_walk(&s, ts_tree_root_node(tree), 0);
       else if (language == 5 || language == 6)
         systems_walk(&s, ts_tree_root_node(tree), 0, language == 6);
       else walk(&s, ts_tree_root_node(tree), 0, 0);

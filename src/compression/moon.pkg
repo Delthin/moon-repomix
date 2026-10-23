@@ -20,6 +20,7 @@ options(
     "go_parser.c",
     "rust_parser.c",
     "rust_scanner.c",
+    "java_parser.c",
     "compression_core.c",
     "ffi.c",
   ],

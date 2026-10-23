@@ -14,6 +14,7 @@ needed to build or run the package.
 | `vendor/moonbit/` | https://github.com/moonbitlang/tree-sitter-moonbit | untagged (2026-07-22), locally patched | `5435c307c6cf2ef0d508a99047b06f35a4308444` | Apache-2.0, `vendor/moonbit/LICENSE` |
 | `vendor/go/` | https://github.com/tree-sitter/tree-sitter-go | `v0.23.4` | `3c3775faa968158a8b4ac190a7fda867fd5fb748` | MIT, `vendor/go/LICENSE` |
 | `vendor/rust/` | https://github.com/tree-sitter/tree-sitter-rust | `v0.23.2` | `cad8a206f2e4194676b9699f26f6560d07130d3f` | MIT, `vendor/rust/LICENSE` |
+| `vendor/java/` | https://github.com/tree-sitter/tree-sitter-java | `v0.23.5` | `94703d5a6bed02b98e438d7cad1136c01a60ba2c` | MIT, `vendor/java/LICENSE` |
 
 The runtime's ICU subset (`vendor/runtime/lib/src/unicode/`) originates from
 https://github.com/unicode-org/icu at
@@ -38,6 +39,12 @@ Original copyright and license notices are retained verbatim.
   `LICENSES/tree-sitter-go-MIT.txt` and `LICENSES/tree-sitter-rust-MIT.txt` copies
   retain their full respective licenses and are included by the existing package
   and install scripts.
+- Java: the upstream-generated `src/parser.c`, its three `src/tree_sitter/*.h`
+  headers and full license, all unchanged. ABI 14 is compatible with runtime
+  v0.25.3. No external scanner, generator, Java VM, Node or upstream lifecycle
+  script is required. `java_parser.c` is the local translation-unit wrapper;
+  `LICENSES/tree-sitter-java-MIT.txt` is the full, byte-identical distribution
+  license (copyright 2017 Ayman Nadeem). No upstream `NOTICE` file exists.
 - TypeScript/TSX: `typescript/src/**`, `tsx/src/**`, `common/**` and full license.
   `typescript/src/tree_sitter/**` is also copied to `common/tree_sitter/**` for
   the shared scanner header's quoted includes.
@@ -158,6 +165,28 @@ copies have the same SHA-256 as the corresponding `LICENSE` below.
 | `{go,rust}/src/tree_sitter/array.h` | `4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1` |
 | `{go,rust}/src/tree_sitter/alloc.h` | `b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea` |
 
+## Java resource manifest
+
+All five files below are byte-identical to the official source archive at
+https://codeload.github.com/tree-sitter/tree-sitter-java/tar.gz/94703d5a6bed02b98e438d7cad1136c01a60ba2c
+(tag `v0.23.5`). No parser regeneration or local grammar patch was performed.
+Paths are relative to `vendor/java/`. The flat distribution license copy has
+exactly the same SHA-256 as `LICENSE`.
+
+| File | SHA-256 |
+| --- | --- |
+| `LICENSE` | `52ed137b039cd9c46409bc22e89938af911c95b157feae2d040b51e6084369a7` |
+| `src/parser.c` | `4add5150cf4531eb5dd97f3343dcf65cd11704c84711348b328582b83424a0e4` |
+| `src/tree_sitter/parser.h` | `a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a` |
+| `src/tree_sitter/array.h` | `5bdf6ed1a78e3409fd443e085ca967a64c188a5d082aaf7f819bccd53a471c94` |
+| `src/tree_sitter/alloc.h` | `b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea` |
+
+`validation/prepare.mbtx` copies these files directly from the pinned archive;
+`validation/verify-native.mbtx` verifies upstream equality and hashes, then reuses
+an existing real-FFI sanitizer checker with Java inputs. Validation-only Gson
+sources are not shipped; their pin, file set, independent API anchors and byte
+results are recorded in `validation/EVIDENCE.md`.
+
 ## Resource size
 
 Uncompressed vendored sources/provenance/licenses (including duplicate headers):
@@ -171,9 +200,10 @@ Uncompressed vendored sources/provenance/licenses (including duplicate headers):
 | MoonBit | 9 | 6,200,870 |
 | Go | 5 | 1,557,034 |
 | Rust | 6 | 6,212,241 |
-| **Total** | **95** | **38,341,862** |
+| Java | 5 | 2,580,790 |
+| **Total** | **100** | **40,922,652** |
 
-Approximately 36.57 MiB; generated parser tables dominate. Upstream tests,
+Approximately 39.03 MiB; generated parser tables dominate. Upstream tests,
 package-manager files, generator binaries and repository history are not shipped.
 Updating a dependency requires repinning its commit, copying resources/licenses
 and both applicable header locations, preserving or reviewing local patches, and

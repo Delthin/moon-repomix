@@ -4,7 +4,7 @@
 
 ## 核心功能
 
-- **代码结构压缩**：`--compress` 支持 MoonBit 源码与接口（`.mbt/.mbti`）、JavaScript/TypeScript（含 JSX/TSX）和 Python，保留声明、类型、注释与嵌套结构，省略实现细节；当前源码另支持 Go `.go` 和 Rust `.rs`，其他语言保留原文。
+- **代码结构压缩**：`--compress` 支持 MoonBit 源码与接口（`.mbt/.mbti`）、JavaScript/TypeScript（含 JSX/TSX）和 Python，保留声明、类型、注释与嵌套结构，省略实现细节；当前源码另支持 Go `.go`、Rust `.rs` 和 Java `.java`，其他语言保留原文。
 - **远程与 Git 上下文**：获取公开 HTTPS 仓库的指定版本，或把本地源码、暂存/未暂存差异和近期提交组合成评审材料。
 - **四格式导出**：XML、Markdown、JSON 和纯文本均含目录结构，默认展示轻量概览；`--full-metadata` 提供逐文件记录与原始行区间。
 - **筛选与密钥扫描**：组合忽略规则和 glob，支持 stdin 精确文件列表、NUL 协议和花括号备选。先扫描原始内容，再压缩，命中的文件、补丁或提交整体排除。
@@ -66,9 +66,11 @@ moon run src/cmd/moon-repomix --target native --release -- ./project --compress 
 
 这些是当前源码的新能力；已发布 v0.3.0 的选项见 [固定版本说明](https://github.com/Delthin/moon-repomix/blob/v0.3.0/README.md)。
 
-## Go/Rust 压缩（当前源码）
+## Go/Rust/Java 压缩（当前源码）
 
-Go 保留包、导入、泛型、receiver、完整类型和函数签名；Rust 保留属性、trait/impl、生命周期、where 约束及签名，宏和 extern 内容保守保留。压缩按 AST 正文字节边界进行，原始行区间仍可定位源码。只含接口、宏密集或无精确 token 收益的文件会保留原文。两套固定 grammar 随源码提供，不增加运行时依赖；具体范围见 [仓库上下文](docs/context.md)。
+Go 保留包、导入、泛型、receiver、完整类型和函数签名；Rust 保留属性、trait/impl、生命周期、where 约束及签名，宏和 extern 内容保守保留。压缩按 AST 正文字节边界进行，原始行区间仍可定位源码。只含接口、宏密集或无精确 token 收益的文件会保留原文。固定 grammar 随源码提供，不增加运行时依赖。
+
+Java 保留 package/import、类/接口/枚举/record、annotations、完整泛型/返回/throws 签名及嵌套和匿名类 API，仅省略已知方法、构造、lambda 和初始化实现区。解析器编译为原生 C，不要求安装 JDK 或 Node；具体范围见 [仓库上下文](docs/context.md)。
 
 ## 展示控制（当前源码）
 

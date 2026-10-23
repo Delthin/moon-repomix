@@ -211,6 +211,11 @@ async fn main {
   let rust_source = "pub struct Counter { total: i64 }\n\nimpl Counter {\n    pub fn add(&self, value: i64) -> Result<i64, &'static str> {\n        let mut total = self.total;\n" +
     rust_body.repeat(80) +
     "        Ok(total)\n    }\n}\n"
+  let java_body = "    total += value;\n"
+  let java_source = "package fixture;\n\npublic class Counter<T extends Number> {\n  private int total;\n  public int add(final int value) throws java.io.IOException {\n    int total = this.total;\n" +
+    java_body.repeat(80) +
+    "    return total;\n  }\n}\n"
+  @fs.write_file(root + "/src/Counter.java", java_source, create_mode=CreateNew)
   @fs.write_file(root + "/src/counter.go", go_source, create_mode=CreateNew)
   @fs.write_file(root + "/src/counter.rs", rust_source, create_mode=CreateNew)
   @fs.write_file(
@@ -324,6 +329,17 @@ async fn main {
     ),
   )
   assert_false(rust_outline.contains(rust_body + rust_body))
+  guard files.get("src/Counter.java") is Some(String(java_outline)) else {
+    fail("Missing Java skeleton")
+  }
+  assert_true(java_outline.contains("public class Counter<T extends Number>"))
+  assert_true(java_outline.contains("private int total;"))
+  assert_true(
+    java_outline.contains(
+      "public int add(final int value) throws java.io.IOException",
+    ),
+  )
+  assert_false(java_outline.contains(java_body + java_body))
   assert_eq(
     files.get("notes.txt"),
     Some(Json("plain context remains exact\r\n")),
@@ -335,7 +351,7 @@ async fn main {
     fail("Missing compression overview")
   }
   assert_eq(file_count, files.length().to_double())
-  assert_true(applied >= 5)
+  assert_true(applied >= 6)
   let (full_ok, detailed, full_report) = run(
     binary,
     common + ["--style=json", "--stdout", "--full-metadata"],
@@ -361,6 +377,7 @@ async fn main {
   let systems : Map[String, (String, String)] = {
     "src/counter.go": ("go", go_source),
     "src/counter.rs": ("rust", rust_source),
+    "src/Counter.java": ("java", java_source),
   }
   let systems_seen : Set[String] = Set([])
   let moonbit_lines : Array[StringView] = moonbit_source.split("\n").collect()
@@ -441,8 +458,8 @@ async fn main {
       compressed += 1
     }
   }
-  assert_true(compressed >= 5)
-  assert_eq(systems_seen.length(), 2)
+  assert_true(compressed >= 6)
+  assert_eq(systems_seen.length(), systems.length())
   assert_true(has_moonbit && has_interface)
   let mut staged = false
   let mut unstaged = false

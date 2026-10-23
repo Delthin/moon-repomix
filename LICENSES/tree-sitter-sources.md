@@ -11,6 +11,7 @@ These components are compiled into the application. Original license files accom
 | [MoonBit grammar (.mbt/.mbti)](https://github.com/moonbitlang/tree-sitter-moonbit) | `5435c307c6cf2ef0d508a99047b06f35a4308444` (2026-07-22), locally patched, ABI 15 | `tree-sitter-moonbit-Apache-2.0.txt` |
 | [Go grammar](https://github.com/tree-sitter/tree-sitter-go) | `v0.23.4`, `3c3775faa968158a8b4ac190a7fda867fd5fb748`, ABI 14 | `tree-sitter-go-MIT.txt` |
 | [Rust grammar](https://github.com/tree-sitter/tree-sitter-rust) | `v0.23.2`, `cad8a206f2e4194676b9699f26f6560d07130d3f`, ABI 14 | `tree-sitter-rust-MIT.txt` |
+| [Java grammar](https://github.com/tree-sitter/tree-sitter-java) | `v0.23.5`, `94703d5a6bed02b98e438d7cad1136c01a60ba2c`, ABI 14 | `tree-sitter-java-MIT.txt` |
 | [ICU/Unicode subset](https://github.com/unicode-org/icu) | `552b01f61127d30d6589aa4bf99468224979b661` | `tree-sitter-ICU.txt` |
 
 MoonBit's root grammar serves both file extensions. Its local `grammar.patch`
@@ -32,6 +33,8 @@ no local patches or regeneration. Their ABI 14 is accepted by the unchanged
 runtime's ABI 13–15 range. File manifests, SHA-256 hashes and resource sizes are
 in `src/compression/THIRD_PARTY.md`. The two flat license files above and this
 notice are copied by the existing binary package/install scripts.
+
+Java ships the fixed upstream generated C parser, all three original headers and full MIT license without regeneration or patches. It has no external scanner, uses ABI 14 with the same runtime, and carries its full flat license in binary distributions. Per-file hashes and resource sizes are in `src/compression/THIRD_PARTY.md`.
 
 The runtime's `portable/endian.h` retains this original notice:
 

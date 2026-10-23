@@ -139,8 +139,10 @@ Package-local C translation units include vendored resources using relative
 paths; `moon.pkg` needs no platform-specific include/link flags. The upstream
 runtime includes Windows clock/endian support. The original nine compression
 groups, including MoonBit, passed native CI on Windows, Linux and macOS for
-v0.3.0. The four new Go/Rust groups have been verified on macOS native with
-`moonc v0.10.15+943464bfa`; Go/Rust Windows/Linux execution is not yet claimed.
+v0.3.0. The subsequent four Go/Rust groups also passed current-source native
+CI on all three platforms. The two Java groups have been verified on macOS
+native with `moonc v0.10.15+943464bfa`; Java Windows/Linux execution has not
+been verified yet.
 All adapters use portable C and need no platform-specific flags.
 
 With the project toolchain selected:
@@ -165,3 +167,8 @@ Four Go/Rust groups cover complete type/signature preservation, nested definitio
 macro/extern conservatism, literal braces, original Unicode/CRLF fragments and
 exact ranges, case-insensitive extensions, invalid syntax and honest non-smaller
 fallbacks.
+
+Two Java groups cover complete generic/constructor/native/throws signatures,
+annotations, records/enums/interfaces, conservative fields, nested and anonymous
+class APIs, original reference anchors, exact CRLF/Unicode ranges and unchanged
+fallbacks. Java uses the fixed native parser described in `THIRD_PARTY.md`.
