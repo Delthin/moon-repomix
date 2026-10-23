@@ -2,6 +2,8 @@
 package "Delthin/moon_repomix/selection"
 
 // Values
+pub async fn explain(String, SelectionOptions, Array[String], file_paths? : Array[String]?, max_files? : Int) -> SelectionExplanation
+
 pub fn file_matcher(Array[String]) -> FileMatcher raise SelectionError
 
 pub async fn path_filter(String, SelectionOptions, file_paths? : Array[String]?) -> PathFilter
@@ -27,13 +29,32 @@ pub(all) struct Candidate {
 type FileMatcher
 pub fn FileMatcher::matches(Self, String) -> Bool
 
+pub(all) struct PathDecision {
+  path : String
+  eligible : Bool
+  reason : String
+  origin : RuleOrigin?
+}
+
 type PathFilter
 pub async fn PathFilter::allows(Self, String) -> Bool
+
+pub(all) struct RuleOrigin {
+  kind : String
+  source : String?
+  line : Int?
+  index : Int?
+}
 
 pub(all) struct Selection {
   root : String
   files : Array[Candidate]
   skipped : Array[Skipped]
+}
+
+pub(all) struct SelectionExplanation {
+  selection : Selection
+  decisions : Array[PathDecision]
 }
 
 pub(all) struct SelectionOptions {

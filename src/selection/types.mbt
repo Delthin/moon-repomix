@@ -44,6 +44,32 @@ pub(all) struct Selection {
 }
 
 ///|
+/// Safe rule provenance: no pattern text; source is root-relative or None.
+/// index is zero-based in the compiled (brace-expanded) matcher list.
+pub(all) struct RuleOrigin {
+  kind : String
+  source : String?
+  line : Int32?
+  index : Int32?
+}
+
+///|
+/// Candidate means structurally eligible, not yet read or security-scanned.
+pub(all) struct PathDecision {
+  path : String
+  eligible : Bool
+  reason : String
+  origin : RuleOrigin?
+}
+
+///|
+/// The selection and decisions describe the same exact query, without reselection.
+pub(all) struct SelectionExplanation {
+  selection : Selection
+  decisions : Array[PathDecision]
+}
+
+///|
 /// Validation failures. Filesystem failures and cancellation propagate unchanged.
 pub(all) suberror SelectionError {
   InvalidRoot(String)

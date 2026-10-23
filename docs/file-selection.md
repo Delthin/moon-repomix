@@ -21,13 +21,35 @@ pub(all) struct Selection {
   files : Array[Candidate]
   skipped : Array[Skipped]
 }
+pub(all) struct RuleOrigin {
+  kind : String
+  source : String?
+  line : Int32?
+  index : Int32?
+}
+pub(all) struct PathDecision {
+  path : String
+  eligible : Bool
+  reason : String
+  origin : RuleOrigin?
+}
+pub(all) struct SelectionExplanation {
+  selection : Selection
+  decisions : Array[PathDecision]
+}
 pub async fn select(
   root : String, options : SelectionOptions,
-  file_paths? : Array[String]? = None,
+  file_paths~ : Array[String]? = None,
+  max_files~ : Int32 = 2147483647,
 ) -> Selection
+pub async fn explain(
+  root : String, options : SelectionOptions, paths : Array[String],
+  file_paths~ : Array[String]? = None,
+  max_files~ : Int32 = 2147483647,
+) -> SelectionExplanation
 pub async fn path_filter(
   root : String, options : SelectionOptions,
-  file_paths? : Array[String]? = None,
+  file_paths~ : Array[String]? = None,
 ) -> PathFilter
 pub async fn PathFilter::allows(self : PathFilter, relative : String) -> Bool
 ```
@@ -56,7 +78,25 @@ files 和 skipped 分别按相对路径的 **UTF-8 字节词典序** 排序，�
 - 使用可移植 `/` 分隔写法。空路径、绝对路径、空组件、`.`、`..`、NUL、反斜杠及冒号均整体报 `InvalidPattern(source="file_paths", line=0, pattern=原始路径, ...)`，Windows 盘符、UNC、盘符相对路径也不能逃逸；**两接口都在规则 I/O 前校验完整列表**，不悄悄删除非法项。此限制不改变普通遍历或无精确列表的 Git 路径对 Unix 反斜杠/冒号文件名的支持。
 - 显式列表不绕过 include/default/custom/Git/dot/output-self 规则。每个列出路径从根逐组件 no-follow 检查，链接祖先或末项均记 Symlink；祖先是普通文件记 NotDirectory；其他非普通类型记 UnsupportedFileType；末项是普通目录记 Directory，不展开内容。
 - 完整路径语法校验后：继承的根剪枝 → 每层父目录规则加载 → 该组件 no-follow 类型（含 MissingFile）→ 已存在普通组件的 literal 拼写 → 文件/目录位置类型 → output-self → default → custom → Git/dot 规则 → 最终 include。普通文件/祖先缺失记 MissingFile；只有 ENOENT 是缺失，权限、规则解析、其他 I/O 和取消仍传播。一个列出路径只记一条 skip，path 保留列出项，祖先排除以 IgnoredDirectory 原因表示（不额外枚举祖先 skip）；空列表不读取根内规则。
-- PathFilter 使用同一私有 reason 决策和 exact 集合：未列出的路径恒 false，不递归列出的目录；但允许不存在的文件/目录组件供 Git 删除记录过滤；来自 Git 的已存在组件同样要求磁盘目录项原始拼写，其余规则照常适用。Git rename 两端是否都匹配由调用者现有逻辑决定，本包不改变该契约。列表与规则、候选文件均不会直接读取候选正文。
+- PathFilter 使用同一结构化决策及其旧 reason 表示和 exact 集合：未列出的路径恒 false，不递归列出的目录；但允许不存在的文件/目录组件供 Git 删除记录过滤；来自 Git 的已存在组件同样要求磁盘目录项原始拼写，其余规则照常适用。Git rename 两端是否都匹配由调用者现有逻辑决定，本包不改变该契约。列表与规则、候选文件均不会直接读取候选正文。
+
+## 指定路径解释
+
+`explain(root, options, paths, file_paths~, max_files~)` 仅解释 `paths` 查询集。查询使用精确列表相同的严格路径校验、去重和 UTF-8 排序，不展开目录或模式；完整查询和主机列表均在规则 I/O 前校验，危险路径使全次失败。查询数量和字节长度限制由上层入口控制。
+
+`file_paths` 仍是独立的主机允许列表：`None` 不限制查询成员，`Some([])` 使所有查询项为 `NotListed`，查询不能替换它。未列入主机列表的查询先记 `NotListed`，不访问其父目录或加载局部规则。空查询返回空候选和空决定，不读取根内规则；根、选项及继承规则的验证与精确选择一致。
+
+`selection.files` 和 `decisions` 来自同一次结构选择，调用者应直接读取其中的候选，不再调用 `select`。`eligible=true, reason="Candidate"` 只表示普通文件通过结构筛选，尚未读取或检查正文。`max_files` 仅累计本次查询通过筛选的候选，超限抛出 `FileLimitExceeded(limit~)`，不返回部分解释；负上限也报此错。普通 `select` 的相同限制不变。
+
+查询与实际 exact 选择、Git PathFilter 以及普通 walker 共用结构化排除逻辑。查询对每层原始拼写强制校验，即使 `file_paths=None`；Git 仍允许缺失路径表示删除。被父规则剪枝的查询记真正决定剪枝的目录规则，不读取被剪枝子目录；选择根被祖先规则剪枝时，来源同样指向那条祖先规则。
+
+`decisions` 每个去重查询一条，`path` 保留查询原文。拒绝原因是 `NotListed`、`MissingFile`、`Directory`、`NotDirectory`、`NonLiteralPath`、`Symlink`、`UnsupportedFileType`、`OutputFile`、`NotIncluded`、`Ignored` 或 `IgnoredDirectory`。忽略决定附带 `origin`，其他决定的 `origin=None`：
+
+- `kind` 为 `default`、`custom`、`gitignore`、`dot-ignore`、`repomixignore` 或 `git-info-exclude`。
+- 默认及自定义匹配器提供从 **0** 开始的首个匹配 `index`，位置属于**花括号展开后的编译列表**，不是原输入列表；`source`、`line` 为 `None`。
+- 规则文件提供决定性规则的 **1-based** `line`，`index=None`。`source` 仅在规则文件位于所选根内时给出相对路径；祖先规则、外部 Git 元数据来源为 `None`。不回传规则正文、绝对路径或 `../` 祖先路径。
+
+`decisions` 是适合上层安全序列化的结构判定；`selection` 是后续读入阶段使用的选择结果，`selection.skipped` 为兼容现有调用者仍保留含绝对规则来源的旧诊断，不能将整个 `SelectionExplanation` 直接作为安全响应输出。规则解析、权限、其他 I/O 与取消照常抛出，不转为成功或逐路径拒绝。
 
 ## 作用域与顺序
 
@@ -93,6 +133,7 @@ files 和 skipped 分别按相对路径的 **UTF-8 字节词典序** 排序，�
 稳定 `pub(all) suberror SelectionError`：
 
 - `InvalidRoot(String)`：相对根、缺失根或非普通目录（含链接）。
+- `FileLimitExceeded(limit~ : Int32)`：候选数超过上限或上限为负。
 - `InvalidPattern(source~ : String, line~ : Int, pattern~ : String, detail~ : String)`：模式或精确列表路径错误；include/ignore/file_paths 的 source 为对应字段名、line 为 0；规则文件为绝对来源路径和 1-based 行号。
 - `InvalidRuleFile(String)`：存在的规则文件不是普通文件，包括链接。
 - `InvalidGitMetadata(String)`：Git marker/目录结构/commondir 不合法或含链接。
@@ -114,5 +155,7 @@ moon check src/selection --target native
 ```
 
 `selection_wbtest.mbt` 使用自动清理的临时合成树，覆盖：逐项比较真实 `git check-ignore --no-index`（屏蔽全局/系统配置）、父层/嵌套/目录反选与剪枝、dot/custom/默认独立开关、真实父路径输出别名与缺失输出、UTF-8 顺序、未读正文、链接/断链/FIFO、规则解码和类型错误、无 Git 父层与 worktree commondir。`compat_wbtest.mbt` 另覆盖固定原版默认集合具体文件、根/嵌套作用域、共享剪枝、root-relative include、嵌套花括号及 256/8 边界、Git 字面花括号；`exact_wbtest.mbt` 覆盖 literal 列表、空列表/重复/UTF-8 排序、所有忽略层及来源、非法路径整体失败、目录/缺失/链接祖先/FIFO、未读正文、output 别名与 Git 删除路径集合；并在探测到大小写不敏感的夹具卷时验证文件/目录大写别名不能绕过 ignore 或 `.git` 排除。测试需要现有 Git，Unix 类型夹具还需要现有 mkfifo。
+
+`explain_wbtest.mbt` 的两个聚合组复用上述合成夹具，覆盖解释与 exact 选择的候选和旧诊断一致、独立主机列表、空查询/空名单、候选上限、结构原因、规则来源行与编译匹配器序号、祖先及外部 Git 元数据来源隐藏、剪枝不读内部规则、危险查询/名单整体失败、局部规则错误传播，以及原始拼写与 Unix no-follow 类型检查。
 
 CLI 功能测试还覆盖 Windows junction 排除；目标平台运行由 native CI 矩阵执行。

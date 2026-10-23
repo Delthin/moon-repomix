@@ -80,19 +80,19 @@ pub async fn path_filter(
 // latter allows missing paths (deletions). Ancestors are checked before loading
 // rules beneath them. Exact lists also check on-disk spelling using cached names
 // of visited parents; pruned directories are never listed or entered.
-async fn PathFilter::reason(
+async fn PathFilter::decision(
   self : PathFilter,
   relative : String,
   require_file : Bool,
-) -> String? {
+) -> Exclusion? {
   if !relative_file_path(relative) || !git_path_spelling(relative) {
-    return Some("InvalidPath")
+    return Some(Fixed("InvalidPath"))
   }
   if self.exact is Some(paths) && !paths.contains(relative) {
-    return Some("NotListed")
+    return Some(Fixed("NotListed"))
   }
   if self.blocked is Some(rule) {
-    return Some("IgnoredDirectory:\{rule.source}:\{rule.line}")
+    return Some(RuleFile(rule, true))
   }
   let parts = relative.split("/").map(p => p.to_owned()).collect()
   let mut directory = self.root
@@ -110,14 +110,13 @@ async fn PathFilter::reason(
     let path = join(directory, part)
     let is_dir = i < parts.length() - 1
     let kind = optional_kind(path)
-    match kind {
-      Some(SymLink) => return Some("Symlink")
-      Some(kind) if kind != Regular && kind != Directory =>
-        return Some("UnsupportedFileType")
-      None if require_file => return Some("MissingFile")
-      _ => ()
+    if type_exclusion(kind) is Some(exclusion) {
+      return Some(exclusion)
     }
-    if self.exact is Some(_) && kind is Some(_) {
+    if kind is None && require_file {
+      return Some(Fixed("MissingFile"))
+    }
+    if (require_file || self.exact is Some(_)) && kind is Some(_) {
       // stat can accept case-folded, normalization or short-name aliases. Only
       // ordinary existing entries reach here; compare their parent's raw names
       // before entering this component or applying string-based exclusions.
@@ -134,35 +133,32 @@ async fn PathFilter::reason(
         }
       }
       if !names.contains(part) {
-        return Some("NonLiteralPath")
+        return Some(Fixed("NonLiteralPath"))
       }
     }
     match kind {
-      Some(Directory) if !is_dir => return Some("Directory")
-      Some(Regular) if is_dir => return Some("NotDirectory")
+      Some(Directory) if !is_dir => return Some(Fixed("Directory"))
+      Some(Regular) if is_dir => return Some(Fixed("NotDirectory"))
       _ => ()
     }
-    if self.output is Some(output) && normalize(path) == output {
-      return Some("OutputFile")
-    }
-    let ignored = if is_dir { "IgnoredDirectory" } else { "Ignored" }
-    if self.defaults.any(p => p.matches_parts(parts[:i + 1], is_dir)) {
-      return Some("\{ignored}:default")
-    }
-    if self.custom.any(p => p.matches_parts(parts[:i + 1], is_dir)) {
-      return Some("\{ignored}:custom")
-    }
-    if ignored_by(rules, path, is_dir) is Some(rule) {
-      return Some("\{ignored}:\{rule.source}:\{rule.line}")
+    if self.exclusion(path, normalize(path), parts[:i + 1], is_dir, rules)
+      is Some(exclusion) {
+      return Some(exclusion)
     }
     directory = path
     inherited = rules
   }
-  if included_parts(self.includes, parts[:]) {
-    None
-  } else {
-    Some("NotIncluded")
-  }
+  self.include_exclusion(parts[:])
+}
+
+///|
+// Preserve existing exact-selection and Git diagnostic strings.
+async fn PathFilter::reason(
+  self : PathFilter,
+  relative : String,
+  require_file : Bool,
+) -> String? {
+  self.decision(relative, require_file).map(exclusion => exclusion.reason())
 }
 
 ///|
