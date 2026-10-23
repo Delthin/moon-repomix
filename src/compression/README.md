@@ -31,6 +31,8 @@ extensions, case-insensitively:
 | `.tsx` | `tsx` |
 | `.py`, `.pyi` | `python` |
 | `.mbt`, `.mbti` | `moonbit` |
+| `.go` | `go` |
+| `.rs` | `rust` |
 
 The function parses the complete UTF-8 input with its actual grammar. AST node
 kinds and fields select original source fragments; no regular-expression body
@@ -87,6 +89,26 @@ patch, generator version and generated-source hashes are in
 exact original with `language = Some("moonbit")`, `reason = Some("parse-error")`
 and no ranges. Error/missing nodes are never ignored or normalized away.
 
+### Go and Rust AST coverage
+
+Go retains package/import declarations, comments/build tags, complete type
+aliases, structs/tags, interfaces/type sets, generic constraints, receiver and
+function signatures, full parameters and results. Only function/method/literal
+body interiors are omitted at the actual block's brace tokens. Nested type
+definitions and closure bindings survive, including below discarded control flow.
+
+Rust retains use/mod declarations, attributes/docs, struct/enum/union/trait
+shapes, impl headers, associated types/constants, visibility, generics, lifetimes,
+where clauses and complete function signatures. Functions and default trait/impl
+methods lose only their AST body interiors. Nested items and their attributes
+survive. Macro definitions and invocations are opaque original fragments, even
+inside bodies: they may generate public API. Extern blocks/declarations, constants,
+types and unknown items are conservatively preserved, not guessed or expanded.
+This can yield little or no compression for macro-heavy or interface-only files.
+Neither language uses initializer folding or presentation compaction. As with
+MoonBit, enclosing implementation conditions around nested definitions are omitted;
+the outline is not an executable program.
+
 `ranges` has one entry per retained contiguous original fragment, in the same
 order as the output. Bounds are **1-based inclusive original lines**, not output
 lines. Inline fragments can share line numbers; a range need not contain the
@@ -117,8 +139,8 @@ Package-local C translation units include vendored resources using relative
 paths; `moon.pkg` needs no platform-specific include/link flags. The upstream
 runtime includes Windows clock/endian support. The original seven compression
 groups have passed native CI on Windows, Linux and macOS. The MoonBit groups and
-scanner adapter have been verified on macOS native with
-`moonc v0.10.15+943464bfa`; MoonBit Windows/Linux execution is not yet claimed.
+scanner adapter, and the Go/Rust groups, have been verified on macOS native with
+`moonc v0.10.15+943464bfa`; MoonBit/Go/Rust Windows/Linux execution is not yet claimed.
 All adapters use portable C and need no platform-specific flags.
 
 With the project toolchain selected:
@@ -139,3 +161,7 @@ Two additional MoonBit groups cover declarations/literal boundaries, tuple loops
 range patterns, `errdefer`, complete default callback signatures, nested matrix
 functions, invalid/`#~` fallbacks, case-insensitive extensions, `.mbti` interfaces
 and exact Unicode/CRLF output and line ranges.
+Four Go/Rust groups cover complete type/signature preservation, nested definitions,
+macro/extern conservatism, literal braces, original Unicode/CRLF fragments and
+exact ranges, case-insensitive extensions, invalid syntax and honest non-smaller
+fallbacks.

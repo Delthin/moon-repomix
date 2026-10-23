@@ -8,6 +8,8 @@ const TSLanguage *tree_sitter_typescript(void);
 const TSLanguage *tree_sitter_tsx(void);
 const TSLanguage *tree_sitter_python(void);
 const TSLanguage *tree_sitter_moonbit(void);
+const TSLanguage *tree_sitter_go(void);
+const TSLanguage *tree_sitter_rust(void);
 
 typedef struct {
   SCPlan plan;
@@ -513,7 +515,7 @@ static void comments(Selection *s, TSNode node, unsigned depth) {
   if (is(node, "object") && is(ts_node_parent(node), "variable_declarator") &&
       s->plan.keep[ts_node_start_byte(ts_node_parent(node))] &&
       !s->plan.keep[ts_node_start_byte(node)]) return;
-  if (is(node, "comment") || is(node, "block_comment")) {
+  if (is(node, "comment") || is(node, "block_comment") || is(node, "line_comment")) {
     select_node(s, node, 1);
     /* A removed statement may have owned the following newline. Without it,
      * adjacent // comments become one line and swallow the next fragment. */
@@ -653,6 +655,91 @@ static void moonbit_walk(Selection *s, TSNode node, unsigned depth) {
   }
 }
 
+/* Go/Rust use a conservative, body-only outline: types, initializers and
+ * unknown top-level syntax remain original. Only a known callable's `body`
+ * field can lose bytes, never braces in a type, literal or macro token tree. */
+static void systems_walk(Selection *, TSNode, unsigned, int);
+
+static int rust_item(TSNode node) {
+  const char *type = ts_node_type(node);
+  size_t n = strlen(type);
+  return (n >= 5 && strcmp(type + n - 5, "_item") == 0) ||
+    is(node, "associated_type") || is(node, "use_declaration") ||
+    is(node, "extern_crate_declaration") || is(node, "macro_definition") ||
+    is(node, "macro_invocation");
+}
+
+static int go_callable(TSNode node) {
+  return is(node, "function_declaration") || is(node, "method_declaration") ||
+    is(node, "func_literal");
+}
+
+static int go_has_callable(Selection *s, TSNode node, unsigned depth) {
+  if (s->plan.status) return 0;
+  if (depth > 512) { s->plan.status = 3; return 0; }
+  if (go_callable(node)) return 1;
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    if (go_has_callable(s, ts_node_named_child(node, i), depth + 1)) return 1;
+  return 0;
+}
+
+/* Recover nested items even below discarded control flow. Rust macro calls
+ * can generate public items: retain both calls and definitions without looking
+ * inside opaque tokens. Attributes are siblings, not part of their item node. */
+static void systems_nested(Selection *s, TSNode node, unsigned depth, int rust) {
+  if (s->plan.status) return;
+  if (depth > 512) { s->plan.status = 3; return; }
+  int binding = !rust && (is(node, "var_declaration") ||
+    is(node, "short_var_declaration") || is(node, "assignment_statement")) &&
+    go_has_callable(s, node, depth + 1);
+  if ((rust && rust_item(node)) || (!rust &&
+      (is(node, "type_declaration") || go_callable(node) || binding))) {
+    select_node(s, node, 1);
+    systems_walk(s, node, depth + 1, rust);
+    return;
+  }
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    systems_nested(s, ts_node_named_child(node, i), depth + 1, rust);
+}
+
+static void systems_body(Selection *s, TSNode body, unsigned depth, int rust) {
+  TSNode open = {0}, close = {0};
+  for (uint32_t i = 0; i < ts_node_child_count(body); ++i) {
+    TSNode token = ts_node_child(body, i);
+    if (is(token, "{") && ts_node_is_null(open)) open = token;
+    if (is(token, "}")) close = token;
+  }
+  if (ts_node_is_null(open) || ts_node_is_null(close)) return;
+  uint32_t start = ts_node_end_byte(open), end = ts_node_start_byte(close);
+  if (start > end) return;
+  memset(s->plan.keep + start, 0, end - start);
+  for (uint32_t i = 0; i < ts_node_named_child_count(body); ++i)
+    systems_nested(s, ts_node_named_child(body, i), depth + 1, rust);
+}
+
+static void systems_walk(Selection *s, TSNode node, unsigned depth, int rust) {
+  if (s->plan.status) return;
+  if (depth > 512) { s->plan.status = 3; return; }
+  if ((!rust && go_callable(node)) || (rust && is(node, "function_item"))) {
+    TSNode body = field(node, "body");
+    if (is(body, "block")) systems_body(s, body, depth + 1, rust);
+    return;
+  }
+  if (rust) {
+    /* Extern declarations, structs/enums/unions, associated types, macros,
+     * attributes and unknown items are deliberately indivisible. */
+    if (is(node, "mod_item") || is(node, "impl_item") || is(node, "trait_item")) {
+      TSNode body = field(node, "body");
+      if (!ts_node_is_null(body)) systems_walk(s, body, depth + 1, rust);
+      return;
+    }
+    if (!(is(node, "source_file") || is(node, "declaration_list"))) return;
+  } else if (is(node, "type_declaration") || is(node, "import_declaration") ||
+             is(node, "package_clause") || is(node, "comment")) return;
+  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    systems_walk(s, ts_node_named_child(node, i), depth + 1, rust);
+}
+
 SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
                uint64_t timeout_micros) {
   Selection s = {{NULL, length, 0}, language == 3, source};
@@ -664,6 +751,8 @@ SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
     case 2: grammar = tree_sitter_tsx(); break;
     case 3: grammar = tree_sitter_python(); break;
     case 4: grammar = tree_sitter_moonbit(); break;
+    case 5: grammar = tree_sitter_go(); break;
+    case 6: grammar = tree_sitter_rust(); break;
     default: s.plan.status = 4; return s.plan;
   }
   TSParser *parser = ts_parser_new();
@@ -686,9 +775,11 @@ SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
     } else {
       memset(s.plan.keep, 1, length);
       if (language == 4) moonbit_walk(&s, ts_tree_root_node(tree), 0);
+      else if (language == 5 || language == 6)
+        systems_walk(&s, ts_tree_root_node(tree), 0, language == 6);
       else walk(&s, ts_tree_root_node(tree), 0, 0);
       comments(&s, ts_tree_root_node(tree), 0);
-      if (language != 4) presentation(&s, ts_tree_root_node(tree), 0);
+      if (language < 4) presentation(&s, ts_tree_root_node(tree), 0);
       merge_omissions(&s);
     }
   }

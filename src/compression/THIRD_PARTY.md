@@ -12,6 +12,8 @@ needed to build or run the package.
 | `vendor/python/` | https://github.com/tree-sitter/tree-sitter-python | `v0.23.6` | `bffb65a8cfe4e46290331dfef0dbf0ef3679de11` | MIT, `vendor/python/LICENSE` |
 | `vendor/typescript/` | https://github.com/tree-sitter/tree-sitter-typescript | `v0.23.2` | `f975a621f4e7f532fe322e13c4f79495e0a7b2e7` | MIT, `vendor/typescript/LICENSE` |
 | `vendor/moonbit/` | https://github.com/moonbitlang/tree-sitter-moonbit | untagged (2026-07-22), locally patched | `5435c307c6cf2ef0d508a99047b06f35a4308444` | Apache-2.0, `vendor/moonbit/LICENSE` |
+| `vendor/go/` | https://github.com/tree-sitter/tree-sitter-go | `v0.23.4` | `3c3775faa968158a8b4ac190a7fda867fd5fb748` | MIT, `vendor/go/LICENSE` |
+| `vendor/rust/` | https://github.com/tree-sitter/tree-sitter-rust | `v0.23.2` | `cad8a206f2e4194676b9699f26f6560d07130d3f` | MIT, `vendor/rust/LICENSE` |
 
 The runtime's ICU subset (`vendor/runtime/lib/src/unicode/`) originates from
 https://github.com/unicode-org/icu at
@@ -29,6 +31,13 @@ Original copyright and license notices are retained verbatim.
   `lib/include/tree_sitter/**` is also copied to `lib/src/tree_sitter/**`, allowing
   quoted API includes to resolve without compiler-specific `-I` configuration.
 - JavaScript and Python: `src/**` C/H files and full licenses.
+- Go and Rust: `src/**` C/H files and full licenses. Both upstream parsers use
+  ABI 14, compatible with the unchanged runtime's ABI 13–15 range. Go has no
+  external scanner; Rust includes its original `src/scanner.c`. No regeneration,
+  patching, upstream lifecycle script or additional runtime is needed. Flat
+  `LICENSES/tree-sitter-go-MIT.txt` and `LICENSES/tree-sitter-rust-MIT.txt` copies
+  retain their full respective licenses and are included by the existing package
+  and install scripts.
 - TypeScript/TSX: `typescript/src/**`, `tsx/src/**`, `common/**` and full license.
   `typescript/src/tree_sitter/**` is also copied to `common/tree_sitter/**` for
   the shared scanner header's quoted includes.
@@ -130,6 +139,25 @@ upstream archive. There is no upstream `NOTICE` file. Distributions must carry
 full licenses and attribution, not only URLs or SPDX identifiers, together with
 the C source/header resources and MoonBit grammar/patch provenance.
 
+## Go/Rust resource manifest
+
+All Go/Rust entries below are byte-identical to their pinned upstream archives.
+Paths are relative to `vendor/`. The two `src/tree_sitter/` header sets have
+identical contents; they are kept in each grammar's original include location.
+Neither upstream archive has a `NOTICE` file. The flat distribution license
+copies have the same SHA-256 as the corresponding `LICENSE` below.
+
+| File | SHA-256 |
+| --- | --- |
+| `go/LICENSE` | `2e0110e07abef7c2548b26ec9d6969775617ca539a0dc8dbeeb14d6452c711d1` |
+| `go/src/parser.c` | `3e412fb341a5ccb20455b34a8e3c1068cc064bd044146255fd47442458f5d575` |
+| `rust/LICENSE` | `31d5b6f4243d5c7c6e1c4ebbbb9f6407bd1457a08bcc4f706521710341acba36` |
+| `rust/src/parser.c` | `bd34b47f9cce5b4f85153e1180bdb4aa3d2b12fd0c33bb22bcbd9ffc1c3f80d5` |
+| `rust/src/scanner.c` | `77faa4943da96dcb17d9c2a735bdbf7702287b52a1d2971117b167e47e318620` |
+| `{go,rust}/src/tree_sitter/parser.h` | `a1f6ef161fbaf48a0e10fca90ef5290a062462b307b3898aa562993853b9f80a` |
+| `{go,rust}/src/tree_sitter/array.h` | `4ff743903dc46f5db6aa54f31c6b4d160a8a9779e5b2ab1ee59ae7ebcd850ea1` |
+| `{go,rust}/src/tree_sitter/alloc.h` | `b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea` |
+
 ## Resource size
 
 Uncompressed vendored sources/provenance/licenses (including duplicate headers):
@@ -141,9 +169,11 @@ Uncompressed vendored sources/provenance/licenses (including duplicate headers):
 | Python | 6 | 3,464,497 |
 | TypeScript + TSX | 15 | 17,583,384 |
 | MoonBit | 9 | 6,200,870 |
-| **Total** | **84** | **30,572,587** |
+| Go | 5 | 1,557,034 |
+| Rust | 6 | 6,212,241 |
+| **Total** | **95** | **38,341,862** |
 
-Approximately 29.16 MiB; generated parser tables dominate. Upstream tests,
+Approximately 36.57 MiB; generated parser tables dominate. Upstream tests,
 package-manager files, generator binaries and repository history are not shipped.
 Updating a dependency requires repinning its commit, copying resources/licenses
 and both applicable header locations, preserving or reviewing local patches, and
