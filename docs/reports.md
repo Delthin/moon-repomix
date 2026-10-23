@@ -2,12 +2,12 @@
 
 当前源码的 `--report-json` 将诊断通道切换为一份紧凑 JSON 和末尾 LF，位置是 stderr。stdout 仍只承载文档；分卷写目录时 stdout 为空。该开关优先于 `--quiet`，不改变打包、扫描、退出码或正文格式。显式 `--no-report-json` 恢复人类诊断。帮助和版本查询保持各自的 stdout 格式。
 
-每份报告带 `schemaVersion: 1`、`status`、`exitCode`。成功打包还包含 `operation`、`publication`、`style`、`security`、`counts`、`output`、`tokens` 和 `bytes`。`counts.acceptedFiles` 是扫描后接受的文件数，`skippedEntries` 包括目录和非文件条目；它们不是输入资源限额的计数器。token 和字节计量使用十进制字符串，避免 JSON 消费者丢失 64 位精度。
+每份报告带 `schemaVersion: 1`、`status`、`exitCode`。成功打包还包含 `operation`、`publication`、`style`、`security`、`counts`、`output`、`limits`、`tokens` 和 `bytes`。`counts.acceptedFiles` 是扫描后接受的文件数，`skippedEntries` 包括目录和非文件条目；它们不是输入资源限额的计数器。`limits.maxFiles` 与十进制字符串 `maxTotalSize` 表示配置上限，不冒充实际使用量。token 和字节计量使用十进制字符串，避免 JSON 消费者丢失 64 位精度。
 
 单份文档示例：
 
 ```json
-{"schemaVersion":1,"status":"ok","operation":"pack","publication":"committed","exitCode":0,"style":"markdown","security":{"status":"passed","enabled":true,"findings":0},"counts":{"acceptedFiles":2,"skippedEntries":0},"output":{"kind":"stdout","documents":1},"tokens":{"documents":"123","index":"0","total":"123","limit":null,"exceeded":false},"bytes":{"documents":"456","index":"0","total":"456"}}
+{"schemaVersion":1,"status":"ok","operation":"pack","publication":"committed","exitCode":0,"style":"markdown","security":{"status":"passed","enabled":true,"findings":0},"counts":{"acceptedFiles":2,"skippedEntries":0},"output":{"kind":"stdout","documents":1},"limits":{"maxFiles":20000,"maxTotalSize":"209715200"},"tokens":{"documents":"123","index":"0","total":"123","limit":null,"exceeded":false},"bytes":{"documents":"456","index":"0","total":"456"}}
 ```
 
 `tokens.documents` 为最终完整文档计数；分卷时为各独立卷计数之和，`index` 单列最终索引计数，`total` 为两者之和。分卷报告另含 `volumes` 数组，每项给出 `id`、`fileName`、token/字节字符串及文件、章节数量。`output.indexFile` 为 `index.json`。
@@ -20,7 +20,7 @@
 {"schemaVersion":1,"status":"error","exitCode":1,"publication":"not_started","error":{"category":"ContextSecurityError","field":"output.headerText","limit":null}}
 ```
 
-`error.category` 是固定错误类别；`field` 只给出受影响的配置字段，`limit` 在适用时给出十进制限制。未知或不适用的值为 JSON null；失败报告不伪造未得到的处理计数。解析其他参数失败时，已出现的有效报告开关仍尽量保留 JSON 诊断。
+输入限额失败使用 `InputLimitError`，`field` 为 `input.maxFiles` 或 `input.maxTotalSize`，`limit` 为对应上限。`error.category` 是固定错误类别；`field` 只给出受影响的配置字段，`limit` 在适用时给出十进制限制。未知或不适用的值为 JSON null；失败报告不伪造未得到的处理计数。解析其他参数失败时，已出现的有效报告开关仍尽量保留 JSON 诊断。
 
 ## 提交点与失败处理
 

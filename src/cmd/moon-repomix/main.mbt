@@ -233,9 +233,14 @@ async fn main {
   } catch {
     err => {
       let mut field : String? = None
+      let mut limit : Int64? = None
       match err {
         @repomix.ContextTextError(value)
         | @repomix.ContextSecurityFinding(value) => field = Some(value)
+        @repomix.InputLimitExceeded(kind~, limit=maximum) => {
+          field = Some("input." + kind)
+          limit = Some(maximum)
+        }
         _ => ()
       }
       let category = if @async.is_cancellation_error(err) {
@@ -250,6 +255,12 @@ async fn main {
           @repomix.ScanError => "ScanError"
           @repomix.GitError => "GitError"
           @repomix.RemoteError => "RemoteError"
+          @repomix.InputLimitExceeded(kind~, limit=maximum) =>
+            "InputLimitError (input." +
+            kind +
+            "; limit=" +
+            maximum.to_string() +
+            ")"
           @repomix.PartitionError::InvalidCap(_)
           | @repomix.PartitionError::DuplicatePath(_)
           | @repomix.PartitionError::TemplateTooLarge(_)
@@ -274,10 +285,11 @@ async fn main {
             let safe_category = match err {
               @repomix.ContextTextError(_) => "ContextTextError"
               @repomix.ContextSecurityFinding(_) => "ContextSecurityError"
+              @repomix.InputLimitExceeded(kind=_, limit=_) => "InputLimitError"
               _ => category
             }
             write_json_report(
-              error_report(safe_category, field, None, state.publication),
+              error_report(safe_category, field, limit, state.publication),
             ) catch {
               _ => ()
             }

@@ -37,6 +37,8 @@ let help : String =
   #|      --split-output N           Exact token cap per volume; -o names a new directory
   #|      --no-split-output          Disable configured volume output
   #|      --report-json              One machine-readable report on stderr
+  #|      --max-files N              Nonnegative candidate limit (default: 20000)
+  #|      --max-total-size N         Nonnegative raw-read byte limit (default: 209715200)
   #|      --top-files-len N          Top content-token files (default: 5; 0 hides)
   #|      --token-count-tree [N]     Content-token tree; optional minimum (>= 0)
   #|      --tokenizer-path PATH      Explicit o200k_base.tiktoken resource

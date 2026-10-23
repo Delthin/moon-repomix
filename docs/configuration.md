@@ -44,6 +44,8 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--token-budget N` | 正整数预算；等于预算通过，超限保留完整输出并返回 1 |
 | `--split-output N`, `--no-split-output` | 每卷精确 token 上限，`-o` 是新目录；与 stdout、`-o -` 及普通预算冲突 |
 | `--report-json`, `--no-report-json` | stderr 改为单份 JSON 运行报告，显式报告覆盖 quiet，stdout 仍是文档 |
+| `--max-files N` | 非负；过滤后、读取前的普通候选数上限，默认 20,000 |
+| `--max-total-size N` | 非负原始读取字节上限，默认 209,715,200（200 MiB）；最大 2^53−1 |
 | `--top-files-len N` | 按文件正文 token 数降序显示前 N 个文件，默认 5；0 关闭 |
 | `--token-count-tree [N]` | 显示文件和目录的 token 树；省略 N 时为 0，只显示计数 ≥ N 的节点 |
 | `--tokenizer-path PATH` | 显式指定词表文件；加载时校验资源 |
@@ -116,6 +118,8 @@ stdin 仅由这两个 CLI 参数显式开启，配置文件不会隐式读取终
 远程来源可在 `--config` 显式指定的文件中配置为 `"remote": {"url":"https://github.com/octocat/Hello-World.git", "branch":"master"}`。`branch` 可省略，URL 必填；配置中的远程 URL 同样要求目录为 `.`。语法压缩、Git 章节、回退和安全规则详见 [仓库上下文](context.md)。
 
 `tokenizer_path` 通过 CLI 或编程接口设置，不属于 JSON 字段。
+
+`input.maxFiles` / `input.maxTotalSize` 分别限制候选数与实际原始读取量，CLI 与库使用 `max_files` / `max_total_size`，均允许 0。过滤掉的路径不计候选；随后因密钥、二进制或无效 UTF-8 被排除的文件仍计候选和已读取字节，BOM、探测字节也计入。单文件 `maxFileSize` 的静态大小跳过可消耗 0 字节。累计读取至多多探测 1 byte 后以 `InputLimitError` 停止，错误不输出原文；模板、Git 与词表分别受已有独立上限约束。
 
 `output.splitOutput` 为正整数或 `false`，CLI 可覆盖或关闭。开启分卷且未指定路径时，输出目录为 `moon-repomix-output`。每卷预算、索引与不覆盖发布约定见 [精确 Token 分卷](partition.md)，机器报告见 [报告协议](reports.md)。
 

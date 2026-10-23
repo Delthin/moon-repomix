@@ -60,6 +60,10 @@ fn single_report(
       },
       "documents": 1,
     },
+    "limits": {
+      "maxFiles": options.max_files,
+      "maxTotalSize": options.max_total_size.to_string(),
+    },
     "tokens": {
       "documents": result.tokens.to_string(),
       "index": "0",
@@ -115,6 +119,10 @@ fn volumes_report(
       "kind": "directory",
       "documents": result.partition.volumes.length(),
       "indexFile": "index.json",
+    },
+    "limits": {
+      "maxFiles": options.max_files,
+      "maxTotalSize": options.max_total_size.to_string(),
     },
     "tokens": {
       "documents": tokens.to_string(),

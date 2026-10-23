@@ -37,7 +37,7 @@ async test "pack_volumes reuses scanned snapshots and counts independent complet
   )
   let cwd = @env.current_dir().unwrap()
   let runtime = Runtime::load(cwd + "/assets/tokenizer-o200k_base.tiktoken")
-  for style in [Style::Json, Style::Xml] {
+  for style in [Style::Json, Style::Xml, Style::Markdown, Style::Plain] {
     let base = options(
       temp,
       style~,
@@ -67,7 +67,12 @@ async test "pack_volumes reuses scanned snapshots and counts independent complet
     let mut total = result.partition.index_tokens.to_int64()
     for volume in result.partition.volumes {
       assert_true(volume.tokens <= limit)
-      let extension = if style is Style::Json { ".json" } else { ".xml" }
+      let extension = match style {
+        Style::Json => ".json"
+        Style::Xml => ".xml"
+        Style::Markdown => ".md"
+        Style::Plain => ".txt"
+      }
       assert_eq(result.file_names[volume.id], volume.id + extension)
       assert_eq(runtime.encoder.count(volume.text), volume.tokens)
       assert_eq(@utf8.encode(volume.text).length(), volume.bytes)
