@@ -31,6 +31,15 @@ struct Suite {
 }
 
 ///|
+fn normalized_path(path : String, windows : Bool) -> String {
+  if windows {
+    path.replace_all(old="\\", new="/")
+  } else {
+    path
+  }
+}
+
+///|
 fn environment() -> Map[String, String] {
   let null = if @env.get_env_var("OS") == Some("Windows_NT") {
     "NUL"
@@ -1520,6 +1529,9 @@ async fn stdout_baseline(s : Suite) -> Unit {
 ///|
 async fn main {
   let args = @env.args()
+  let windows = @env.get_env_var("OS") == Some("Windows_NT")
+  assert_eq(normalized_path("C:\\tmp\\file", true), "C:/tmp/file")
+  assert_eq(normalized_path("/tmp/a\\b", false), "/tmp/a\\b")
   guard args.length() >= 5 && args[3] == "--log-dir" else {
     fail(
       "Usage: volume-cli-test.mbtx BINARY VOCABULARY --log-dir NEW_ABSOLUTE_DIRECTORY [--xml-oracle] [--prepare-only] [--real-corpus DIRECTORY] [--verify-splits PREVIOUS_LOG_DIRECTORY]",
@@ -1530,24 +1542,27 @@ async fn main {
   for i = 5; i < args.length(); {
     if args[i] == "--verify-splits" {
       assert_true(i + 1 < args.length())
-      previous = Some(@fs.realpath(args[i + 1]))
+      previous = Some(normalized_path(@fs.realpath(args[i + 1]), windows))
       continue i + 2
     }
     if args[i] == "--real-corpus" {
       assert_true(i + 1 < args.length())
-      corpus = Some(@fs.realpath(args[i + 1]))
+      corpus = Some(normalized_path(@fs.realpath(args[i + 1]), windows))
       continue i + 2
     }
     assert_true(args[i] == "--xml-oracle" || args[i] == "--prepare-only")
     continue i + 1
   }
-  let logs = args[4]
+  let logs = normalized_path(args[4], windows)
   assert_true(logs.has_prefix("/") || (logs.length() > 2 && logs[1] == ':'))
   @fs.mkdir(logs) // Exclusive: never reuse, overwrite, or clean a supplied path.
   let s = {
-    binary: @fs.realpath(args[1]),
-    vocabulary: @fs.realpath(args[2]),
-    temp: @fs.tmpdir(prefix="moon-repomix-volume-cli-"),
+    binary: normalized_path(@fs.realpath(args[1]), windows),
+    vocabulary: normalized_path(@fs.realpath(args[2]), windows),
+    temp: normalized_path(
+      @fs.tmpdir(prefix="moon-repomix-volume-cli-"),
+      windows,
+    ),
     logs,
     environment: environment(),
     calls: 0,
