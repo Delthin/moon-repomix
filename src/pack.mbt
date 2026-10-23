@@ -1,7 +1,46 @@
 ///|
+priv struct PreparedPack {
+  document : Document
+  display : @output.Display
+  files : Array[FileStats]
+  skipped : Array[Skipped]
+  findings : Array[Finding]
+  security : SecurityStatus
+}
+
+///|
 /// Build and count a complete document. Remote inputs are fetched and cleaned here.
 /// The caller decides where to write the result.
 pub async fn pack(options : Options, runtime : Runtime) -> PackResult {
+  let prepared = prepare_pack(options, runtime)
+  let text = render_document(
+    prepared.document,
+    options.style,
+    options.full_metadata,
+    prepared.display,
+  )
+  @async.sleep(0)
+  let tokens = runtime.encoder.count(text)
+  let budget = match options.token_budget {
+    None => NotSet
+    Some(limit) if tokens > limit => Exceeded(limit)
+    Some(limit) => Within(limit)
+  }
+  {
+    document: prepared.document,
+    text,
+    bytes: @utf8.encode(text).length(),
+    tokens,
+    files: prepared.files,
+    skipped: prepared.skipped,
+    findings: prepared.findings,
+    security: prepared.security,
+    budget,
+  }
+}
+
+///|
+async fn prepare_pack(options : Options, runtime : Runtime) -> PreparedPack {
   if options.max_file_size <= 0 ||
     options.max_git_bytes <= 0 ||
     options.include_logs_count <= 0 ||
@@ -64,7 +103,7 @@ async fn pack_directory(
   remote_source : Json,
   keep_full : @selection.FileMatcher,
   context : ContextTexts,
-) -> PackResult {
+) -> PreparedPack {
   let cwd = @env.current_dir().unwrap_or(".")
   let root = @platform.absolute(options.directory, cwd)
   let destination = if options.stdout {
@@ -257,24 +296,9 @@ async fn pack_directory(
     instruction_text=context.instructions,
   )
   let display = display_for(options, selected.root, cwd)
-  let text = render_document(
-    document,
-    options.style,
-    options.full_metadata,
-    display,
-  )
-  @async.sleep(0)
-  let tokens = runtime.encoder.count(text)
-  let budget = match options.token_budget {
-    None => NotSet
-    Some(limit) if tokens > limit => Exceeded(limit)
-    Some(limit) => Within(limit)
-  }
   {
     document,
-    text,
-    bytes: @utf8.encode(text).length(),
-    tokens,
+    display,
     files,
     skipped,
     findings,
@@ -285,6 +309,5 @@ async fn pack_directory(
     } else {
       Excluded
     },
-    budget,
   }
 }

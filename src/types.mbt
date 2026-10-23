@@ -11,6 +11,14 @@ pub using @selection {type Skipped}
 pub using @document {type Document, type Section}
 
 ///|
+pub using @partition {
+  type Partition,
+  type Volume,
+  type PartitionError,
+  type UnitIdentity,
+}
+
+///|
 /// Validated resources shared by sequential pack operations.
 pub struct Runtime {
   encoder : @metrics.Encoder
@@ -77,6 +85,16 @@ pub struct PackResult {
   findings : Array[Finding]
   security : SecurityStatus
   budget : BudgetStatus
+}
+
+///|
+/// Prepared, scanned input split into separately bounded documents and an index.
+pub struct VolumePackResult {
+  partition : Partition
+  files : Array[FileStats]
+  skipped : Array[Skipped]
+  findings : Array[Finding]
+  security : SecurityStatus
 }
 
 ///|

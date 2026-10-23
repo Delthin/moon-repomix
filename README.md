@@ -167,6 +167,18 @@ let result = @repomix.pack(options, runtime)
 
 `options` 默认使用 XML；可通过 `style` 选择 `Xml`、`Markdown`、`Json`、`Plain`，同时选择对应的默认文件名。`options` 还接受 `compress`、`full_metadata`、`include_diffs`、`include_logs`、`include_logs_count`、`remote : String?` 和 `remote_branch : String?`。`file_paths : Array[String]?` 中，`None` 表示遍历，`Some(paths)` 只选择列表中的文件，`Some([])` 为零文件。远程调用使用目录 `"."`，例如 `options(".", remote=Some("https://github.com/octocat/Hello-World.git"))`。`pack` 返回结果，不写文件，并负责远程目录的获取与清理；由调用者决定如何处理输出和预算超限。词表同目录还须有 `tokenizer-unicode-16.0.0.txt`，两份资源均校验 SHA-256。一个 `Runtime` 可复用于多次顺序打包。接口见 [`src/pkg.generated.mbti`](src/pkg.generated.mbti)。
 
+### 分卷库（当前源码）
+
+本地联调当前源码时，可把同一份已选择、扫描和转换的文档分成独立上下文：
+
+```moonbit
+let volumes = @repomix.pack_volumes(options, runtime, max_tokens=32000)
+// 每个 volume.text 都经过完整 o200k_base 计数，且不超过 32,000 tokens。
+// volumes.partition.index_text 保存文件/章节到卷的映射。
+```
+
+每个文件或 Git 章节完整归属一卷，模板按卷重复，单项超限会明确报错。索引独立计数，`total_tokens` 包含各卷和索引；该接口返回字符串，不写目录。预算、元数据归属和底层回调说明见 [精确 Token 分卷](docs/partition.md)。已发布 v0.3.0 不包含此接口，CLI 仍输出单份文档。
+
 ## 开发与打包
 
 CI 通过官方安装脚本安装固定版本，再从 `moon-toolchain` 读取要求并核对实际编译器。升级时同步修改该文件与工作流中的 `MOONBIT_INSTALL_VERSION`，并重新运行黄金夹具和功能测试。

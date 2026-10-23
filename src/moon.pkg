@@ -8,10 +8,15 @@ import {
   "Delthin/moon_repomix/document",
   "Delthin/moon_repomix/output",
   "Delthin/moon_repomix/metrics",
+  "Delthin/moon_repomix/partition",
   "Delthin/moon_repomix/platform",
   "moonbitlang/async",
   "moonbitlang/core/env",
   "moonbitlang/core/encoding/utf8",
 }
+
+import {
+  "moonbitlang/async/fs",
+} for "wbtest"
 
 supported_targets = "native"

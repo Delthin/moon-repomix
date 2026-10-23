@@ -5,6 +5,7 @@ import {
   "Delthin/moon_repomix/config",
   "Delthin/moon_repomix/document",
   "Delthin/moon_repomix/metrics",
+  "Delthin/moon_repomix/partition",
   "Delthin/moon_repomix/security",
   "Delthin/moon_repomix/selection",
 }
@@ -13,6 +14,8 @@ import {
 pub fn options(String, style? : @config.Style, compress? : Bool, keep_full_patterns? : Array[String], header_text? : String, instruction_file_path? : String?, full_metadata? : Bool, file_summary? : Bool, directory_structure? : Bool, include_files? : Bool, git_sections? : Bool, metadata? : Bool, show_line_numbers? : Bool, output_file_path_style? : @config.PathStyle, file_paths? : Array[String]?, include_diffs? : Bool, include_logs? : Bool, include_logs_count? : Int, remote? : String?, remote_branch? : String?) -> @config.Options raise
 
 pub async fn pack(@config.Options, Runtime) -> PackResult
+
+pub async fn pack_volumes(@config.Options, Runtime, max_tokens~ : Int) -> VolumePackResult
 
 pub fn version() -> String
 
@@ -65,12 +68,24 @@ pub(all) enum SecurityStatus {
   Disabled
 }
 
+pub struct VolumePackResult {
+  partition : @partition.Partition
+  files : Array[FileStats]
+  skipped : Array[@selection.Skipped]
+  findings : Array[@security.Finding]
+  security : SecurityStatus
+}
+
 // Type aliases
 pub using @document {type Document}
 
 pub using @security {type Finding}
 
 pub using @config {type Options}
+
+pub using @partition {type Partition}
+
+pub using @partition {type PartitionError}
 
 pub using @config {type PathStyle}
 
@@ -79,5 +94,9 @@ pub using @document {type Section}
 pub using @selection {type Skipped}
 
 pub using @config {type Style}
+
+pub using @partition {type UnitIdentity}
+
+pub using @partition {type Volume}
 
 // Traits
