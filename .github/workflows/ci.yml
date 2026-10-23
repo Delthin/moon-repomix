@@ -67,6 +67,15 @@ jobs:
         run: moon run --target native scripts/output-formats-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken --json-oracle
       - name: Advanced repository context functional test
         run: moon run --target native scripts/advanced-context-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken ${{ runner.os == 'Linux' && '--xml-oracle' || '' }}
+      - name: Mixed full/skeleton context and template functional test
+        run: >-
+          moon run --target native scripts/context-customization-test.mbtx
+          _build/native/release/build/cmd/moon-repomix/moon-repomix.exe
+          assets/tokenizer-o200k_base.tiktoken
+          --text-error-category ContextTextError
+          --security-error-category ContextSecurityError
+          --log-dir "${{ runner.temp }}/context-customization"
+          ${{ runner.os == 'Linux' && '--xml-oracle' || '' }}
       - name: Reproducible demo
         run: moon run --target native scripts/demo.mbtx
       - name: Real repository self-pack
@@ -99,6 +108,13 @@ jobs:
         with:
           name: moonbit-self-pack-${{ matrix.platform }}
           path: dist/self-pack/moonbit-*
+          if-no-files-found: ignore
+      - name: Context customization diagnostics
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: context-customization-${{ matrix.platform }}
+          path: ${{ runner.temp }}/context-customization
           if-no-files-found: ignore
       - name: Pinned Node for Linux performance comparison
         if: runner.os == 'Linux'

@@ -185,6 +185,8 @@ moon run --target native scripts/input-list-test.mbtx
 moon run --target native scripts/self-pack-test.mbtx ../moon-repomix-self-check
 ```
 
+混合/模板聚合用例为 `scripts/context-customization-test.mbtx`，接收二进制、词表、`--text-error-category ContextTextError`、`--security-error-category ContextSecurityError` 和 `--log-dir` 参数；日志目录使用尚不存在的绝对路径。它核对全文/骨架、模板、Git、扫描及完整预算；可用 `--xml-oracle` 增加 XML 独立读回。
+
 格式功能测试覆盖四种格式的文件输出、stdout、预算边界和失败保留；安装了 `jq` 时可追加 `--json-oracle`，独立解析 JSON 并还原每个文件的正文。
 
 自打包检查会新建输出目录，保留 XML、Markdown 和日志；已有目录会报错。安装了 `xmllint` 时可追加 `--xml-oracle`，独立核对黄金数据从 XML 还原后的正文。

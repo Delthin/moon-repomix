@@ -2,11 +2,11 @@
 // Standalone functional unit; never builds the product or uses the network.
 // Preparation (compiles helpers, does not invoke the product):
 //   moon run --target native scripts/context-customization-test.mbtx --prepare
-// After explicit READY:
+// Run against a built CLI:
 //   moon run --target native scripts/context-customization-test.mbtx BINARY VOCABULARY \
 //     --text-error-category NAME --security-error-category NAME \
 //     --log-dir ABSOLUTE_NEW_DIRECTORY [--xml-oracle]
-// Error category names are supplied from the implementation handoff, not guessed.
+// Error category names must match the public CLI error contract.
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -878,7 +878,7 @@ async fn main {
     }
     check(!@fs.exists(temp), "owned tmpdir cleanup self-test")
     println(
-      "PREPARED: compiled; assertions, synthetic Git and cleanup passed; product CLI NOT invoked. Waiting for explicit READY.",
+      "PREPARED: assertions, synthetic Git and cleanup passed; product CLI NOT invoked.",
     )
     return
   }
