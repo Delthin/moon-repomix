@@ -4,9 +4,17 @@ package "Delthin/moon_repomix/input"
 // Values
 pub async fn read(String, Int) -> ReadResult
 
+pub async fn read_metered(String, Int, Int64) -> MeteredRead
+
 // Errors
+pub(all) suberror TotalSizeLimitExceeded
 
 // Types and methods
+pub(all) struct MeteredRead {
+  result : ReadResult
+  read_bytes : Int64
+}
+
 pub(all) enum ReadResult {
   Loaded(Snapshot)
   Skipped(String)

@@ -1,6 +1,7 @@
 ///|
 priv struct Walker {
   options : SelectionOptions
+  max_files : Int32
   root : String
   output : String?
   includes : Array[Pattern]
@@ -77,6 +78,9 @@ async fn Walker::walk(
     if is_dir {
       self.walk(path, rules)
     } else if included_parts(self.includes, parts[:]) {
+      if self.files.length() >= self.max_files {
+        raise SelectionError::FileLimitExceeded(limit=self.max_files)
+      }
       self.files.push({ path, relative, })
     } else {
       self.skip(relative, "NotIncluded")
@@ -89,11 +93,16 @@ async fn Walker::walk(
 /// literal root-relative entries and their ancestors, never recurse directories.
 /// Ignore files are read strictly; I/O and cancellation propagate unchanged.
 /// Files and skips are sorted by UTF-8 bytes of root-relative paths.
+/// max_files bounds filtered regular candidates before appending, not accepted bodies.
 pub async fn select(
   root : String,
   options : SelectionOptions,
   file_paths~ : Array[String]? = None,
+  max_files~ : Int32 = 2147483647,
 ) -> Selection {
+  if max_files < 0 {
+    raise SelectionError::FileLimitExceeded(limit=max_files)
+  }
   let paths = exact_paths(file_paths)
   let mut input = separators(root)
   if !absolute(input) {
@@ -128,7 +137,12 @@ pub async fn select(
     for relative in paths {
       match filter.reason(relative, true) {
         Some(reason) => skipped.push({ path: relative, reason, })
-        None => files.push({ path: join(root, relative), relative, })
+        None => {
+          if files.length() >= max_files {
+            raise SelectionError::FileLimitExceeded(limit=max_files)
+          }
+          files.push({ path: join(root, relative), relative, })
+        }
       }
     }
     return { root, files, skipped, }
@@ -147,6 +161,7 @@ pub async fn select(
   }
   let walker : Walker = {
     options,
+    max_files,
     root,
     output,
     includes,

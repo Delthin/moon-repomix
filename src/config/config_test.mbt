@@ -12,6 +12,28 @@ test "defaults and presence-aware configuration precedence" {
   assert_eq(defaults.encoding, "o200k_base")
   assert_true(defaults.security_check)
   assert_eq(defaults.max_file_size, 52428800)
+  assert_eq(defaults.max_files, 20000)
+  assert_eq(defaults.max_total_size, 209715200L)
+  let limits = @config.parse_json(
+    "{\"input\":{\"maxFiles\":2,\"maxTotalSize\":9007199254740991}}",
+  )
+  let configured_limits = @config.resolve(cli, Some(limits))
+  assert_eq(configured_limits.max_files, 2)
+  assert_eq(configured_limits.max_total_size, 9007199254740991L)
+  let cleared_limits = @config.resolve(
+    @config.parse_cli(["--max-files", "0", "--max-total-size=0"]),
+    Some(limits),
+  )
+  assert_eq(cleared_limits.max_files, 0)
+  assert_eq(cleared_limits.max_total_size, 0L)
+  let maximum_limits = @config.resolve(
+    @config.parse_cli([
+      "--max-files=2147483647", "--max-total-size", "9007199254740991",
+    ]),
+    None,
+  )
+  assert_eq(maximum_limits.max_files, 2147483647)
+  assert_eq(maximum_limits.max_total_size, 9007199254740991L)
   assert_eq(defaults.token_budget, None)
   assert_eq(defaults.split_output, @config.SplitOutput::Disabled)
   assert_false(cli.report_json)
@@ -292,6 +314,13 @@ test "strict rejection of invalid configuration and CLI" {
       "null",
       "{",
       "{\"remote\":true}",
+      "{\"input\":{\"maxFiles\":-1}}",
+      "{\"input\":{\"maxFiles\":2147483648}}",
+      "{\"input\":{\"maxFiles\":1.5}}",
+      "{\"input\":{\"maxTotalSize\":-1}}",
+      "{\"input\":{\"maxTotalSize\":1.5}}",
+      "{\"input\":{\"maxTotalSize\":9007199254740992}}",
+      "{\"input\":{\"maxTotalSize\":\"12\"}}",
       "{\"output\":{\"fileSummary\":1}}",
       "{\"output\":{\"files\":\"false\"}}",
       "{\"output\":{\"showLineNumbers\":null}}",
@@ -377,6 +406,17 @@ test "strict rejection of invalid configuration and CLI" {
       ["--split-output=2147483648"],
       ["--split-output"],
       ["--report-json=false"],
+      ["--max-files"],
+      ["--max-files="],
+      ["--max-files=-1"],
+      ["--max-files=1.5"],
+      ["--max-files=2147483648"],
+      ["--max-total-size"],
+      ["--max-total-size="],
+      ["--max-total-size=-1"],
+      ["--max-total-size=1.5"],
+      ["--max-total-size=9007199254740992"],
+      ["--max-total-size=9999999999999999999999999999999999"],
       ["--output-file-path-style=unknown"],
       ["--output-file-path-style"],
       ["--no-files=true"],

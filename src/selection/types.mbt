@@ -47,6 +47,7 @@ pub(all) struct Selection {
 /// Validation failures. Filesystem failures and cancellation propagate unchanged.
 pub(all) suberror SelectionError {
   InvalidRoot(String)
+  FileLimitExceeded(limit~ : Int32)
   InvalidPattern(
     source~ : String,
     line~ : Int32,

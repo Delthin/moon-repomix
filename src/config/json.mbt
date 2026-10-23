@@ -39,6 +39,19 @@ fn json_nonnegative_int(
 }
 
 ///|
+fn json_nonnegative_size(
+  value : Json,
+  field : String,
+) -> Int64 raise ConfigError {
+  match value {
+    Number(n, ..) if n >= 0 &&
+      n <= 9007199254740991.0 &&
+      n.to_int64().to_double() == n => n.to_int64()
+    _ => raise InvalidValue(field)
+  }
+}
+
+///|
 fn json_positive_int(value : Json, field : String) -> Int32 raise ConfigError {
   let result = json_nonnegative_int(value, field)
   if result == 0 {
@@ -204,6 +217,14 @@ pub fn parse_json(text : String) -> Patch raise ConfigError {
             "maxGitBytes" =>
               patch.max_git_bytes = Some(
                 json_positive_int(value, "input.maxGitBytes"),
+              )
+            "maxFiles" =>
+              patch.max_files = Some(
+                json_nonnegative_int(value, "input.maxFiles"),
+              )
+            "maxTotalSize" =>
+              patch.max_total_size = Some(
+                json_nonnegative_size(value, "input.maxTotalSize"),
               )
             "maxFileSize" =>
               patch.max_file_size = Some(

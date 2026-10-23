@@ -93,6 +93,8 @@ pub(all) struct Patch {
   mut top_files_length : Int32?
   mut token_count_tree : TokenCountTree?
   mut max_file_size : Int32?
+  mut max_files : Int32?
+  mut max_total_size : Int64?
   mut tokenizer_path : String?
 } derive(Debug)
 
@@ -131,6 +133,8 @@ pub fn Patch::empty() -> Patch {
     top_files_length: None,
     token_count_tree: None,
     max_file_size: None,
+    max_files: None,
+    max_total_size: None,
     tokenizer_path: None,
   }
 }
@@ -186,6 +190,8 @@ pub(all) struct Options {
   top_files_length : Int32
   token_count_tree : TokenCountTree
   max_file_size : Int32
+  max_files : Int32
+  max_total_size : Int64
   tokenizer_path : String?
   quiet : Bool
   verbose : Bool
@@ -304,6 +310,13 @@ fn validate_patch(patch : Patch) -> Unit raise ConfigError {
   }
   if patch.max_file_size is Some(value) && value <= 0 {
     raise InvalidValue("input.maxFileSize")
+  }
+  if patch.max_files is Some(value) && value < 0 {
+    raise InvalidValue("input.maxFiles")
+  }
+  if patch.max_total_size is Some(value) &&
+    (value < 0 || value > 9007199254740991L) {
+    raise InvalidValue("input.maxTotalSize")
   }
   if patch.output is Some(value) {
     validate_path(value, "output.filePath")
@@ -492,6 +505,10 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
     ),
     max_file_size: patch.max_file_size.unwrap_or(
       file.max_file_size.unwrap_or(52428800),
+    ),
+    max_files: patch.max_files.unwrap_or(file.max_files.unwrap_or(20000)),
+    max_total_size: patch.max_total_size.unwrap_or(
+      file.max_total_size.unwrap_or(209715200L),
     ),
     tokenizer_path: match patch.tokenizer_path {
       Some(_) as value => value

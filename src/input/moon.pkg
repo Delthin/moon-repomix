@@ -6,4 +6,9 @@ import {
   "moonbitlang/core/encoding/utf8",
 }
 
+import {
+  "Delthin/moon_repomix",
+  "moonbitlang/core/env",
+} for "test"
+
 supported_targets = "native"

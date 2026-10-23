@@ -12,6 +12,8 @@ test "library options select formats and their matching output filenames" {
     assert_eq(options.style, style)
     assert_eq(options.output, "repomix-output." + suffix)
     assert_true(options.security_check)
+    assert_eq(options.max_files, 20000)
+    assert_eq(options.max_total_size, 209715200L)
     assert_false(options.full_metadata)
     assert_true(
       options.file_summary &&
@@ -55,6 +57,20 @@ test "library options select formats and their matching output filenames" {
     @moon_repomix.options(".", file_paths=Some([])).file_paths,
     Some([]),
   )
+  let zero = @moon_repomix.options(".", max_files=0, max_total_size=0L)
+  assert_eq(zero.max_files, 0)
+  assert_eq(zero.max_total_size, 0L)
+  for (count, total) in [(-1, 0L), (0, -1L), (0, 9007199254740992L)] {
+    try
+      @moon_repomix.options(".", max_files=count, max_total_size=total)
+    catch {
+      @config.ConfigError::InvalidValue(field) =>
+        assert_true(field == "input.maxFiles" || field == "input.maxTotalSize")
+      _ => fail("unexpected options error")
+    } noraise {
+      _ => fail("invalid SDK resource limits must fail")
+    }
+  }
   let paths = ["src/a.mbt"]
   let precise = @moon_repomix.options(".", file_paths=Some(paths))
   paths.push("src/b.mbt")

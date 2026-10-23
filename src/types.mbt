@@ -43,6 +43,7 @@ pub(all) suberror PackError {
   ContextTextError(String)
   ContextSecurityFinding(String)
   SelectionError
+  InputLimitExceeded(kind~ : String, limit~ : Int64)
   ScanError
   ResourceError
   GitError
@@ -124,6 +125,8 @@ pub fn options(
   include_logs_count~ : Int32 = 50,
   remote~ : String? = None,
   remote_branch~ : String? = None,
+  max_files~ : Int32 = 20000,
+  max_total_size~ : Int64 = 209715200L,
 ) -> Options raise {
   let cli = @config.parse_cli([directory])
   cli.patch.style = Some(style)
@@ -145,6 +148,8 @@ pub fn options(
   cli.patch.include_logs_count = Some(include_logs_count)
   cli.patch.remote = remote
   cli.patch.remote_branch = remote_branch
+  cli.patch.max_files = Some(max_files)
+  cli.patch.max_total_size = Some(max_total_size)
   let resolved = @config.resolve(cli, None)
   {
     ..resolved,

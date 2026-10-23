@@ -18,6 +18,25 @@ fn nonnegative_int(value : String, field : String) -> Int32 raise ConfigError {
 }
 
 ///|
+fn nonnegative_size(value : String, field : String) -> Int64 raise ConfigError {
+  if value.is_empty() {
+    raise InvalidValue(field)
+  }
+  let mut result = 0L
+  for c in value {
+    if c < '0' || c > '9' {
+      raise InvalidValue(field)
+    }
+    let digit = (c.to_int() - 48).to_int64()
+    if result > (9007199254740991L - digit) / 10 {
+      raise InvalidValue(field)
+    }
+    result = result * 10 + digit
+  }
+  result
+}
+
+///|
 fn cli_positive_int(value : String, field : String) -> Int32 raise ConfigError {
   let result = nonnegative_int(value, field)
   if result == 0 {
@@ -146,6 +165,8 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       | "--remote"
       | "--remote-branch"
       | "--max-git-bytes"
+      | "--max-files"
+      | "--max-total-size"
       | "-c"
       | "--config"
       | "--tokenizer-path" => true
@@ -214,6 +235,12 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
         "--max-git-bytes" =>
           patch.max_git_bytes = Some(
             cli_positive_int(value, "input.maxGitBytes"),
+          )
+        "--max-files" =>
+          patch.max_files = Some(nonnegative_int(value, "input.maxFiles"))
+        "--max-total-size" =>
+          patch.max_total_size = Some(
+            nonnegative_size(value, "input.maxTotalSize"),
           )
         "--remote" => {
           validate_path(value, "remote.url")

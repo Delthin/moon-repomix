@@ -88,6 +88,8 @@ pub(all) struct Options {
   top_files_length : Int
   token_count_tree : TokenCountTree
   max_file_size : Int
+  max_files : Int
+  max_total_size : Int64
   tokenizer_path : String?
   quiet : Bool
   verbose : Bool
@@ -127,6 +129,8 @@ pub(all) struct Patch {
   mut top_files_length : Int?
   mut token_count_tree : TokenCountTree?
   mut max_file_size : Int?
+  mut max_files : Int?
+  mut max_total_size : Int64?
   mut tokenizer_path : String?
 } derive(@debug.Debug)
 pub fn Patch::empty() -> Self

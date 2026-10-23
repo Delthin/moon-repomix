@@ -6,11 +6,12 @@ pub fn file_matcher(Array[String]) -> FileMatcher raise SelectionError
 
 pub async fn path_filter(String, SelectionOptions, file_paths? : Array[String]?) -> PathFilter
 
-pub async fn select(String, SelectionOptions, file_paths? : Array[String]?) -> Selection
+pub async fn select(String, SelectionOptions, file_paths? : Array[String]?, max_files? : Int) -> Selection
 
 // Errors
 pub(all) suberror SelectionError {
   InvalidRoot(String)
+  FileLimitExceeded(limit~ : Int)
   InvalidPattern(source~ : String, line~ : Int, pattern~ : String, detail~ : String)
   InvalidRuleFile(String)
   InvalidGitMetadata(String)

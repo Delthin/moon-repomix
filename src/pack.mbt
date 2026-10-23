@@ -42,6 +42,9 @@ pub async fn pack(options : Options, runtime : Runtime) -> PackResult {
 ///|
 async fn prepare_pack(options : Options, runtime : Runtime) -> PreparedPack {
   if options.max_file_size <= 0 ||
+    options.max_files < 0 ||
+    options.max_total_size < 0 ||
+    options.max_total_size > 9007199254740991L ||
     options.max_git_bytes <= 0 ||
     options.include_logs_count <= 0 ||
     options.include_logs_count > 10000 ||
@@ -132,7 +135,10 @@ async fn pack_directory(
     root,
     selection_options,
     file_paths=options.file_paths,
+    max_files=options.max_files,
   ) catch {
+    @selection.SelectionError::FileLimitExceeded(limit~) =>
+      raise InputLimitExceeded(kind="maxFiles", limit=limit.to_int64())
     err => {
       if @async.is_cancellation_error(err) {
         raise err
@@ -147,6 +153,7 @@ async fn pack_directory(
   let skipped = selected.skipped.copy()
   let findings : Array[Finding] = []
   let mut since_timer_poll = 0
+  let mut read_bytes = 0L
   for candidate in selected.files {
     // pause keeps the task cancellable without creating an OS timer per file.
     // Periodically poll timers as well, including when filesystem calls finish
@@ -158,7 +165,20 @@ async fn pack_directory(
       @async.pause()
       since_timer_poll += 1
     }
-    match @input.read(candidate.path, options.max_file_size) {
+    let metered = @input.read_metered(
+      candidate.path,
+      options.max_file_size,
+      options.max_total_size - read_bytes,
+    ) catch {
+      @input.TotalSizeLimitExceeded =>
+        raise InputLimitExceeded(
+          kind="maxTotalSize",
+          limit=options.max_total_size,
+        )
+      err => raise err
+    }
+    read_bytes += metered.read_bytes
+    match metered.result {
       Skipped(reason) => {
         skipped.push({ path: candidate.relative, reason, })
         excluded.add(context_path_key(candidate.relative))
