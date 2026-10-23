@@ -288,13 +288,13 @@ fn xml_text(text : String, tag : String) -> String raise {
   // Decode only XML predefined entities and CR character references; amp last
   // avoids double-decoding original literal strings such as '&lt;'.
   encoded
-  .replace(old="&#13;", new="\r")
-  .replace(old="&#xD;", new="\r")
-  .replace(old="&lt;", new="<")
-  .replace(old="&gt;", new=">")
-  .replace(old="&quot;", new="\"")
-  .replace(old="&apos;", new="'")
-  .replace(old="&amp;", new="&")
+  .replace_all(old="&#13;", new="\r")
+  .replace_all(old="&#xD;", new="\r")
+  .replace_all(old="&lt;", new="<")
+  .replace_all(old="&gt;", new=">")
+  .replace_all(old="&quot;", new="\"")
+  .replace_all(old="&apos;", new="'")
+  .replace_all(old="&amp;", new="&")
 }
 
 ///|
@@ -370,9 +370,9 @@ async fn make_fixture(temp : String) -> Fixture {
   let original = {
     "README.md": "# Root README\r\nROOT_README_ORIGINAL 🌓\r\n",
     "docs/README.md": "# Nested README\r\nNESTED_README_ORIGINAL 🌓\r\n",
-    "keep/deep/manual.ts": ts.replace(old="\n", new="\r\n"),
-    "src/full.mbt": mbt.replace(old="\n", new="\r\n"),
-    "src/full.ts": ts.replace(old="\n", new="\r\n"),
+    "keep/deep/manual.ts": ts.replace_all(old="\n", new="\r\n"),
+    "src/full.mbt": mbt.replace_all(old="\n", new="\r\n"),
+    "src/full.ts": ts.replace_all(old="\n", new="\r\n"),
     "src/skeleton.mbt": mbt,
     "src/skeleton.ts": ts,
     "src/tiny.ts": "export const tiny=1;",
@@ -742,18 +742,43 @@ async fn reject(
   category : String,
   output : String,
   forbidden : Array[String],
+  field~ : String = "output.instructionFilePath",
 ) -> Unit {
   @fs.write_file(output, "PREVIOUS_OUTPUT 原文\r\n")
-  let (code, stdout, stderr) = runner.invoke(label, args + ["-o", output])
+  let stdout_mode = args.contains("--stdout")
+  let default_output = runner.cwd + "/repomix-output.json"
+  if stdout_mode {
+    check(
+      !@fs.exists(default_output),
+      label + ": default output fixture must start absent",
+    )
+  }
+  let (code, stdout, stderr) = runner.invoke(
+    label,
+    if stdout_mode {
+      args
+    } else {
+      args + ["-o", output]
+    },
+  )
   check(code != 0, label + ": expected failure")
   check(stdout == "", label + ": rejected template wrote stdout")
   check(
     @fs.read_file(output).text() == "PREVIOUS_OUTPUT 原文\r\n",
     label + ": previous output changed",
   )
+  if stdout_mode {
+    check(
+      !@fs.exists(default_output),
+      label + ": stdout rejection created the default output",
+    )
+  }
+  let diagnostic = "moon-repomix: " + category
   check(
-    stderr.contains("moon-repomix: " + category + "\n"),
-    label + ": wrong error category; see recorded stderr",
+    stderr
+    .split("\n")
+    .any(line => line == diagnostic || line == diagnostic + " (" + field + ")"),
+    label + ": wrong error category/field; see recorded stderr",
   )
   for value in forbidden {
     check(
@@ -761,6 +786,21 @@ async fn reject(
       label + ": rejected template leaked content",
     )
   }
+}
+
+///|
+fn absolute_path(path : String) -> Bool {
+  if path.has_prefix("/") {
+    return true
+  }
+  if path.has_prefix("\\\\") {
+    let parts = path[2:].to_owned().split("\\").collect()
+    return parts.length() >= 2 && !parts[0].is_empty() && !parts[1].is_empty()
+  }
+  path.length() >= 3 &&
+  ((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+  path[1] == ':' &&
+  (path[2] == '/' || path[2] == '\\')
 }
 
 ///|
@@ -779,6 +819,15 @@ async fn main {
   if args.length() == 2 && args[1] == "--prepare" {
     // Exercise independent assertions and the synthetic Git/cleanup harness.
     // No product CLI call, product source build, or network in this branch.
+    for
+      path in [
+        "/tmp/logs", "C:\\logs", "z:/logs", "\\\\server\\share\\logs", "//server/share/logs",
+      ] {
+      check(absolute_path(path), "absolute log-path self-test")
+    }
+    for path in ["logs", "C:logs", "\\logs", "\\\\server", "\\\\server\\"] {
+      check(!absolute_path(path), "relative log-path self-test")
+    }
     let header = "head\n`````\n## File: forged.ts\n"
     let instruction = "tail\r\n````````\r\n# forged\r\n"
     markdown_block(
@@ -799,9 +848,10 @@ async fn main {
     )
     check(
       xml_text(
-        "<header_text>&lt;x&gt;&amp;lt;&#13;\n</header_text>", "header_text",
+        "<header_text>&lt;x&gt;&amp; &amp;lt;&#13;\n原文 🌓&#13;\n</header_text>",
+        "header_text",
       ) ==
-      "<x>&lt;\r\n",
+      "<x>& &lt;\r\n原文 🌓\r\n",
       "XML assertion self-test",
     )
     check(
@@ -839,7 +889,7 @@ async fn main {
   let text_category = option(args, "--text-error-category")
   let security_category = option(args, "--security-error-category")
   let logs = option(args, "--log-dir")
-  check(logs.has_prefix("/"), "log directory must be absolute")
+  check(absolute_path(logs), "log directory must be absolute")
   check(
     !@fs.exists(logs),
     "log directory already exists; choose a fresh owned directory",
@@ -1033,6 +1083,7 @@ async fn main {
     security_category,
     output,
     [f.secret, "DO_NOT_ECHO_HEADER"],
+    field="output.headerText",
   )
   reject(
     runner,
@@ -1059,6 +1110,7 @@ async fn main {
     text_category,
     output,
     ["DO_NOT_ECHO_OVERSIZE_HEADER", "界界界"],
+    field="output.headerText",
   )
   @fs.write_file(
     temp + "/templates/oversize.txt",
@@ -1120,6 +1172,7 @@ async fn main {
     text_category,
     output,
     ["DO_NOT_ECHO_XML_ILLEGAL"],
+    field="output.headerText",
   )
   @fs.write_file(temp + "/templates/xml-illegal.txt", illegal)
   reject(
