@@ -35,6 +35,7 @@ pub(all) struct Patch {
   mut output : String?
   mut style : Style?
   mut compress : Bool?
+  mut keep_full_patterns : Array[String]
   mut full_metadata : Bool?
   mut include_diffs : Bool?
   mut include_logs : Bool?
@@ -62,6 +63,7 @@ pub fn Patch::empty() -> Patch {
     output: None,
     style: None,
     compress: None,
+    keep_full_patterns: [],
     full_metadata: None,
     include_diffs: None,
     include_logs: None,
@@ -104,6 +106,7 @@ pub(all) struct Options {
   stdout : Bool
   style : Style
   compress : Bool
+  keep_full_patterns : Array[String]
   full_metadata : Bool
   include_diffs : Bool
   include_logs : Bool
@@ -215,6 +218,9 @@ fn validate_patch(patch : Patch) -> Unit raise ConfigError {
   for p in patch.ignore {
     validate_pattern(p)
   }
+  for p in patch.keep_full_patterns {
+    validate_pattern(p)
+  }
   if patch.encoding is Some(value) && value != "o200k_base" {
     raise InvalidValue("tokenCount.encoding")
   }
@@ -324,6 +330,10 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
     stdout: cli.stdout || output == "-",
     style,
     compress: patch.compress.unwrap_or(file.compress.unwrap_or(false)),
+    keep_full_patterns: append_unique(
+      file.keep_full_patterns,
+      patch.keep_full_patterns,
+    ),
     full_metadata: patch.full_metadata.unwrap_or(
       file.full_metadata.unwrap_or(false),
     ),

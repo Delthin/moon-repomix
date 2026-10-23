@@ -16,6 +16,16 @@ JS/TS/Python 的相邻删除区合并，AST 容器子节点之间的展示空白
 
 每份压缩记录包含 `path`、`language`、`applied`、`reason`、`ranges`、`originalTokens` 和 `outputTokens`。`ranges` 是 `[startLine,endLine]` 数组，从 1 开始、包含两端，回指原文件而非输出行号。相邻或重叠的行区间合并，区间表示保留片段覆盖到的行，不表示整行均被保留；压缩包 API 仍提供逐片段范围。不支持、解析失败或正文 token 数没有减少时保留原文，并记录原因。骨架适合先了解结构；需要实现细节时可用 `--include` 选定路径，再关闭压缩。
 
+### 按路径保留原文（当前源码）
+
+```sh
+moon-repomix ./project --compress --keep-full 'src/core/**,README.md' --style markdown -o review.md
+```
+
+`--keep-full` 为已选文件设置原文例外，其余文件仍按语言提取骨架。模式相对输入根，沿用 include 的花括号、字符类和目录后代匹配；它只控制压缩方式，文件选择与扫描保持同一流程。库入口使用 `options(..., compress=true, keep_full_patterns=["src/core/**"])`，配置使用 `output.keepFull`。
+
+主动保留的完整记录为 `applied: false`、`reason: "kept-full"`、空行区间，原始/输出正文计数相同；`language` 为 null，表示未调用解析器。概览以 `keptFull` 单独计数。关闭全局压缩时全部文件保留原文。此能力需当前源码，v0.3.0 的使用说明见 [固定版本](https://github.com/Delthin/moon-repomix/blob/v0.3.0/docs/context.md)。
+
 终端的 `File-body tokens` 对比接受文件的原始正文与实际输出正文，文件排名和目录树使用后者。最终文档计数还包含目录树、格式包装、来源、压缩记录及 Git 章节，预算以这个完整计数为准。
 
 ## 导出变更和历史

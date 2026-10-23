@@ -103,6 +103,19 @@ async test "custom braces expand nested alternatives with bounded products and l
     assert_true(included(patterns, path), msg=path)
   }
   assert_false(included(patterns, "nested/src/a.mbt"))
+  let full = file_matcher(["README.md", "src/{core,api}", "字/?.mbt"])
+  for
+    path in ["README.md", "src/core/a.ts", "src/api/deep/b.mbt", "字/猫.mbt"] {
+    assert_true(full.matches(path), msg=path)
+  }
+  for
+    path in [
+      "nested/README.md", "nested/src/core/a.ts", "src/other/a.ts", "../README.md",
+      "/README.md", "src//core/a.ts",
+    ] {
+    assert_false(full.matches(path), msg=path)
+  }
+  assert_false(file_matcher([]).matches("README.md"))
   let product = "{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}"
   assert_eq(custom_patterns([product], "include").length(), 256)
   assert_eq(custom_patterns(Array::make(256, "plain"), "include").length(), 256)

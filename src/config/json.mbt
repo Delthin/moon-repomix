@@ -97,6 +97,8 @@ pub fn parse_json(text : String) -> Patch raise ConfigError {
               patch.token_count_tree = Some(json_token_tree(value))
             "compress" =>
               patch.compress = Some(json_bool(value, "output.compress"))
+            "keepFull" =>
+              patch.keep_full_patterns = json_patterns(value, "output.keepFull")
             "fullMetadata" =>
               patch.full_metadata = Some(
                 json_bool(value, "output.fullMetadata"),

@@ -15,7 +15,23 @@ test "defaults and presence-aware configuration precedence" {
   assert_eq(defaults.token_budget, None)
   assert_eq(defaults.top_files_length, 5)
   assert_false(defaults.full_metadata)
+  assert_eq(defaults.keep_full_patterns, [])
   assert_eq(defaults.file_paths, None)
+  let mixed = @config.parse_json(
+    "{\"output\":{\"compress\":true,\"keepFull\":[\"README.md\",\"src/core/**\"]}}",
+  )
+  let mixed_options = @config.resolve(
+    @config.parse_cli(["--keep-full=src/core/**,src/*.{mbt,ts}"]),
+    Some(mixed),
+  )
+  assert_true(mixed_options.compress)
+  assert_eq(mixed_options.keep_full_patterns, [
+    "README.md", "src/core/**", "src/*.{mbt,ts}",
+  ])
+  assert_eq(mixed.keep_full_patterns, ["README.md", "src/core/**"])
+  assert_false(
+    @config.resolve(@config.parse_cli(["--no-compress"]), Some(mixed)).compress,
+  )
   let detailed = @config.parse_json("{\"output\":{\"fullMetadata\":true}}")
   assert_true(
     @config.resolve(@config.parse_cli([]), Some(detailed)).full_metadata,
@@ -215,6 +231,12 @@ test "strict rejection of invalid configuration and CLI" {
       ),
       (
         #|{"output":{"compress":1}}
+      ),
+      (
+        #|{"output":{"keepFull":[false]}}
+      ),
+      (
+        #|{"output":{"keepFull":["../escape"]}}
       ),
       (
         #|{"output":{"fullMetadata":"true"}}

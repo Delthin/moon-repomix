@@ -131,6 +131,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       | "--output"
       | "--style"
       | "--include"
+      | "--keep-full"
       | "-i"
       | "--ignore"
       | "--token-count-encoding"
@@ -170,6 +171,11 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
         "--include" =>
           patch.include_patterns = append_unique(
             patch.include_patterns,
+            csv_patterns(value),
+          )
+        "--keep-full" =>
+          patch.keep_full_patterns = append_unique(
+            patch.keep_full_patterns,
             csv_patterns(value),
           )
         "-i" | "--ignore" =>

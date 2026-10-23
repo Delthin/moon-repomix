@@ -57,6 +57,7 @@ pub(all) struct Options {
   stdout : Bool
   style : Style
   compress : Bool
+  keep_full_patterns : Array[String]
   full_metadata : Bool
   include_diffs : Bool
   include_logs : Bool
@@ -86,6 +87,7 @@ pub(all) struct Patch {
   mut output : String?
   mut style : Style?
   mut compress : Bool?
+  mut keep_full_patterns : Array[String]
   mut full_metadata : Bool?
   mut include_diffs : Bool?
   mut include_logs : Bool?

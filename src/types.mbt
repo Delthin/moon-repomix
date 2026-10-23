@@ -83,6 +83,7 @@ pub fn options(
   directory : String,
   style~ : Style = Xml,
   compress~ : Bool = false,
+  keep_full_patterns~ : Array[String] = [],
   full_metadata~ : Bool = false,
   file_paths~ : Array[String]? = None,
   include_diffs~ : Bool = false,
@@ -94,6 +95,7 @@ pub fn options(
   let cli = @config.parse_cli([directory])
   cli.patch.style = Some(style)
   cli.patch.compress = Some(compress)
+  cli.patch.keep_full_patterns = keep_full_patterns.copy()
   cli.patch.full_metadata = Some(full_metadata)
   cli.patch.include_diffs = Some(include_diffs)
   cli.patch.include_logs = Some(include_logs)

@@ -9,6 +9,7 @@ let help : String =
   #|      --stdin0                   Read a NUL-separated file list (for git -z)
   #|      --style FORMAT             xml|markdown|json|plain (default: xml)
   #|      --compress / --no-compress  Syntax-tree code skeletons with source lines
+  #|      --keep-full GLOBS          Keep matching files intact when compressing
   #|      --full-metadata            Full per-file records and source maps in any format
   #|      --include-diffs            Export staged and unstaged Git patches
   #|      --include-logs             Export recent Git commit messages and paths

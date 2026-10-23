@@ -116,6 +116,7 @@ fn BraceParser::sequence(
 fn custom_patterns(
   raw_patterns : Array[String],
   source : String,
+  root_relative~ : Bool = false,
 ) -> Array[Pattern] raise SelectionError {
   let result : Array[Pattern] = []
   for raw in raw_patterns {
@@ -136,7 +137,7 @@ fn custom_patterns(
       }
       result.push({
         ..pattern,
-        basename: pattern.basename && source != "include",
+        basename: pattern.basename && source != "include" && !root_relative,
       })
     }
   }

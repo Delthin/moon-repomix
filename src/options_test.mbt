@@ -14,6 +14,7 @@ test "library options select formats and their matching output filenames" {
     assert_true(options.security_check)
     assert_false(options.full_metadata)
     assert_eq(options.file_paths, None)
+    assert_eq(options.keep_full_patterns, [])
   }
   assert_true(@moon_repomix.options(".", full_metadata=true).full_metadata)
   assert_eq(
@@ -24,4 +25,8 @@ test "library options select formats and their matching output filenames" {
   let precise = @moon_repomix.options(".", file_paths=Some(paths))
   paths.push("src/b.mbt")
   assert_eq(precise.file_paths, Some(["src/a.mbt"]))
+  let keep = ["src/core/**"]
+  let mixed = @moon_repomix.options(".", compress=true, keep_full_patterns=keep)
+  keep.push("README.md")
+  assert_eq(mixed.keep_full_patterns, ["src/core/**"])
 }

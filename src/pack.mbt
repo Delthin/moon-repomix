@@ -11,8 +11,11 @@ pub async fn pack(options : Options, runtime : Runtime) -> PackResult {
     (options.remote is None && options.remote_branch is Some(_)) {
     raise ConfigurationError
   }
+  let keep_full = @selection.file_matcher(options.keep_full_patterns) catch {
+    _ => raise ConfigurationError
+  }
   match options.remote {
-    None => pack_directory(options, runtime, Json::null())
+    None => pack_directory(options, runtime, Json::null(), keep_full)
     Some(url) => {
       if options.directory != "." {
         raise ConfigurationError
@@ -42,11 +45,12 @@ pub async fn pack(options : Options, runtime : Runtime) -> PackResult {
         remote: None,
         remote_branch: None,
       }
-      pack_directory(local_options, runtime, {
-        "kind": "remote",
-        "url": checkout.url,
-        "revision": checkout.revision,
-      })
+      pack_directory(
+        local_options,
+        runtime,
+        { "kind": "remote", "url": checkout.url, "revision": checkout.revision },
+        keep_full,
+      )
     }
   }
 }
@@ -56,6 +60,7 @@ async fn pack_directory(
   options : Options,
   runtime : Runtime,
   remote_source : Json,
+  keep_full : @selection.FileMatcher,
 ) -> PackResult {
   let cwd = @env.current_dir().unwrap_or(".")
   let root = @platform.absolute(options.directory, cwd)
@@ -151,7 +156,19 @@ async fn pack_directory(
         let mut text = snapshot.text
         let mut tokens = original_tokens
         if options.compress {
-          let result = @compression.compress(candidate.relative, snapshot.text)
+          let result : @compression.Outcome = if keep_full.matches(
+              candidate.relative,
+            ) {
+            {
+              text: snapshot.text,
+              language: None,
+              applied: false,
+              reason: Some("kept-full"),
+              ranges: [],
+            }
+          } else {
+            @compression.compress(candidate.relative, snapshot.text)
+          }
           let compressed_tokens = if result.applied {
             runtime.encoder.count(result.text)
           } else {

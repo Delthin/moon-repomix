@@ -2,6 +2,8 @@
 package "Delthin/moon_repomix/selection"
 
 // Values
+pub fn file_matcher(Array[String]) -> FileMatcher raise SelectionError
+
 pub async fn path_filter(String, SelectionOptions, file_paths? : Array[String]?) -> PathFilter
 
 pub async fn select(String, SelectionOptions, file_paths? : Array[String]?) -> Selection
@@ -20,6 +22,9 @@ pub(all) struct Candidate {
   path : String
   relative : String
 }
+
+type FileMatcher
+pub fn FileMatcher::matches(Self, String) -> Bool
 
 type PathFilter
 pub async fn PathFilter::allows(Self, String) -> Bool
