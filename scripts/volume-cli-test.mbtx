@@ -7,6 +7,8 @@ import {
   "moonbitlang/core/json",
   "moonbitlang/core/string",
   "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/encoding/hex",
+  "moonbitlang/x@0.5.5/crypto",
 }
 
 ///|
@@ -16,7 +18,8 @@ import {
 //        [--real-corpus ABSOLUTE_REPOMIX_1_18_1_DIRECTORY]
 //        [--verify-splits ABSOLUTE_PREVIOUS_LOG_DIRECTORY]
 // --verify-splits rechecks captured successful documents without new CLI calls.
-// Requires local git and shasum. Inputs/outputs are synthetic and locally owned.
+// Requires local git. SHA256 uses moonbitlang/x@0.5.5/crypto (Apache-2.0),
+// without local modifications. Inputs/outputs are synthetic and locally owned.
 struct Suite {
   binary : String
   vocabulary : String
@@ -86,17 +89,9 @@ async fn git(s : Suite, args : Array[String], cwd : String) -> String {
 }
 
 ///|
-async fn sha(s : Suite, path : String) -> String {
-  let (code, out, _) = capture(
-    "shasum",
-    ["-a", "256", path],
-    s.temp,
-    s.environment,
-  )
-  assert_eq(code, 0)
-  let text = @utf8.decode(out)
-  guard text.length() >= 64 else { fail("missing SHA256") }
-  text[:64].to_owned()
+async fn sha(_s : Suite, path : String) -> String {
+  let bytes = @fs.read_file(path).binary()
+  @hex.encode(Bytes::from_array(@crypto.sha256(bytes)[:]))
 }
 
 ///|
@@ -206,6 +201,7 @@ async fn invoke(
   name : String,
   args : Array[String],
   target : String,
+  expected_stdout? : Bytes,
 ) -> (Int32, Json) {
   s.calls += 1
   let log = s.logs + "/" + s.calls.to_string() + "-" + name
@@ -234,7 +230,18 @@ async fn invoke(
   if target != "" {
     snapshot(s, target, log)
   }
-  assert_eq(out.length(), 0)
+  match expected_stdout {
+    None => assert_eq(out.length(), 0)
+    Some(expected) => {
+      assert_eq(target, "")
+      assert_eq(out, expected)
+      put(
+        log + "/documents.json",
+        archive(s, log + "/stdout.bin", log + "/output.bin").stringify(indent=2) +
+        "\n",
+      )
+    }
+  }
   let report_text = @utf8.decode(err)
   assert_true(report_text.has_suffix("\n"))
   // parse the entire stderr, not a trimmed line or a substring of mixed output.
@@ -261,6 +268,8 @@ async fn invoke(
     }
     expected.sort()
     assert_eq(after, expected)
+  } else {
+    assert_eq(after, before)
   }
   (code, report)
 }
@@ -811,15 +820,9 @@ fn xml_escape(value : String) -> String {
 }
 
 ///|
-async fn exercise(
-  s : Suite,
-  originals : Map[String, String],
-  xml_oracle : Bool,
-) -> Unit {
-  let input = s.temp + "/input"
-  let output = s.temp + "/outputs/"
-  let common = [
-    input,
+fn context_args(s : Suite) -> Array[String] {
+  [
+    s.temp + "/input",
     "--compress",
     "--keep-full=**/*",
     "--full-metadata",
@@ -833,6 +836,17 @@ async fn exercise(
     "--include-logs",
     "--include-logs-count=1",
   ]
+}
+
+///|
+async fn exercise(
+  s : Suite,
+  originals : Map[String, String],
+  xml_oracle : Bool,
+) -> Unit {
+  let input = s.temp + "/input"
+  let output = s.temp + "/outputs/"
+  let common = context_args(s)
   let baseline_path = output + "baseline.json"
   let (code, baseline_report) = invoke(
     s,
@@ -1473,6 +1487,37 @@ async fn verify_saved_splits(s : Suite, previous : String) -> Unit {
 }
 
 ///|
+async fn stdout_baseline(s : Suite) -> Unit {
+  let path = s.temp + "/outputs/baseline.json"
+  let expected = @fs.read_file(path).binary()
+  let baseline = @json.parse(
+    @fs.read_file(s.logs + "/1-whole-json-context/stderr.bin").text(),
+  )
+  let (code, report) = invoke(
+    s,
+    "single-machine-stdout",
+    context_args(s) + ["--style=json", "--stdout"],
+    "",
+    expected_stdout=expected,
+  )
+  assert_eq(code, 0)
+  ok(report, "pack", number(prop(prop(baseline, "counts"), "acceptedFiles")))
+  assert_eq(
+    prop(report, "output"),
+    ({ "kind": "stdout", "documents": 1 } : Json),
+  )
+  for field in ["tokens", "bytes", "security", "style", "counts", "limits"] {
+    assert_eq(prop(report, field), prop(baseline, field))
+  }
+  assert_eq(
+    decimal(prop(prop(report, "bytes"), "total")),
+    expected.length().to_int64(),
+  )
+  assert_eq(@fs.read_file(path).binary(), expected)
+  pass(s, "single-machine-stdout")
+}
+
+///|
 async fn main {
   let args = @env.args()
   guard args.length() >= 5 && args[3] == "--log-dir" else {
@@ -1558,6 +1603,7 @@ async fn main {
   if corpus is Some(root) {
     real_corpus(s, root)
   }
+  stdout_baseline(s)
   assert_eq(s.calls, s.passed)
   completed = true
   println(
