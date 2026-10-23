@@ -7,6 +7,7 @@ let help : String =
   #|      --stdout                   Write only the document to stdout
   #|      --stdin                    Read a literal UTF-8 file list, one path per line
   #|      --stdin0                   Read a NUL-separated file list (for git -z)
+  #|      --explain-path PATH        Explain one literal local path; repeat up to 256
   #|      --style FORMAT             xml|markdown|json|plain (default: xml)
   #|      --compress / --no-compress  Syntax-tree code skeletons with source lines
   #|      --keep-full GLOBS          Keep matching files intact when compressing

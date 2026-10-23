@@ -22,6 +22,10 @@
 
 输入限额失败使用 `InputLimitError`，`field` 为 `input.maxFiles` 或 `input.maxTotalSize`，`limit` 为对应上限。`error.category` 是固定错误类别；`field` 只给出受影响的配置字段，`limit` 在适用时给出十进制限制。未知或不适用的值为 JSON null；失败报告不伪造未得到的处理计数。解析其他参数失败时，已出现的有效报告开关仍尽量保留 JSON 诊断。
 
+## 入选原因操作
+
+`--explain-path` 的 stdout 是独立的 requested-paths 决策 JSON，而不是上下文文档；同时使用 `--report-json` 时，stderr 返回同一操作的数量、来源配额和安全摘要，省略 `paths` 明细。`operation` 为 `explain_selection`，`scope` 为 `requested-paths`；没有未执行的 token 或文件发布计数。路径都完成查询即可退出 0，`excluded` 不是运行失败；非法查询、规则错误、候选/读取限额失败则退出非零，具体范围见 [查询说明](selection-explanation.md)。
+
 ## 提交点与失败处理
 
 `publication` 是本次运行的输出状态：

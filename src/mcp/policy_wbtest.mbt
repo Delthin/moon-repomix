@@ -55,6 +55,35 @@ test "client parameters only narrow host authority and validate every literal pa
     }
     assert_true(failed)
   }
+  assert_eq(explanation_paths({ "paths": ["src/a.mbt", "src/b.mbt"] }), [
+    "src/a.mbt", "src/b.mbt",
+  ])
+  assert_eq(explanation_paths({ "paths": [] }), [])
+  let bad_explanations : Array[Json] = [
+    {},
+    { "paths": false },
+    { "paths": [false] },
+    { "paths": ["../outside"] },
+    { "paths": ["/absolute"] },
+    { "paths": ["a\\b"] },
+    { "paths": ["a//b"] },
+    { "paths": ["a\u0000b"] },
+    { "paths": ["a".repeat(4097)] },
+    { "paths": Array::make(257, "src/a.mbt") },
+    { "paths": [], "securityCheck": false },
+    { "paths": [], "root": "/" },
+    { "paths": [], "maxFiles": 9999 },
+    { "paths": [], "remote": "https://example.invalid" },
+  ]
+  for args in bad_explanations {
+    let failed = try {
+      ignore(explanation_paths(args))
+      false
+    } catch {
+      _ => true
+    }
+    assert_true(failed)
+  }
   assert_true(safe_path("src/中文 file.mbt"))
   assert_true(safe_path("src/name\nline.mbt"))
   assert_false(safe_path(""))

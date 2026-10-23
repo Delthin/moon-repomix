@@ -87,6 +87,24 @@ fn resource_description(value : Resource) -> Json {
 }
 
 ///|
+fn explanation_paths(args : Json) -> Array[String] raise {
+  let values = fields(args, ["paths"])
+  guard values.get("paths") is Some(Array(paths)) && paths.length() <= 256 else {
+    return invalid()
+  }
+  let result : Array[String] = []
+  for path in paths {
+    guard path is String(path) &&
+      safe_path(path) &&
+      @utf8.encode(path).length() <= 4096 else {
+      return invalid()
+    }
+    result.push(path)
+  }
+  result
+}
+
+///|
 fn requested_options(
   base : @repomix.Options,
   maximum : Int32,

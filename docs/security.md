@@ -40,4 +40,6 @@ Git 诊断使用 `git:diff:N` 或 `git:commit:ID` 标签，偏移和行号相对
 
 `ScanError` 包含 `InvalidBomOffset`、`InvalidText`、`InvalidEngineRange`、`InputTooLarge`，不携带原文或引擎消息。扫描函数同步执行，无 I/O 和日志；调用者处理失败时也不得记录快照正文。内存耗尽等原生运行时终止不属于可恢复的 MoonBit 错误。
 
+入选原因查询与打包共用源码读取、扫描和 XML 表示检查；只返回固定阶段、原因、检测器标签和安全规则位置，不返回正文、规则内容或绝对祖先路径。查询不处理模板、Git、压缩与最终预算，见 [查询范围](selection-explanation.md)。
+
 依赖原码保持原样，坐标转换和过滤位于本项目适配层。显式关闭扫描时，CLI 显示警告，结果记录 `SecurityStatus.Disabled`。

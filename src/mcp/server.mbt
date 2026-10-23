@@ -115,6 +115,54 @@ async fn build(state : State, args : Json) -> Json {
 }
 
 ///|
+async fn explain(state : State, args : Json) -> Json {
+  let paths = explanation_paths(args)
+  if state.busy {
+    return error_result("Busy")
+  }
+  state.busy = true
+  defer {
+    state.busy = false
+  }
+  let report = @repomix.explain_selection(state.options, paths) catch {
+    err => {
+      if @async.is_cancellation_error(err) {
+        raise err
+      }
+      let category = match err {
+        @repomix.InputLimitExceeded(kind=_, limit=_) => "InputLimitError"
+        @repomix.ConfigurationError => "ConfigurationError"
+        @repomix.SelectionError => "SelectionError"
+        @repomix.ScanError => "ScanError"
+        _ => "InspectionError"
+      }
+      return error_result(category)
+    }
+  }
+  guard report.to_json() is Object(fields) else {
+    return error_result("InspectionError")
+  }
+  let content = fields.copy()
+  content["ok"] = true
+  let response : Json = {
+    "content": [
+      {
+        "type": "text",
+        "text": "Requested-path explanation ready. It does not modify the current context.",
+      },
+    ],
+    "structuredContent": Json::object(content),
+    "isError": false,
+  }
+  let bytes = @utf8.encode(response.stringify()).length()
+  if bytes > 4194304 || bytes > state.max_output_bytes {
+    return error_result("ResourceLimit")
+  }
+  @async.sleep(0)
+  response
+}
+
+///|
 async fn dispatch(state : State, request_name : String, params : Json) -> Json {
   match request_name {
     "tools/list" => {
@@ -127,6 +175,7 @@ async fn dispatch(state : State, request_name : String, params : Json) -> Json {
       let args = values.get("arguments").unwrap_or({})
       match name {
         "pack_repository" => build(state, args)
+        "explain_selection" => explain(state, args)
         "release_context" => {
           ignore(fields(args, []))
           state.resources.clear()

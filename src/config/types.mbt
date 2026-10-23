@@ -147,6 +147,7 @@ pub(all) struct Cli {
   action : Action
   stdout : Bool
   stdin_mode : StdinMode
+  explain_paths : Array[String]
   report_json : Bool
   mcp : Bool
   mcp_max_tokens : Int32

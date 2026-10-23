@@ -6,6 +6,13 @@ test "defaults and presence-aware configuration precedence" {
   assert_eq(cli.action, @config.Action::Pack)
   assert_eq(cli.patch.security_check, None)
   assert_eq(cli.stdin_mode, @config.StdinMode::Off)
+  assert_eq(cli.explain_paths, [])
+  assert_eq(
+    @config.parse_cli([
+      "--explain-path=src/a.mbt", "--explain-path", "src/b.mbt",
+    ]).explain_paths,
+    ["src/a.mbt", "src/b.mbt"],
+  )
   let defaults = @config.resolve(cli, None)
   assert_eq(defaults.output, "repomix-output.xml")
   assert_eq(defaults.style, @config.Style::Xml)
@@ -412,6 +419,14 @@ test "strict rejection of invalid configuration and CLI" {
   for
     args in [
       ["--remote"],
+      ["--explain-path="],
+      ["--explain-path=a", "--mcp"],
+      ["--explain-path=a", "--stdin"],
+      ["--explain-path=a", "--stdin0"],
+      ["--explain-path=a", "--stdout"],
+      ["--explain-path=a", "--output=-"],
+      ["--explain-path=a", "--output=x.json"],
+      ["--explain-path=a", "--init"],
       ["--mcp=true"],
       ["--mcp", "--stdout"],
       ["--mcp", "--stdin"],

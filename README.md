@@ -44,13 +44,21 @@ moon-repomix ./project --include 'src/**/*.{mbt,ts,py}' -o -
 
 `--stdin` 每行一个相对路径，`--stdin0` 使用 NUL 分隔；空输入选零文件，重复项去重，列表仍受 ignore、原始内容扫描和 Git 路径筛选约束。`-o -`、`--output=-` 和配置中的 `output.filePath: "-"` 均输出到 stdout；`-o ./-` 写入普通文件。`--no-dot-ignore` 仅关闭 `.ignore`，`.repomixignore` 始终生效。详细规则见 [配置文档](docs/configuration.md)。
 
+## 入选原因查询（当前源码）
+
+```sh
+moon-repomix ./project --explain-path src/main.mbt --explain-path dist/app.js
+```
+
+stdout 返回本次请求的 JSON 决策，区分选择规则、输入、密钥扫描和表示检查，给出安全的规则位置；不加载词表或写入上下文。它检查至多 256 个字面路径，完整打包还需处理模板、Git、压缩和预算。库与 MCP 也提供 `explain_selection`，见 [查询文档](docs/selection-explanation.md)。
+
 ## MCP 本地入口（当前源码）
 
 ```sh
 moon-repomix /path/to/repository --mcp --compress --mcp-max-tokens 12000
 ```
 
-客户端调用 `pack_repository` 生成受限的上下文卷，再按返回 URI 读取。根目录、扫描与输入限额由启动参数固定；资源只存内存，失败保留上一份成功结果，`release_context` 可释放缓存。支持当前每请求版本协议及旧 initialize 客户端，配置示例和限制见 [MCP stdio](docs/mcp.md)。这是当前源码能力，正式 v0.3.0 尚不包含该入口。
+客户端调用 `pack_repository` 生成受限的上下文卷，再按返回 URI 读取。根目录、扫描与输入限额由启动参数固定；资源只存内存，失败保留上一份成功结果，`release_context` 可释放缓存，`explain_selection` 可查询字面路径的入选原因而不改变缓存。支持当前每请求版本协议及旧 initialize 客户端，配置示例和限制见 [MCP stdio](docs/mcp.md)。这是当前源码能力，正式 v0.3.0 尚不包含该入口。
 
 ## 混合上下文与模板（当前源码）
 

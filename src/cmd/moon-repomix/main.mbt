@@ -115,6 +115,16 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
     ) {
     raise Configuration
   }
+  if !cli.explain_paths.is_empty() &&
+    (
+      resolved.remote is Some(_) ||
+      resolved.remote_branch is Some(_) ||
+      resolved.stdout ||
+      resolved.split_output is Enabled(_) ||
+      resolved.token_budget is Some(_)
+    ) {
+    raise Configuration
+  }
   let directory_target = match resolved.split_output {
     Disabled => None
     Enabled(_) =>
@@ -135,6 +145,38 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
   }
   if !options.security_check && !cli.report_json {
     @stdio.stderr.write("Warning: secret scanning is disabled.\n")
+  }
+  if !cli.explain_paths.is_empty() {
+    let result = @repomix.explain_selection(options, cli.explain_paths)
+    let value = result.to_json()
+    let text = value.stringify() + "\n"
+    state.publication = "unknown"
+    @stdio.stdout.write(text) catch {
+      err => {
+        if @async.is_cancellation_error(err) {
+          raise err
+        }
+        raise Write
+      }
+    }
+    state.publication = "committed"
+    @async.protect_from_cancel(
+      () => {
+        if cli.report_json {
+          write_json_report(explanation_report(result))
+        } else if !cli.quiet {
+          @stdio.stderr.write(
+            "Explained " +
+            result.paths.length().to_string() +
+            " requested paths; accepted " +
+            result.accepted_count.to_string() +
+            ".\n",
+          )
+        }
+      },
+      resume_on_cancel=false,
+    )
+    return 0
   }
   let resource = match options.tokenizer_path {
     Some(path) => @platform.absolute(path, cwd)

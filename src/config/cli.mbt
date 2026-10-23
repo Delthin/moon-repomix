@@ -108,6 +108,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
   let mut action = Pack
   let mut stdout = false
   let mut stdin_mode = StdinMode::Off
+  let explain_paths : Array[String] = []
   let mut report_json = false
   let mut mcp = false
   let mut mcp_max_tokens = 16000
@@ -174,6 +175,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       | "--mcp-max-tokens"
       | "--mcp-max-output-bytes"
       | "--mcp-max-volumes"
+      | "--explain-path"
       | "-c"
       | "--config"
       | "--tokenizer-path" => true
@@ -213,6 +215,13 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
             patch.keep_full_patterns,
             csv_patterns(value),
           )
+        "--explain-path" => {
+          validate_path(value, "explain.paths")
+          if explain_paths.length() >= 256 {
+            raise InvalidValue("explain.paths")
+          }
+          explain_paths.push(value)
+        }
         "--header-text" => patch.header_text = Some(value)
         "--instruction-file-path" => patch.instruction_file_path = Some(value)
         "-i" | "--ignore" =>
@@ -350,6 +359,16 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
   if mcp && (stdin_mode != Off || stdout || report_json || action == Init) {
     raise Conflict("mcp")
   }
+  if !explain_paths.is_empty() &&
+    (
+      mcp ||
+      stdin_mode != Off ||
+      stdout ||
+      action == Init ||
+      patch.output is Some(_)
+    ) {
+    raise Conflict("explain")
+  }
   validate_patch(patch)
   {
     directory: directory.unwrap_or("."),
@@ -357,6 +376,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
     action,
     stdout,
     stdin_mode,
+    explain_paths,
     report_json,
     mcp,
     mcp_max_tokens,

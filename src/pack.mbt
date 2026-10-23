@@ -41,11 +41,8 @@ pub async fn pack(options : Options, runtime : Runtime) -> PackResult {
 
 ///|
 async fn prepare_pack(options : Options, runtime : Runtime) -> PreparedPack {
-  if options.max_file_size <= 0 ||
-    options.max_files < 0 ||
-    options.max_total_size < 0 ||
-    options.max_total_size > 9007199254740991L ||
-    options.max_git_bytes <= 0 ||
+  validate_source_limits(options)
+  if options.max_git_bytes <= 0 ||
     options.include_logs_count <= 0 ||
     options.include_logs_count > 10000 ||
     options.encoding != "o200k_base" ||
@@ -165,55 +162,19 @@ async fn pack_directory(
       @async.pause()
       since_timer_poll += 1
     }
-    let metered = @input.read_metered(
-      candidate.path,
-      options.max_file_size,
+    let screened = read_screened(
+      candidate,
+      options,
       options.max_total_size - read_bytes,
-    ) catch {
-      @input.TotalSizeLimitExceeded =>
-        raise InputLimitExceeded(
-          kind="maxTotalSize",
-          limit=options.max_total_size,
-        )
-      err => raise err
-    }
-    read_bytes += metered.read_bytes
-    match metered.result {
+    )
+    read_bytes += screened.read_bytes
+    findings.append(screened.findings)
+    match screened.result {
       Skipped(reason) => {
         skipped.push({ path: candidate.relative, reason, })
         excluded.add(context_path_key(candidate.relative))
       }
       Loaded(snapshot) => {
-        if options.security_check {
-          let hits = @security.scan(
-            candidate.relative,
-            snapshot.text,
-            snapshot.bom_bytes,
-          ) catch {
-            _ => raise ScanError
-          }
-          if !hits.is_empty() {
-            findings.append(hits)
-            skipped.push({
-              path: candidate.relative,
-              reason: "SecurityFinding",
-            })
-            excluded.add(context_path_key(candidate.relative))
-            continue
-          }
-        }
-        if options.style is Xml &&
-          (
-            !@output.xml_representable(candidate.relative) ||
-            !@output.xml_representable(snapshot.text)
-          ) {
-          skipped.push({
-            path: candidate.relative,
-            reason: "UnrepresentableText",
-          })
-          excluded.add(context_path_key(candidate.relative))
-          continue
-        }
         let original_tokens = runtime.encoder.count(snapshot.text)
         let mut text = snapshot.text
         let mut tokens = original_tokens

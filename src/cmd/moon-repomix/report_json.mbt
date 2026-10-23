@@ -167,6 +167,20 @@ fn error_report(
 }
 
 ///|
+fn explanation_report(result : @repomix.SelectionReport) -> Json raise {
+  guard result.to_json() is Object(fields) else {
+    fail("Invalid explanation projection")
+  }
+  let summary = fields.copy()
+  ignore(summary.remove("paths"))
+  summary["status"] = "ok"
+  summary["exitCode"] = 0
+  summary["publication"] = "committed"
+  summary["output"] = { "kind": "stdout" }
+  Json::object(summary)
+}
+
+///|
 async fn write_json_report(value : Json) -> Unit {
   @stdio.stderr.write(value.stringify() + "\n")
 }

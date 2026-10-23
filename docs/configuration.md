@@ -14,6 +14,7 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `-o, --output PATH` | 输出文件路径；`-` 表示 stdout，`./-` 表示普通文件 |
 | `--stdout` | 正文写入 stdout，诊断写入 stderr |
 | `--stdin` | 显式读取 UTF-8 文件列表，每行一个路径，接受 CRLF |
+| `--explain-path PATH` | 重复查询至多 256 个本地字面路径；JSON stdout，不生成上下文，见 [入选原因](selection-explanation.md) |
 | `--stdin0` | 显式读取 NUL 分隔的 UTF-8 文件列表，适配 Git `-z` |
 | `--style xml\|markdown\|json\|plain` | 默认 XML；默认文件名为 `repomix-output` 加对应的 `.xml`、`.md`、`.json`、`.txt` 扩展名 |
 | `--compress`, `--no-compress` | 开启或关闭语法树结构压缩，默认关闭 |
