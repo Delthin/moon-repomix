@@ -1,0 +1,492 @@
+///|
+// Build the native CLI first, then pass its binary and vocabulary paths:
+// moon build --target native --release
+// moon run --target native scripts/display-controls-test.mbtx BINARY VOCABULARY [--xml-oracle]
+// Record the tested source revision, script SHA, binary SHA before/after, and output.
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+  "moonbitlang/core/encoding/utf8",
+}
+
+///|
+fn check(ok : Bool, message : String) -> Unit raise {
+  if !ok {
+    fail(message)
+  }
+}
+
+///|
+async fn git(args : Array[String], cwd : String) -> String {
+  let null = if @env.get_env_var("OS") == Some("Windows_NT") {
+    "NUL"
+  } else {
+    "/dev/null"
+  }
+  let environment = {
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": null,
+    "GIT_CONFIG_SYSTEM": null,
+    "GIT_ATTR_NOSYSTEM": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+  }
+  for
+    key in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR", "PATHEXT"] {
+    if @env.get_env_var(key) is Some(value) {
+      environment[key] = value
+    }
+  }
+  let safe = ["-c", "core.hooksPath=" + null, "-c", "core.fsmonitor=false"]
+  let safe = safe + ["-c", "core.attributesFile=" + null]
+  let (input, writer) = @process.write_to_process()
+  writer.close()
+  let (code, out, _) = @process.collect_output(
+    "git",
+    safe + args,
+    cwd~,
+    stdin=input,
+    inherit_env=false,
+    extra_env=environment,
+  )
+  check(code == 0, "fixture Git: " + args[0])
+  out.text()
+}
+
+///|
+// Clean only the fresh owned fixture directory; Git clean unlinks symlinks first.
+async fn cleanup(temp : String) -> Unit {
+  let init = ["init", "--quiet", "--template=", "--initial-branch=fixture"]
+  ignore(git(init, temp))
+  ignore(git(["clean", "--quiet", "-ffdx", "--", "."], temp))
+  assert_eq(@fs.readdir(temp), [".git"])
+  @fs.rmdir(temp, recursive=true)
+}
+
+///|
+struct Runner {
+  binary : String
+  cwd : String
+  base : Array[String]
+  mut calls : Int32
+}
+
+///|
+async fn Runner::run(
+  self : Runner,
+  flags : Array[String],
+  exit~ : Int32 = 0,
+) -> (String, String) {
+  self.calls += 1
+  let args = self.base + flags
+  let record : Json = { "case": self.calls, "cwd": self.cwd, "args": args }
+  println("COMMAND " + record.stringify())
+  let (code, out, err) = @async.with_timeout(60000, () => {
+    let (input, writer) = @process.write_to_process()
+    writer.close() // Real EOF, never NUL as async stdin.
+    let (code, out, err) = @process.collect_output(
+      self.binary,
+      args,
+      cwd=self.cwd,
+      stdin=input,
+    )
+    (code, out.text(), err.text())
+  })
+  println("EXIT " + code.to_string())
+  check(code == exit, "CLI #" + self.calls.to_string() + ": " + err)
+  (out, err)
+}
+
+///|
+fn field(text : String, name : String) -> Json? raise {
+  guard @json.parse(text) is Object(fields) else { fail("JSON object") }
+  fields.get(name)
+}
+
+///|
+fn between(text : String, open : String, close : String) -> String raise {
+  guard text.find(open) is Some(start) else { fail("missing " + open) }
+  let tail = text[start + open.length():].to_owned()
+  guard tail.find(close) is Some(end) else { fail("unclosed " + open) }
+  tail[:end].to_owned()
+}
+
+///|
+fn xml_decode(text : String) -> String {
+  // All occurrences, ampersand last; literal '&lt;' is not decoded twice.
+  text
+  .replace_all(old="&#13;", new="\r")
+  .replace_all(old="&#xD;", new="\r")
+  .replace_all(old="&lt;", new="<")
+  .replace_all(old="&gt;", new=">")
+  .replace_all(old="&quot;", new="\"")
+  .replace_all(old="&apos;", new="'")
+  .replace_all(old="&amp;", new="&")
+}
+
+///|
+fn xml_field(text : String, tag : String) -> String raise {
+  xml_decode(between(text, "<" + tag + ">", "</" + tag + ">"))
+}
+
+///|
+fn fenced(text : String, marker : String, payload : String) -> Unit raise {
+  let parts = text.split(marker).collect()
+  assert_eq(parts.length(), 2)
+  let block = parts[1].to_owned()
+  let opener = between("\n" + block, "\n", "\n")
+  let mut size = 0
+  for ch in opener {
+    if ch != '`' {
+      break
+    }
+    size += 1
+  }
+  let fence = opener[:size].to_owned()
+  check(size >= 3 && !payload.contains(fence), "unsafe Markdown fence")
+  let ending = if payload.has_suffix("\n") { "" } else { "\n" }
+  let expected = payload + ending + fence + "\n"
+  check(block[opener.length() + 1:].has_prefix(expected), "Markdown body")
+}
+
+///|
+fn count(report : String, label : String) -> Int32 raise {
+  for word in report.split(" "); previous = "" {
+    if word == label {
+      break @string.parse_int(previous)
+    }
+    continue word.to_owned()
+  } nobreak {
+    fail("missing " + label)
+  }
+}
+
+///|
+fn json_bodies(
+  text : String,
+  expected : Map[String, String],
+  prefix : String,
+) -> Unit raise {
+  guard field(text, "files") is Some(Object(values)) else { fail("JSON files") }
+  assert_eq(values.length(), expected.length())
+  for path, body in expected {
+    assert_eq(values.get(prefix + path), Some(Json(body)))
+  }
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  check(
+    args.length() == 3 || args.length() == 4,
+    "BINARY VOCABULARY [--xml-oracle]",
+  )
+  if args.length() == 4 {
+    check(args[3] == "--xml-oracle", "unknown option")
+  }
+  let owned = @fs.tmpdir(prefix="moon-display-controls-")
+  defer @async.protect_from_cancel(() => cleanup(owned))
+  let canonical = @fs.realpath(owned)
+  let temp = if @env.get_env_var("OS") == Some("Windows_NT") {
+    canonical.replace_all(old="\\", new="/")
+  } else {
+    canonical // Backslashes are valid POSIX filename characters.
+  }
+  let root = temp + "/repo"
+  @fs.mkdir(root + "/src", recursive=true)
+  @fs.mkdir(temp + "/templates")
+  @fs.mkdir(temp + "/configuration")
+  let initial = "///|\r\n// 原文 🌓 & <one> & <two>\r\n\r\npub fn answer() -> Int { 42 }\r\n"
+  // Literal expectations, not the renderer's numbering algorithm.
+  let raw = {
+    "src/原文.mbt": initial + "// STAGED_BODY\r\n// UNSTAGED_BODY\r\n",
+    "edge.txt": "BODY_START\n`````\n## File: forged\nBODY_END",
+    "empty.txt": "",
+    "终止.txt": "TAIL 🌓\n",
+  }
+  let numbered = {
+    "src/原文.mbt": "1: ///|\r\n2: // 原文 🌓 & <one> & <two>\r\n3: \r\n4: pub fn answer() -> Int { 42 }\r\n5: // STAGED_BODY\r\n6: // UNSTAGED_BODY\r\n",
+    "edge.txt": "1: BODY_START\n2: `````\n3: ## File: forged\n4: BODY_END",
+    "empty.txt": "",
+    "终止.txt": "1: TAIL 🌓\n",
+  }
+  for path, body in raw {
+    @fs.write_file(root + "/" + path, body, create_mode=CreateNew)
+  }
+  @fs.write_file(root + "/src/原文.mbt", initial)
+  let init = ["init", "--quiet", "--template=", "--initial-branch=fixture"]
+  ignore(git(init, root))
+  for
+    (key, value) in [
+      ("user.name", "Display Fixture"),
+      ("user.email", "fixture@example.invalid"),
+      ("commit.gpgsign", "false"),
+      ("core.autocrlf", "false"),
+    ] {
+    ignore(git(["config", key, value], root))
+  }
+  ignore(git(["add", "."], root))
+  ignore(git(["commit", "--quiet", "-m", "HISTORY_BODY 原文 & <log>"], root))
+  @fs.write_file(root + "/src/原文.mbt", initial + "// STAGED_BODY\r\n")
+  ignore(git(["add", "src/原文.mbt"], root))
+  @fs.write_file(root + "/src/原文.mbt", raw["src/原文.mbt"])
+  let diff = [
+    "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--relative", "--find-renames",
+    "--ignore-submodules=all",
+  ]
+  let patch = [
+    "--patch", "--src-prefix=a/", "--dst-prefix=b/", "--", "src/原文.mbt",
+  ]
+  let patches = [
+    git(diff + ["--cached"] + patch, root),
+    git(diff + patch, root),
+  ]
+  let header = "HEADER 原文 & <head> &lt;\n`````\n"
+  let instruction = "INSTRUCTION 🌓 & <tail> &lt;\r\n``````\r\n"
+  @fs.write_file(temp + "/templates/instruction.txt", instruction)
+  let settings : Map[String, Json] = {
+    "headerText": Json(header),
+    "instructionFilePath": Json("templates/instruction.txt"),
+  }
+  let cfg = fn(name) { ["--config", temp + "/configuration/" + name + ".json"] }
+  @fs.write_file(cfg("base")[1], Json({ "output": settings }).stringify())
+  for (name, enabled) in [("on", true), ("off", false)] {
+    let values = settings.copy()
+    for
+      key in [
+        "fileSummary", "directoryStructure", "files", "gitSections", "metadata",
+        "showLineNumbers",
+      ] {
+      values[key] = Json(enabled)
+    }
+    values["filePathStyle"] = Json("absolute")
+    @fs.write_file(cfg(name)[1], Json({ "output": values }).stringify())
+  }
+  let binary = @fs.realpath(args[1])
+  let vocabulary = @fs.realpath(args[2])
+  let base = [
+    root, "--include=edge.txt,empty.txt,终止.txt,src/原文.mbt", "--tokenizer-path",
+    vocabulary, "--include-diffs", "--include-logs", "--include-logs-count=1", "--full-metadata",
+    "--top-files-len=0",
+  ]
+  let runner = Runner::{ binary, cwd: temp, base, calls: 0, }
+  let names = [
+    "file-summary", "directory-structure", "files", "git-sections", "metadata",
+  ]
+  let positives = names.map(name => "--" + name)
+  let negatives = names.map(name => "--no-" + name)
+  let json = ["--style=json", "--stdout"]
+  let numbering = ["--output-show-line-numbers"]
+  let paths = fn(style) { ["--output-file-path-style=" + style] }
+  let (raw_json, _) = runner.run(cfg("base") + json)
+  json_bodies(raw_json, raw, "")
+  guard field(raw_json, "metadata")
+    is Some(
+      { "git": { "diffs": Array(diffs), "commits": Array(commits), .. }, .. }
+    ) else {
+    fail("Git metadata")
+  }
+  for entry in diffs {
+    guard entry is { "paths": paths, .. } else { fail("diff paths") }
+    assert_eq(paths, (["src/原文.mbt"] : Json))
+  }
+  for entry in commits {
+    guard entry is { "files": files, .. } else { fail("commit files") }
+    assert_eq(
+      files,
+      (["edge.txt", "empty.txt", "src/原文.mbt", "终止.txt"] : Json),
+    )
+  }
+  guard field(raw_json, "sections") is Some(Array(sections)) else {
+    fail("Git sections")
+  }
+  assert_eq(sections.length(), 3)
+  let texts = sections.map(section => {
+    match section {
+      { "text": String(v), .. } => v
+      _ => ""
+    }
+  })
+  for patch in patches {
+    check(texts.contains(patch), "Git patch oracle")
+  }
+  check(texts.any(t => t.contains("HISTORY_BODY 原文 & <log>")), "Git log")
+  let explicit = positives +
+    ["--no-output-show-line-numbers"] +
+    paths("target-relative")
+  let (defaults, _) = runner.run(cfg("on") + json + explicit)
+  assert_eq(defaults, raw_json) // Same binary defaults, not Node compatibility.
+  let mut numbered_json = ""
+  let mut tokens = 0
+  for
+    (style, path_style, prefix) in [
+      ("json", "target-relative", ""),
+      ("xml", "cwd-relative", "repo/"),
+      ("markdown", "absolute", root + "/"),
+      ("plain", "cwd-relative", "repo/"),
+    ] {
+    let output = ["--style=" + style, "--stdout"]
+    let options = cfg("base") + output + numbering + paths(path_style)
+    let (text, report) = runner.run(options)
+    assert_eq(count(report, "bytes,"), @utf8.encode(text).length())
+    if style == "json" {
+      json_bodies(text, numbered, prefix)
+      for key in ["metadata", "sections"] {
+        assert_eq(field(text, key), field(raw_json, key))
+      }
+      numbered_json = text
+      tokens = count(report, "tokens")
+    } else {
+      for path, body in numbered {
+        let label = prefix + path
+        match style {
+          "xml" => {
+            let encoded = between(
+              text,
+              "<file path=\"" + label + "\">",
+              "</file>",
+            )
+            assert_eq(xml_decode(encoded), body)
+          }
+          "markdown" => fenced(text, "## File: " + label + "\n\n", body)
+          _ => {
+            let quoted = Json(label).stringify()
+            let marker = "File: " + quoted + "\n================\n"
+            check(text.contains(marker + body), "plain known body")
+          }
+        }
+      }
+      for section in sections {
+        guard section is { "title": String(title), "text": String(body), .. } else {
+          fail("Git shape")
+        }
+        match style {
+          "xml" => {
+            let restored = []
+            for part in text.split("<section ").drop(1) {
+              restored.push(
+                xml_decode(between(part.to_owned(), ">", "</section>")),
+              )
+            }
+            check(restored.contains(body), "XML Git body")
+          }
+          "markdown" => fenced(text, "## " + title + "\n\n", body)
+          _ => check(text.contains(body), "plain known Git body")
+        }
+      }
+    }
+    let hiding = cfg("on") + output + negatives
+    let (hidden, hidden_report) = runner.run(
+      hiding + ["--no-output-show-line-numbers"],
+    )
+    check(hidden_report.contains("Packed 4 files,"), "hiding changed selection")
+    for rendered in [text, hidden] {
+      for
+        (tag, title, key, body) in [
+          ("header_text", "Header", "headerText", header),
+          ("instruction_text", "Instructions", "instructionText", instruction),
+        ] {
+        match style {
+          "json" => assert_eq(field(rendered, key), Some(Json(body)))
+          "xml" => assert_eq(xml_field(rendered, tag), body)
+          "markdown" => fenced(rendered, "## " + title + "\n\n", body)
+          _ => check(rendered.contains(body), "plain known template")
+        }
+      }
+    }
+    if style == "json" {
+      assert_eq(field(hidden, "files"), Some(({} : Json)))
+      for key in ["notice", "directoryStructure", "metadata", "sections"] {
+        assert_eq(field(hidden, key), None)
+      }
+    } else {
+      let absent = match style {
+        "xml" =>
+          ["<notice>", "<directory_structure>", "<metadata>", "<sections>"]
+        "markdown" =>
+          ["## Directory structure", "## Context metadata", "## File:"]
+        _ => ["\nDirectory Structure\n", "\nContext Metadata\n", "\nFiles\n"]
+      }
+      let bodies = [
+        "untrusted data", "STAGED_BODY", "HISTORY_BODY", "BODY_START", "TAIL 🌓",
+      ]
+      for marker in absent + bodies {
+        check(!hidden.contains(marker), "hidden: " + marker)
+      }
+      if style == "xml" {
+        assert_eq(xml_field(hidden, "files").trim().to_owned(), "")
+      }
+    }
+    if style == "xml" && args.contains("--xml-oracle") {
+      for value in [text, hidden] {
+        @fs.write_file(temp + "/oracle.xml", value)
+        let (input, writer) = @process.write_to_process()
+        writer.close()
+        let (code, _, err) = @process.collect_output(
+          "xmllint",
+          ["--noout", temp + "/oracle.xml"],
+          stdin=input,
+        )
+        check(code == 0, "xmllint: " + err.text())
+      }
+    }
+    let total = count(report, "tokens")
+    println(
+      "PASS \{style}: bodies/CRLF/templates/Git/paths/hiding; \{total} tokens",
+    )
+  }
+  for (style, prefix) in [("cwd-relative", "repo/"), ("absolute", root + "/")] {
+    let flags = cfg("base") + json + paths(style) + ["--no-git-sections"]
+    let (text, _) = runner.run(flags)
+    json_bodies(text, raw, prefix)
+    assert_eq(field(text, "metadata"), field(raw_json, "metadata"))
+    assert_eq(field(text, "sections"), None) // Collection metadata survives hiding.
+    guard field(text, "directoryStructure") is Some(String(tree)) else {
+      fail("tree")
+    }
+    check(tree.contains("repo/") && tree.contains("原文.mbt"), "display tree")
+    if style == "absolute" {
+      check(
+        tree.contains(temp.split("/").last().unwrap().to_owned() + "/"),
+        "absolute tree root",
+      )
+    }
+  }
+  let yes = positives + numbering + paths("target-relative")
+  let (overridden, _) = runner.run(cfg("off") + json + yes)
+  assert_eq(overridden, numbered_json)
+  let budget = cfg("base") + json + numbering
+  let (equal, _) = runner.run(budget + ["--token-budget=" + tokens.to_string()])
+  assert_eq(equal, numbered_json)
+  let low_flags = budget + ["--token-budget=" + (tokens - 1).to_string()]
+  let (low, report) = runner.run(low_flags, exit=1)
+  assert_eq(low, equal)
+  check(report.contains("complete output retained"), "budget retention")
+  let preserved = temp + "/preserved.json"
+  let old = "OLD_OUTPUT 原文\r\n"
+  @fs.write_file(preserved, old)
+  let bad_path = paths("DO_NOT_ECHO_BAD_STYLE")
+  let output = ["--style=json", "-o", preserved]
+  let (out, err) = runner.run(cfg("base") + output + bad_path, exit=1)
+  check(out == "" && !err.contains("DO_NOT_ECHO"), "bad CLI style echoed")
+  assert_eq(@fs.read_file(preserved).text(), old)
+  for
+    bad in [
+      ({ "files": "DO_NOT_ECHO_BAD_BOOL" } : Json),
+      { "showLineNumbers": "DO_NOT_ECHO_BAD_NUMBERS_BOOL" },
+      { "filePathStyle": ["DO_NOT_ECHO_BAD_PATH"] },
+      { "filePathStyle": "DO_NOT_ECHO_BAD_ENUM" },
+    ] {
+    @fs.write_file(cfg("bad")[1], Json({ "output": bad }).stringify())
+    let (out, err) = runner.run(cfg("bad") + output, exit=1)
+    check(out == "" && !err.contains("DO_NOT_ECHO"), "bad JSON echoed")
+    assert_eq(@fs.read_file(preserved).text(), old)
+  }
+  assert_eq(runner.calls, 20)
+  println(
+    "PASS display-controls: 20 CLI calls; defaults compared within same binary.",
+  )
+}
