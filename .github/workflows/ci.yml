@@ -89,6 +89,16 @@ jobs:
           assets/tokenizer-o200k_base.tiktoken
           --log-dir "${{ runner.temp }}/volume-cli"
           ${{ runner.os == 'Linux' && '--xml-oracle' || '' }}
+      - name: Prepare fixed MCP stdio fixture
+        run: >-
+          moon run --target native scripts/mcp-test.mbtx --
+          --prepare-only "${{ runner.temp }}/mcp-stdio"
+      - name: MCP modern and legacy real pipe sessions
+        run: >-
+          moon run --target native scripts/mcp-test.mbtx -- --ready
+          "${{ github.workspace }}/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe"
+          "${{ github.workspace }}/assets/tokenizer-o200k_base.tiktoken"
+          "${{ github.workspace }}" "${{ runner.temp }}/mcp-stdio"
       - name: Reproducible demo
         run: moon run --target native scripts/demo.mbtx
       - name: Real repository self-pack
@@ -135,6 +145,13 @@ jobs:
         with:
           name: volume-cli-${{ matrix.platform }}
           path: ${{ runner.temp }}/volume-cli
+          if-no-files-found: ignore
+      - name: MCP stdio diagnostics
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: mcp-stdio-${{ matrix.platform }}
+          path: ${{ runner.temp }}/mcp-stdio
           if-no-files-found: ignore
       - name: Pinned Node for Linux performance comparison
         if: runner.os == 'Linux'

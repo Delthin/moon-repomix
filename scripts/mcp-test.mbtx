@@ -14,7 +14,7 @@ import {
 // Native, real OS-pipe acceptance; no SDK emulation or HTTP.
 // Preparation never starts the product:
 //   moon run --target native scripts/mcp-test.mbtx -- --prepare-only NEW_LOG_DIR
-// After the implementation owner's READY, against a fixed build:
+// Against an existing fixed build:
 //   moon run --target native scripts/mcp-test.mbtx -- --ready BINARY VOCAB SOURCE_ROOT LOG_DIR [SOURCE_REVISION]
 // Two sequential server processes: modern 2026-07-28 and legacy 2025-11-25.
 // All fixtures and transcripts stay in the caller's external LOG_DIR.

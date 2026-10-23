@@ -48,7 +48,7 @@ moon-repomix /path/to/repository --mcp --compress --mcp-max-tokens 12000
 - `maxTokens` 不能高于启动 cap；`style` 为 xml/markdown/json/plain。客户端不能设置目录、远程地址、配置/指令文件、安全开关或更大的输入限额。
 - 返回短文字及 `structuredContent`：run ID、安全状态、接受/跳过数量、卷预算、统计及资源描述。token/字节总数为十进制字符串。源文件和模板扫描沿用普通打包规则。
 
-`resources/list` 返回当前卷和 `index.json`；`resources/read` 只接受刚返回的 `moon-repomix://context/...` URI。它查询内存注册表，不把 URI 转成文件路径。完整索引单独计数，不受每卷 cap 约束，但计入缓存字节上限。仓库文本是待分析数据，客户端应将其与用户指令分开。
+`resources/list` 返回当前卷和 `index.json`；`resources/read` 只接受刚返回的 `moon-repomix://context/...` URI。它查询内存注册表，不把 URI 转成文件路径。完整索引单独计数，不受每卷 cap 约束，但计入缓存字节上限。索引中的 `fileName` 与资源的 `name` 对应；读取时使用服务实际返回的 `uri`。仓库文本是待分析数据，客户端应将其与用户指令分开。
 
 `release_context` 接受空对象，释放当前派生缓存，不修改磁盘。失败或提交前取消保留上一份成功结果；下次成功打包整体替换它，旧 URI 随即失效。进程结束也释放资源。并发打包返回 Busy；资源读取可与打包并行。
 
