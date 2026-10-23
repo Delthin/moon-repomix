@@ -30,7 +30,7 @@ plain 使用 64 个等号分隔章节，16 个等号标识文件。`File:` 行�
 
 ## Header 与 Instructions
 
-文档模型的 `header_text` 和 `instruction_text` 保存已读取、扫描的模板文字，默认均为空。`@document.create(files, header_text="项目背景", instruction_text="请分析这些文件")` 可直接设置两段文字。空字符串省略对应段落；两者均为空时，四种格式的输出与未使用模板时逐字一致。
+文档模型的 `header_text` 和 `instruction_text` 保存模板文字，默认均为空；`pack` 负责读取与扫描。直接构造文档时，由调用者完成相应的安全检查。`@document.create(files, header_text="项目背景", instruction_text="请分析这些文件")` 可直接设置两段文字。空字符串省略对应段落；两者均为空时，四种格式的输出与未使用模板时逐字一致。
 
 JSON 在顶层按需增加 `headerText`、`instructionText` 字符串，`files` 对象保持原结构。XML 对应增加 `header_text`、`instruction_text` 元素，沿用正文转义规则，CR 写为字符引用。两种格式读回后保留模板中的首尾空白、中文和 CRLF。
 

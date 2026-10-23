@@ -29,6 +29,27 @@ test "defaults and presence-aware configuration precedence" {
     "README.md", "src/core/**", "src/*.{mbt,ts}",
   ])
   assert_eq(mixed.keep_full_patterns, ["README.md", "src/core/**"])
+  let templates = @config.parse_json(
+    "{\"output\":{\"headerText\":\"config header\",\"instructionFilePath\":\"notes.md\"}}",
+  )
+  let configured = @config.resolve(@config.parse_cli([]), Some(templates))
+  assert_eq(configured.header_text, "config header")
+  assert_eq(configured.instruction_file_path, Some("notes.md"))
+  let cleared = @config.resolve(
+    @config.parse_cli(["--header-text=", "--instruction-file-path="]),
+    Some(templates),
+  )
+  assert_eq(cleared.header_text, "")
+  assert_eq(cleared.instruction_file_path, None)
+  let overridden = @config.resolve(
+    @config.parse_cli([
+      "--header-text", "命令行\r\nheader", "--instruction-file-path=other.md",
+    ]),
+    Some(templates),
+  )
+  assert_eq(overridden.header_text, "命令行\r\nheader")
+  assert_eq(overridden.instruction_file_path, Some("other.md"))
+  assert_eq(templates.instruction_file_path, Some("notes.md"))
   assert_false(
     @config.resolve(@config.parse_cli(["--no-compress"]), Some(mixed)).compress,
   )
@@ -234,6 +255,15 @@ test "strict rejection of invalid configuration and CLI" {
       ),
       (
         #|{"output":{"keepFull":[false]}}
+      ),
+      (
+        #|{"output":{"headerText":false}}
+      ),
+      (
+        #|{"output":{"instructionFilePath":[]}}
+      ),
+      (
+        #|{"output":{"instructionFilePath":"bad\u0000path"}}
       ),
       (
         #|{"output":{"keepFull":["../escape"]}}

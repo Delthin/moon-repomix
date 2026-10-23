@@ -32,6 +32,8 @@ pub async fn Runtime::load(tokenizer_path : String) -> Runtime {
 ///|
 pub(all) suberror PackError {
   ConfigurationError
+  ContextTextError(String)
+  ContextSecurityFinding(String)
   SelectionError
   ScanError
   ResourceError
@@ -84,6 +86,8 @@ pub fn options(
   style~ : Style = Xml,
   compress~ : Bool = false,
   keep_full_patterns~ : Array[String] = [],
+  header_text~ : String = "",
+  instruction_file_path~ : String? = None,
   full_metadata~ : Bool = false,
   file_paths~ : Array[String]? = None,
   include_diffs~ : Bool = false,
@@ -96,6 +100,8 @@ pub fn options(
   cli.patch.style = Some(style)
   cli.patch.compress = Some(compress)
   cli.patch.keep_full_patterns = keep_full_patterns.copy()
+  cli.patch.header_text = Some(header_text)
+  cli.patch.instruction_file_path = instruction_file_path
   cli.patch.full_metadata = Some(full_metadata)
   cli.patch.include_diffs = Some(include_diffs)
   cli.patch.include_logs = Some(include_logs)

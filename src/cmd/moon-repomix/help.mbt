@@ -10,6 +10,8 @@ let help : String =
   #|      --style FORMAT             xml|markdown|json|plain (default: xml)
   #|      --compress / --no-compress  Syntax-tree code skeletons with source lines
   #|      --keep-full GLOBS          Keep matching files intact when compressing
+  #|      --header-text TEXT         Add a scanned header (UTF-8, at most 1 MiB)
+  #|      --instruction-file-path FILE  Add a scanned local instruction file (1 MiB)
   #|      --full-metadata            Full per-file records and source maps in any format
   #|      --include-diffs            Export staged and unstaged Git patches
   #|      --include-logs             Export recent Git commit messages and paths

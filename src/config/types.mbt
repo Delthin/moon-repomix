@@ -36,6 +36,8 @@ pub(all) struct Patch {
   mut style : Style?
   mut compress : Bool?
   mut keep_full_patterns : Array[String]
+  mut header_text : String?
+  mut instruction_file_path : String?
   mut full_metadata : Bool?
   mut include_diffs : Bool?
   mut include_logs : Bool?
@@ -64,6 +66,8 @@ pub fn Patch::empty() -> Patch {
     style: None,
     compress: None,
     keep_full_patterns: [],
+    header_text: None,
+    instruction_file_path: None,
     full_metadata: None,
     include_diffs: None,
     include_logs: None,
@@ -107,6 +111,8 @@ pub(all) struct Options {
   style : Style
   compress : Bool
   keep_full_patterns : Array[String]
+  header_text : String
+  instruction_file_path : String?
   full_metadata : Bool
   include_diffs : Bool
   include_logs : Bool
@@ -239,6 +245,9 @@ fn validate_patch(patch : Patch) -> Unit raise ConfigError {
   if patch.output is Some(value) {
     validate_path(value, "output.filePath")
   }
+  if patch.instruction_file_path is Some(value) && !value.is_empty() {
+    validate_path(value, "output.instructionFilePath")
+  }
   if patch.tokenizer_path is Some(value) {
     validate_path(value, "tokenizerPath")
   }
@@ -310,6 +319,10 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
       },
     ),
   )
+  let instruction_file_path = match patch.instruction_file_path {
+    Some(_) as explicit => explicit
+    None => file.instruction_file_path
+  }
   let remote = match patch.remote {
     Some(_) as value => value
     None => file.remote
@@ -334,6 +347,11 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
       file.keep_full_patterns,
       patch.keep_full_patterns,
     ),
+    header_text: patch.header_text.unwrap_or(file.header_text.unwrap_or("")),
+    instruction_file_path: match instruction_file_path {
+      Some("") => None
+      other => other
+    },
     full_metadata: patch.full_metadata.unwrap_or(
       file.full_metadata.unwrap_or(false),
     ),

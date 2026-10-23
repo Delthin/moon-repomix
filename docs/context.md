@@ -28,6 +28,16 @@ moon-repomix ./project --compress --keep-full 'src/core/**,README.md' --style ma
 
 终端的 `File-body tokens` 对比接受文件的原始正文与实际输出正文，文件排名和目录树使用后者。最终文档计数还包含目录树、格式包装、来源、压缩记录及 Git 章节，预算以这个完整计数为准。
 
+## 添加头部和指令（当前源码）
+
+```sh
+moon-repomix ./project --header-text '请关注接口与错误处理。' --instruction-file-path review-instructions.md --style markdown -o review.md
+```
+
+先准备本地 `review-instructions.md`，路径相对进程 cwd。头部和指令在获取远程仓库及压缩前读入、扫描，随后进入同一份 `Document`，四种格式均可呈现。头部文字和指令文件各最多 1 MiB；文件使用严格 UTF-8，去除开头 BOM并保留其余 CRLF。最终链接、非普通文件、过大或无效编码均报 `ContextTextError`。扫描开启且任一模板命中时报 `ContextSecurityError`，只显示字段名。
+
+配置字段为 `output.headerText` / `output.instructionFilePath`，空字符串清除继承值；库入口接受 `header_text` / `instruction_file_path`。模板参与完整文档的计数和预算，文件及 Git 章节仍按原选择规则处理。远程仓库不会自动提供指令文件。此能力也需要当前源码。
+
 ## 导出变更和历史
 
 ```sh
@@ -58,7 +68,7 @@ moon-repomix --remote https://github.com/octocat/Hello-World.git --remote-branch
 
 ## 结构化输出与库调用
 
-`Document` 包含 `files`、`sections`、`metadata`；`PackResult.document` 暴露同一份模型，元数据始终完整。完整记录的结构为：
+`Document` 包含 `files`、`sections`、`metadata`、`header_text` 和 `instruction_text`；`PackResult.document` 暴露同一份模型，元数据始终完整。完整记录的结构为：
 
 - `metadata.source`：`kind`、可选 URL 和实际 revision；普通本地压缩未请求 Git 时 revision 为 null。
 - `metadata.compression`：逐文件骨架与回退记录。
@@ -78,4 +88,4 @@ let options = @repomix.options(
 let result = @repomix.pack(options, runtime)
 ```
 
-库入口负责远程获取与清理，返回的文本和结构化文档均可独立使用，不依赖临时目录继续存在。`FileStats.original_tokens` 是扫描后原始正文的计数，`tokens` 是实际渲染正文的计数。`PackError` 增加 `GitError`、`RemoteError`；安全扫描与预算仍使用原有状态。
+库入口负责远程获取与清理，返回的文本和结构化文档均可独立使用，不依赖临时目录继续存在。`FileStats.original_tokens` 是扫描后原始正文的计数，`tokens` 是实际渲染正文的计数。`PackError` 包含 `GitError`、`RemoteError`，以及模板读取/表示错误 `ContextTextError`、扫描命中 `ContextSecurityFinding`；安全扫描与预算仍使用原有状态。

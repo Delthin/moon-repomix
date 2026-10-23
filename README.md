@@ -44,7 +44,7 @@ moon-repomix ./project --include 'src/**/*.{mbt,ts,py}' -o -
 
 `--stdin` 每行一个相对路径，`--stdin0` 使用 NUL 分隔；空输入选零文件，重复项去重，列表仍受 ignore、原始内容扫描和 Git 路径筛选约束。`-o -`、`--output=-` 和配置中的 `output.filePath: "-"` 均输出到 stdout；`-o ./-` 写入普通文件。`--no-dot-ignore` 仅关闭 `.ignore`，`.repomixignore` 始终生效。详细规则见 [配置文档](docs/configuration.md)。
 
-## 混合原文与结构骨架（当前源码）
+## 混合上下文与模板（当前源码）
 
 关键文件可保留完整实现，其他文件生成骨架：
 
@@ -52,7 +52,11 @@ moon-repomix ./project --include 'src/**/*.{mbt,ts,py}' -o -
 moon run src/cmd/moon-repomix --target native --release -- ./project --compress --keep-full 'src/core/**,README.md' --style markdown -o review.md --tokenizer-path assets/tokenizer-o200k_base.tiktoken
 ```
 
-`--keep-full` 使用根相对 glob，仅作用于已选且通过扫描的文件；库中使用 `keep_full_patterns`，配置中使用 `output.keepFull`。完整元数据记录主动保留的原因，统计和最终预算使用实际输出。这是当前源码的新能力；已发布 v0.3.0 的选项见 [固定版本说明](https://github.com/Delthin/moon-repomix/blob/v0.3.0/README.md)。
+`--keep-full` 使用根相对 glob，仅作用于已选且通过扫描的文件；库中使用 `keep_full_patterns`，配置中使用 `output.keepFull`。完整元数据记录主动保留的原因，统计和最终预算使用实际输出。
+
+`--header-text '请关注接口与错误处理。'` 添加头部文字，`--instruction-file-path review-instructions.md` 添加准备好的本地指令。两者在进入文档前扫描，四种格式均支持，最终 token 计数包含模板和包装。每段最多 1 MiB；指令路径相对进程 cwd，库入口使用 `header_text` / `instruction_file_path` 选项。
+
+这些是当前源码的新能力；已发布 v0.3.0 的选项见 [固定版本说明](https://github.com/Delthin/moon-repomix/blob/v0.3.0/README.md)。
 
 ## 安装
 

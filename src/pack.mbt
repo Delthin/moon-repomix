@@ -14,8 +14,9 @@ pub async fn pack(options : Options, runtime : Runtime) -> PackResult {
   let keep_full = @selection.file_matcher(options.keep_full_patterns) catch {
     _ => raise ConfigurationError
   }
+  let context = prepare_context_texts(options)
   match options.remote {
-    None => pack_directory(options, runtime, Json::null(), keep_full)
+    None => pack_directory(options, runtime, Json::null(), keep_full, context)
     Some(url) => {
       if options.directory != "." {
         raise ConfigurationError
@@ -50,6 +51,7 @@ pub async fn pack(options : Options, runtime : Runtime) -> PackResult {
         runtime,
         { "kind": "remote", "url": checkout.url, "revision": checkout.revision },
         keep_full,
+        context,
       )
     }
   }
@@ -61,6 +63,7 @@ async fn pack_directory(
   runtime : Runtime,
   remote_source : Json,
   keep_full : @selection.FileMatcher,
+  context : ContextTexts,
 ) -> PackResult {
   let cwd = @env.current_dir().unwrap_or(".")
   let root = @platform.absolute(options.directory, cwd)
@@ -246,7 +249,13 @@ async fn pack_directory(
     !@output.xml_representable(metadata.stringify()) {
     raise ConfigurationError
   }
-  let document = @document.create(accepted, sections=git.sections, metadata~)
+  let document = @document.create(
+    accepted,
+    sections=git.sections,
+    metadata~,
+    header_text=context.header,
+    instruction_text=context.instructions,
+  )
   let text = match options.style {
     Xml => @output.xml(document, full_metadata=options.full_metadata)
     Markdown => @output.markdown(document, full_metadata=options.full_metadata)

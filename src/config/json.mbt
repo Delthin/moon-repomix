@@ -99,6 +99,12 @@ pub fn parse_json(text : String) -> Patch raise ConfigError {
               patch.compress = Some(json_bool(value, "output.compress"))
             "keepFull" =>
               patch.keep_full_patterns = json_patterns(value, "output.keepFull")
+            "headerText" =>
+              patch.header_text = Some(json_string(value, "output.headerText"))
+            "instructionFilePath" =>
+              patch.instruction_file_path = Some(
+                json_string(value, "output.instructionFilePath"),
+              )
             "fullMetadata" =>
               patch.full_metadata = Some(
                 json_bool(value, "output.fullMetadata"),

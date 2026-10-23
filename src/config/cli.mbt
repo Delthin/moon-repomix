@@ -132,6 +132,8 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       | "--style"
       | "--include"
       | "--keep-full"
+      | "--header-text"
+      | "--instruction-file-path"
       | "-i"
       | "--ignore"
       | "--token-count-encoding"
@@ -178,6 +180,8 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
             patch.keep_full_patterns,
             csv_patterns(value),
           )
+        "--header-text" => patch.header_text = Some(value)
+        "--instruction-file-path" => patch.instruction_file_path = Some(value)
         "-i" | "--ignore" =>
           patch.ignore = append_unique(patch.ignore, csv_patterns(value))
         "--token-count-encoding" => {

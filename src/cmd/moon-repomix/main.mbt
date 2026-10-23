@@ -123,6 +123,9 @@ async fn main {
       } else {
         match err {
           Configuration | @repomix.ConfigurationError => "ConfigurationError"
+          @repomix.ContextTextError(field) => "ContextTextError (" + field + ")"
+          @repomix.ContextSecurityFinding(field) =>
+            "ContextSecurityError (" + field + ")"
           @repomix.SelectionError => "SelectionError"
           @repomix.ScanError => "ScanError"
           @repomix.GitError => "GitError"

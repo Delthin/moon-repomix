@@ -10,7 +10,7 @@ import {
 }
 
 // Values
-pub fn options(String, style? : @config.Style, compress? : Bool, keep_full_patterns? : Array[String], full_metadata? : Bool, file_paths? : Array[String]?, include_diffs? : Bool, include_logs? : Bool, include_logs_count? : Int, remote? : String?, remote_branch? : String?) -> @config.Options raise
+pub fn options(String, style? : @config.Style, compress? : Bool, keep_full_patterns? : Array[String], header_text? : String, instruction_file_path? : String?, full_metadata? : Bool, file_paths? : Array[String]?, include_diffs? : Bool, include_logs? : Bool, include_logs_count? : Int, remote? : String?, remote_branch? : String?) -> @config.Options raise
 
 pub async fn pack(@config.Options, Runtime) -> PackResult
 
@@ -19,6 +19,8 @@ pub fn version() -> String
 // Errors
 pub(all) suberror PackError {
   ConfigurationError
+  ContextTextError(String)
+  ContextSecurityFinding(String)
   SelectionError
   ScanError
   ResourceError

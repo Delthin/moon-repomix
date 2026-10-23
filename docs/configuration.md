@@ -1,6 +1,6 @@
 # 配置与命令行
 
-本页描述当前源码的 CLI、JSON 配置和库接口。新增的混合原文/骨架能力需要源码构建；已发布 v0.3.0 的接口见 [该版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/docs/configuration.md)。
+本页描述当前源码的 CLI、JSON 配置和库接口。新增的混合原文/骨架和头部/指令模板能力需要源码构建；已发布 v0.3.0 的接口见 [该版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/docs/configuration.md)。
 
 配置按“默认值 → 选定的 JSON 文件 → 显式 CLI 参数”合并。普通字段由后者覆盖；include 和自定义 ignore 列表按 JSON、CLI 的顺序追加，按原字符串去重并保留首次出现的位置。未出现的布尔参数不参与覆盖，因此 JSON 中的 `false` 会保留。
 
@@ -18,6 +18,8 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--style xml\|markdown\|json\|plain` | 默认 XML；默认文件名为 `repomix-output` 加对应的 `.xml`、`.md`、`.json`、`.txt` 扩展名 |
 | `--compress`, `--no-compress` | 开启或关闭语法树结构压缩，默认关闭 |
 | `--keep-full GLOBS` | 压缩时保留匹配文件原文；与 include 使用相同的根相对 glob，可重复追加 |
+| `--header-text TEXT` | 添加头部文字，最多 1 MiB UTF-8；空字符串清除 JSON 中的头部 |
+| `--instruction-file-path FILE` | 添加显式本地指令文件，最多 1 MiB；相对进程 cwd，空字符串清除继承值 |
 | `--full-metadata`, `--no-full-metadata` | 四种格式显示完整逐文件元数据，默认使用概览；库模型始终完整 |
 | `--include-diffs`, `--no-include-diffs` | 开启或关闭 staged/unstaged 差异，默认关闭 |
 | `--include-logs`, `--no-include-logs` | 开启或关闭提交历史，默认关闭 |
@@ -73,6 +75,8 @@ stdin 仅由这两个 CLI 参数显式开启，配置文件不会隐式读取终
     "tokenCountTree": 100,
     "compress": true,
     "keepFull": ["src/core/**"],
+    "headerText": "请关注接口与错误处理。",
+    "instructionFilePath": "review-instructions.md",
     "fullMetadata": false,
     "git": { "includeDiffs": true, "includeLogs": true, "includeLogsCount": 20 }
   },
@@ -98,6 +102,10 @@ stdin 仅由这两个 CLI 参数显式开启，配置文件不会隐式读取终
 `tokenizer_path` 通过 CLI 或编程接口设置，不属于 JSON 字段。
 
 `output.keepFull` 是追加去重的字符串数组，CLI 的 `--keep-full` 在 JSON 列表之后合并。开启压缩时仅对最终已选且通过扫描的文件生效；`--no-compress` 时全部文件保留原文。它沿用 include 的根相对和目录后代语义，完整记录以 `reason: "kept-full"` 标识主动保留，概览用 `keptFull` 单独计数。
+
+`output.headerText` 和 `output.instructionFilePath` 是可选字符串，CLI 标量覆盖 JSON，显式空字符串清除继承值。指令文件只读取一次，使用严格 UTF-8、去除开头 BOM、保留其余换行；读取非普通文件、最终符号链接或超过 1 MiB 时失败。扫描开启时，任一模板命中会使本次打包失败；错误仅含字段名，旧输出保持原样。`--no-security-check` 显式关闭同一套扫描。XML 还要求模板可表示为 XML 1.0 文本。
+
+模板不改变文件选择；指令文件若同时在输入集合中，会分别作为文件和模板出现，可用 ignore 排除其文件副本。完整文档计数和预算包含模板文字及格式包装。
 
 include、自定义 ignore 和 keep-full 拒绝空模式、前导 `!`、绝对路径、反斜杠、冒号、NUL 及 `..` 组件。支持 `*`、`?`、`**`、字符类、目录模式及有界的 `{a,b}` 嵌套备选；完整语法和展开上限由文件选择包校验。include 相对根匹配，`LICENSE` 只选根文件，`**/LICENSE` 选择各层文件。规则文件中的 `!` 反选另按 [文件选择规则](file-selection.md) 处理。
 
@@ -125,6 +133,8 @@ pub fn Patch::empty() -> Patch
 | `style` | `Style`，默认 `Xml`；可选 `Markdown`、`Json`、`Plain` |
 | `include_patterns`, `ignore` | `Array[String]`，空 |
 | `keep_full_patterns` | `Array[String]`，空；压缩时的原文例外，使用根相对 include 语义 |
+| `header_text` | `String`，空；模板头部文字 |
+| `instruction_file_path` | `String?`，None；相对进程 cwd 的显式本地文件路径 |
 | `file_paths` | `Array[String]?`，默认 `None` 为遍历；`Some([])` 为零文件，仅库/显式 CLI 列表使用 |
 | `use_gitignore`, `use_dot_ignore`, `use_default_patterns` | `Bool`，true |
 | `security_check` | `Bool`，true |
