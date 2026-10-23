@@ -1,0 +1,814 @@
+///|
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/encoding/hex",
+  "moonbitlang/x@0.5.5/crypto",
+}
+
+///|
+// Native, real OS-pipe acceptance; no SDK emulation or HTTP.
+// Preparation never starts the product:
+//   moon run --target native scripts/mcp-test.mbtx -- --prepare-only NEW_LOG_DIR
+// After the implementation owner's READY, against a fixed build:
+//   moon run --target native scripts/mcp-test.mbtx -- --ready BINARY VOCAB SOURCE_ROOT LOG_DIR [SOURCE_REVISION]
+// Two sequential server processes: modern 2026-07-28 and legacy 2025-11-25.
+// All fixtures and transcripts stay in the caller's external LOG_DIR.
+// SHA256: moonbitlang/x@0.5.5/crypto, Apache-2.0, unmodified.
+struct Session {
+  modern : Bool
+  input : @process.WriteToProcess
+  output : @process.ReadFromProcess
+  log : String
+  root : String
+  sent : Array[String]
+  received : Array[String]
+  expectations : Array[Json]
+  mut next_id : Int32
+  mut pending : Bytes
+}
+
+///|
+fn prop(value : Json, key : String) -> Json raise {
+  guard value is Object(fields) && fields.get(key) is Some(found) else {
+    fail("missing protocol field: " + key)
+  }
+  found
+}
+
+///|
+fn rows(value : Json) -> Array[Json] raise {
+  guard value is Array(found) else { fail("expected protocol array") }
+  found
+}
+
+///|
+fn text(value : Json) -> String raise {
+  guard value is String(found) else { fail("expected protocol string") }
+  found
+}
+
+///|
+fn fields(value : Json) -> Map[String, Json] raise {
+  guard value is Object(found) else { fail("expected protocol object") }
+  found
+}
+
+///|
+fn integer(value : Json) -> Int32 raise {
+  guard value is Number(found, ..) &&
+    found >= 0 &&
+    found <= 2147483647.0 &&
+    found == found.to_int().to_double() else {
+    fail("expected nonnegative protocol integer")
+  }
+  found.to_int()
+}
+
+///|
+async fn put(path : String, data : String) -> Unit {
+  @fs.write_file(path, data, create_mode=CreateNew)
+}
+
+///|
+async fn digest(path : String) -> String {
+  @hex.encode(
+    Bytes::from_array(@crypto.sha256(@fs.read_file(path).binary())[:]),
+  )
+}
+
+///|
+fn bodies() -> Map[String, String] {
+  {
+    "src/alpha.txt": "ALPHA_SOURCE_SENTINEL\r\n" +
+    "alpha complete body line with stable data 42\r\n".repeat(40),
+    "src/beta.txt": "BETA_SOURCE_SENTINEL\n" +
+    "beta complete body line with stable data 73\n".repeat(40),
+    "src/中文.txt": "UNICODE_SOURCE_SENTINEL\n" +
+    "中文 complete body line with stable data 91\n".repeat(40),
+  }
+}
+
+///|
+async fn prepare(log : String) -> Unit {
+  assert_true(log.has_prefix("/"))
+  @fs.mkdir(log, permission=0o700)
+  @fs.mkdir(log + "/fixture")
+  @fs.mkdir(log + "/fixture/src")
+  for path, body in bodies() {
+    put(log + "/fixture/" + path, body)
+  }
+  put(log + "/fixture/src/ignored.txt", "IGNORED_SOURCE_SENTINEL\n")
+  put(log + "/fixture/README.md", "OUTSIDE_INCLUDE_SENTINEL\n")
+  put(log + "/fixture/.repomixignore", "src/ignored.txt\n")
+  let fake_secret = "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+  put(log + "/fixture/src/leak.txt", "token=" + fake_secret + "\n")
+  put(log + "/outside.txt", "OUTSIDE_ROOT_SENTINEL\n")
+  put(
+    log + "/fixture-expectations.json",
+    Json::object(bodies().map((_, body) => Json::string(body))).stringify(
+      indent=2,
+    ) +
+    "\n",
+  )
+  put(
+    log + "/prepared.json",
+    (
+      {
+        "state": "prepared-not-executed",
+        "serverProcesses": 0,
+        "protocols": ["2026-07-28", "2025-11-25"],
+        "hostMaxTokens": 4096,
+        "hostMaxOutputBytes": 65536,
+        "hostMaxVolumes": 4,
+        "requestedMaxTokens": 1024,
+        "budgetOracle": "index token claims bounded; actual UTF-8 byte counts and full bodies independently compared; no independent o200k recount",
+      } : Json).stringify(indent=2) +
+    "\n",
+  )
+  println(
+    "prepared; product invocations=0; waiting for implementation owner READY",
+  )
+}
+
+///|
+async fn source_snapshot(
+  root : String,
+  binary : String,
+  revision : String?,
+) -> Json {
+  if revision is Some(revision) {
+    let (commit_code, commit, _) = @process.collect_output(
+      "git",
+      ["rev-parse", "--verify", revision + "^{commit}"],
+      cwd=root,
+    )
+    assert_eq(commit_code, 0)
+    let (archive_code, archive, _) = @process.collect_output(
+      "git",
+      ["archive", "--format=tar", revision],
+      cwd=root,
+    )
+    assert_eq(archive_code, 0)
+    return {
+      "sourceCommit": commit.text().trim().to_owned(),
+      "sourceArchiveSha256": @hex.encode(
+        Bytes::from_array(@crypto.sha256(archive.binary())[:]),
+      ),
+      "binarySha256": digest(binary),
+    }
+  }
+  let (stdin, writer) = @process.write_to_process()
+  writer.close()
+  let (code, out, _) = @process.collect_output(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+    cwd=root,
+    stdin~,
+  )
+  assert_eq(code, 0)
+  let hashes : Map[String, Json] = Map([])
+  for item in out.text().split("\u0000") {
+    let path = item.to_owned()
+    if path != "" {
+      hashes[path] = Json::string(digest(root + "/" + path))
+    }
+  }
+  {
+    "trackedAndUntrackedSourceFiles": Json::object(hashes),
+    "binarySha256": digest(binary),
+  }
+}
+
+///|
+fn params(s : Session, value : Json) -> Json raise {
+  let value = fields(value)
+  if s.modern {
+    value["_meta"] = {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {},
+    }
+  }
+  Json::object(value)
+}
+
+///|
+async fn send(s : Session, message : Json) -> Unit {
+  let line = message.stringify() + "\n"
+  s.sent.push(line)
+  // Archive before writing, including a request that fails or hangs.
+  @fs.write_file(
+    s.log + "/stdin.ndjson",
+    line,
+    append=true,
+    create_mode=OpenExisting,
+  )
+  s.input.write(line)
+}
+
+///|
+async fn receive(s : Session, id : Int32) -> Json {
+  for ;; {
+    let line = @async.with_timeout(70000, () => {
+      for ;; {
+        if s.pending.find(b"\n") is Some(end) {
+          let line = @utf8.decode(s.pending[:end + 1])
+          s.pending = s.pending[end + 1:].to_owned()
+          break line
+        }
+        guard s.output.read_some() is Some(chunk) else {
+          fail("server EOF before expected newline-terminated response")
+        }
+        // Archive raw bytes, including malformed/partial output, before decoding.
+        @fs.write_file(
+          s.log + "/stdout.ndjson",
+          chunk,
+          append=true,
+          create_mode=OpenExisting,
+        )
+        s.pending = s.pending + chunk
+        assert_true(s.pending.length() <= 1048576)
+      }
+    })
+    s.received.push(line)
+    let value = @json.parse(line)
+    assert_eq(prop(value, "jsonrpc"), Json::string("2.0"))
+    if value is { "id": got, .. } {
+      assert_eq(got, Json::number(id.to_double()))
+      return value
+    }
+    // Only known resource-cache notifications are permitted between responses.
+    assert_eq(
+      prop(value, "method"),
+      Json::string("notifications/resources/list_changed"),
+    )
+  }
+}
+
+///|
+async fn request(
+  s : Session,
+  rpc_method : String,
+  value : Json,
+  expected : String,
+) -> Json {
+  s.next_id += 1
+  let id = s.next_id
+  s.expectations.push({ "id": id, "method": rpc_method, "expected": expected })
+  @fs.write_file(
+    s.log + "/expectations.ndjson",
+    s.expectations.last().unwrap().stringify() + "\n",
+    append=true,
+    create_mode=OpenExisting,
+  )
+  send(s, {
+    "jsonrpc": "2.0",
+    "id": id,
+    "method": rpc_method,
+    "params": params(s, value),
+  })
+  receive(s, id)
+}
+
+///|
+fn success(s : Session, envelope : Json) -> Json raise {
+  let result = prop(envelope, "result")
+  assert_false(fields(envelope).contains("error"))
+  if s.modern {
+    assert_eq(prop(result, "resultType"), Json::string("complete"))
+  } else {
+    assert_false(fields(result).contains("resultType"))
+  }
+  result
+}
+
+///|
+fn safe_failure(s : Session, envelope : Json) -> Unit raise {
+  let error = if fields(envelope).contains("error") {
+    prop(envelope, "error")
+  } else {
+    let result = success(s, envelope)
+    assert_eq(prop(result, "isError"), Json::boolean(true))
+    result
+  }
+  let encoded = error.stringify()
+  for
+    forbidden in [
+      s.root,
+      "/Volumes/",
+      "/Users/",
+      "ALPHA_SOURCE_SENTINEL",
+      "OUTSIDE_ROOT_SENTINEL",
+      "MCP_INVALID_VALUE_SENTINEL",
+    ] {
+    assert_false(encoded.contains(forbidden))
+  }
+}
+
+///|
+fn collect_uris(value : Json, into : Set[String]) -> Unit raise {
+  match value {
+    String(uri) =>
+      if uri.contains("://") {
+        assert_false(uri.has_prefix("file://"))
+        into.add(uri)
+      }
+    Array(items) =>
+      for item in items {
+        collect_uris(item, into)
+      }
+    Object(items) =>
+      for item in items.values() {
+        collect_uris(item, into)
+      }
+    _ => ()
+  }
+}
+
+///|
+async fn listing(s : Session) -> Set[String] {
+  let result = success(
+    s,
+    request(s, "resources/list", {}, "only live in-process resource URIs"),
+  )
+  let found : Set[String] = Set([])
+  for row in rows(prop(result, "resources")) {
+    let uri = text(prop(row, "uri"))
+    assert_false(uri.has_prefix("file://"))
+    assert_false(found.contains(uri))
+    found.add(uri)
+  }
+  found
+}
+
+///|
+async fn read_resource(s : Session, uri : String) -> String {
+  let result = success(
+    s,
+    request(
+      s,
+      "resources/read",
+      { "uri": uri },
+      "returned URI resolves to complete text",
+    ),
+  )
+  let contents = rows(prop(result, "contents"))
+  assert_eq(contents.length(), 1)
+  assert_eq(prop(contents[0], "uri"), Json::string(uri))
+  text(prop(contents[0], "text"))
+}
+
+///|
+async fn verify_context(
+  s : Session,
+  pack : Json,
+) -> (Set[String], Map[String, String]) {
+  let structured = prop(pack, "structuredContent")
+  let returned : Set[String] = Set([])
+  collect_uris(structured, returned)
+  assert_true(returned.length() >= 2)
+  let live = listing(s)
+  assert_eq(live.length(), returned.length())
+  for uri in returned {
+    assert_true(live.contains(uri))
+  }
+  let texts : Map[String, String] = Map([])
+  let volumes : Array[(String, Json)] = []
+  let mut index : Json? = None
+  let mut total_bytes = 0
+  for uri in live {
+    let body = read_resource(s, uri)
+    texts[uri] = body
+    let size = @utf8.encode(body).length()
+    assert_true(size <= 4194304)
+    total_bytes += size
+    assert_false(body.contains("IGNORED_SOURCE_SENTINEL"))
+    assert_false(body.contains("OUTSIDE_INCLUDE_SENTINEL"))
+    assert_false(body.contains("gh" + "p_"))
+    let document = @json.parse(body)
+    if document is { "volumes": Array(_), "files": Object(_), .. } {
+      assert_true(index is None)
+      index = Some(document)
+    } else {
+      volumes.push((body, document))
+    }
+  }
+  assert_true(total_bytes <= 65536)
+  assert_true(volumes.length() >= 2 && volumes.length() <= 4)
+  guard index is Some(index) else { fail("missing actual index resource") }
+  let ownership = fields(prop(index, "files"))
+  let summaries = rows(prop(index, "volumes"))
+  assert_eq(summaries.length(), volumes.length())
+  let expected = bodies()
+  assert_eq(ownership.length(), expected.length())
+  let seen : Set[String] = Set([])
+  let seen_volumes : Set[String] = Set([])
+  for (body, volume) in volumes {
+    let content = fields(prop(volume, "files"))
+    assert_false(content.is_empty())
+    let mut volume_id : String? = None
+    for path, value in content {
+      guard expected.get(path) is Some(original) else {
+        fail("unexpected packed path")
+      }
+      assert_eq(text(value), original)
+      assert_false(seen.contains(path))
+      seen.add(path)
+      let id = text(prop(Json::object(ownership), path))
+      if volume_id is Some(previous) {
+        assert_eq(previous, id)
+      }
+      volume_id = Some(id)
+    }
+    let id = volume_id.unwrap()
+    assert_false(seen_volumes.contains(id))
+    seen_volumes.add(id)
+    let mut matching_summary : Json? = None
+    for row in summaries {
+      if prop(row, "id") == Json::string(id) {
+        assert_true(matching_summary is None)
+        matching_summary = Some(row)
+      }
+    }
+    guard matching_summary is Some(summary) else {
+      fail("volume absent from index")
+    }
+    assert_eq(integer(prop(summary, "bytes")), @utf8.encode(body).length())
+    assert_true(
+      integer(prop(summary, "tokens")) > 0 &&
+      integer(prop(summary, "tokens")) <= 1024,
+    )
+  }
+  assert_eq(seen.length(), expected.length())
+  (live, texts)
+}
+
+///|
+async fn pack(s : Session, arguments : Json, expected : String) -> Json {
+  request(
+    s,
+    "tools/call",
+    { "name": "pack_repository", "arguments": arguments },
+    expected,
+  )
+}
+
+///|
+async fn aggregate(s : Session) -> Unit {
+  if s.modern {
+    ignore(
+      success(
+        s,
+        request(
+          s,
+          "server/discover",
+          {},
+          "modern discovery with resultType=complete",
+        ),
+      ),
+    )
+  } else {
+    let initialized = success(
+      s,
+      request(
+        s,
+        "initialize",
+        {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "moon-repomix-stdio-acceptance",
+            "version": "1",
+          },
+        },
+        "legacy initialization without modern resultType",
+      ),
+    )
+    assert_eq(prop(initialized, "protocolVersion"), Json::string("2025-11-25"))
+    send(s, {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized",
+      "params": {},
+    })
+  }
+  let tools = rows(
+    prop(
+      success(
+        s,
+        request(
+          s,
+          "tools/list",
+          {},
+          "pack_repository and release_context advertised",
+        ),
+      ),
+      "tools",
+    ),
+  )
+  for name in ["pack_repository", "release_context"] {
+    assert_true(tools.any(tool => prop(tool, "name") == Json::string(name)))
+  }
+  assert_eq(listing(s).length(), 0)
+  let packed = success(
+    s,
+    pack(
+      s,
+      { "maxTokens": 1024, "style": "json", "compress": false },
+      "full safe fixture, multiple bounded volumes plus index",
+    ),
+  )
+  let (live, originals) = verify_context(s, packed)
+  // Every failing call must preserve the exact previous resource set and bytes.
+  let denied : Array[Json] = [
+    { "root": "MCP_INVALID_VALUE_SENTINEL" },
+    { "remote": "https://MCP_INVALID_VALUE_SENTINEL.invalid/repository" },
+    { "config": "MCP_INVALID_VALUE_SENTINEL" },
+    { "instructionFilePath": "MCP_INVALID_VALUE_SENTINEL" },
+    { "tokenizerPath": "MCP_INVALID_VALUE_SENTINEL" },
+    { "securityCheck": false },
+    { "maxOutputBytes": 65537 },
+    { "maxVolumes": 5 },
+    { "maxTokens": 4097 },
+    { "filePaths": ["../outside.txt"] },
+    { "filePaths": ["/MCP_INVALID_VALUE_SENTINEL"] },
+    { "style": "MCP_INVALID_VALUE_SENTINEL" },
+    { "compress": "MCP_INVALID_VALUE_SENTINEL" },
+    { "maxTokens": 1, "style": "json" },
+  ]
+  for arguments in denied {
+    safe_failure(
+      s,
+      pack(
+        s, arguments, "reject authority bypass/invalid input/over-budget; retain old context",
+      ),
+    )
+    let after = listing(s)
+    assert_eq(after.length(), live.length())
+    for uri in live {
+      assert_true(after.contains(uri))
+    }
+  }
+  for
+    uri in [
+      "file:///MCP_INVALID_VALUE_SENTINEL", "moon-repomix://MCP_INVALID_VALUE_SENTINEL/missing",
+    ] {
+    safe_failure(
+      s,
+      request(
+        s,
+        "resources/read",
+        { "uri": uri },
+        "unregistered URI rejected without reflecting input",
+      ),
+    )
+  }
+  for uri, original in originals {
+    assert_eq(read_resource(s, uri), original)
+  }
+  // Cancellation of an already completed ID has deterministic semantics here.
+  // Genuine in-flight cancellation/EOF task teardown belongs to the RPC suite.
+  send(s, {
+    "jsonrpc": "2.0",
+    "method": "notifications/cancelled",
+    "params": { "requestId": s.next_id, "reason": "acceptance" },
+  })
+  let retry = success(
+    s,
+    pack(
+      s,
+      {
+        "filePaths": ["src/alpha.txt"],
+        "maxTokens": 1024,
+        "style": "json",
+        "compress": false,
+      },
+      "call after cancellation notification succeeds; filePaths narrows; context replaces previous run",
+    ),
+  )
+  let replacement : Set[String] = Set([])
+  collect_uris(prop(retry, "structuredContent"), replacement)
+  let after = listing(s)
+  assert_eq(after.length(), replacement.length())
+  assert_true(after.length() >= 2)
+  let mut saw_alpha = false
+  for uri in after {
+    assert_true(replacement.contains(uri))
+    let body = read_resource(s, uri)
+    let doc = @json.parse(body)
+    if !(doc is { "volumes": Array(_), .. }) {
+      let content = fields(prop(doc, "files"))
+      assert_eq(content.length(), 1)
+      assert_eq(
+        prop(doc, "files"),
+        Json::object({
+          "src/alpha.txt": Json::string(bodies()["src/alpha.txt"]),
+        }),
+      )
+      saw_alpha = true
+    }
+  }
+  assert_true(saw_alpha)
+  for uri in live {
+    safe_failure(
+      s,
+      request(
+        s,
+        "resources/read",
+        { "uri": uri },
+        "successful replacement invalidates old run URI",
+      ),
+    )
+  }
+  ignore(
+    success(
+      s,
+      request(
+        s,
+        "tools/call",
+        { "name": "release_context", "arguments": {} },
+        "release derived resources only",
+      ),
+    ),
+  )
+  assert_eq(listing(s).length(), 0)
+  for uri in after {
+    safe_failure(
+      s,
+      request(s, "resources/read", { "uri": uri }, "released URI is invalid"),
+    )
+  }
+}
+
+///|
+async fn run_session(
+  binary : String,
+  vocabulary : String,
+  log : String,
+  modern : Bool,
+) -> Unit {
+  let mode = if modern { "modern" } else { "legacy" }
+  let directory = log + "/" + mode
+  @fs.mkdir(directory)
+  put(directory + "/stdin.ndjson", "")
+  put(directory + "/stdout.ndjson", "")
+  put(directory + "/expectations.ndjson", "")
+  let root = log + "/fixture"
+  let (stdin, input) = @process.write_to_process()
+  let (output, stdout) = @process.read_from_process()
+  let (errors, stderr) = @process.read_from_process()
+  defer input.close()
+  defer output.close()
+  defer errors.close()
+  let session : Session = {
+    modern,
+    input,
+    output,
+    log: directory,
+    root,
+    sent: [],
+    received: [],
+    expectations: [],
+    next_id: 0,
+    pending: b"",
+  }
+  let argv = [
+    root, "--mcp", "--mcp-max-tokens", "4096", "--mcp-max-output-bytes", "65536",
+    "--mcp-max-volumes", "4", "--include", "src/**", "--tokenizer-path", vocabulary,
+  ]
+  put(
+    directory + "/argv.json",
+    Json::array(argv.map(Json::string)).stringify(indent=2) + "\n",
+  )
+  let children : Array[@process.Process] = []
+  // The task group reaps/cancels only its own child before this deferred capture.
+  defer @async.protect_from_cancel(() => {
+    for child in children {
+      let code = child.wait()
+      put(
+        directory + "/exit.json",
+        ({ "pid": child.pid, "exitCode": code } : Json).stringify() + "\n",
+      )
+    }
+  })
+  @async.with_task_group(group => {
+    let child = @process.spawn(
+      group,
+      binary,
+      argv,
+      stdin~,
+      stdout~,
+      stderr~,
+      cwd=root,
+    )
+    children.push(child)
+    let diagnostics = group.spawn(() => {
+      put(directory + "/stderr.bin", "")
+      let mut bytes = b""
+      while errors.read_some() is Some(chunk) {
+        @fs.write_file(
+          directory + "/stderr.bin",
+          chunk,
+          append=true,
+          create_mode=OpenExisting,
+        )
+        bytes = bytes + chunk
+        assert_true(bytes.length() <= 1048576)
+      }
+      let err = @utf8.decode(bytes)
+      for forbidden in [root, "/Volumes/", "/Users/", "ALPHA_SOURCE_SENTINEL"] {
+        assert_false(err.contains(forbidden))
+      }
+    })
+    aggregate(session)
+    input.close() // Product must terminate without a shutdown extension.
+    let trailing = @async.with_timeout(5000, () => output.read_all().binary())
+    if !trailing.is_empty() {
+      @fs.write_file(
+        directory + "/stdout.ndjson",
+        trailing,
+        append=true,
+        create_mode=OpenExisting,
+      )
+    }
+    if !trailing.is_empty() || !session.pending.is_empty() {
+      // All expected replies were consumed; additional stdout is a failure.
+      fail("unexpected stdout after final response")
+    }
+    assert_eq(@async.with_timeout(5000, () => child.wait()), 0)
+    diagnostics.wait()
+  })
+  // Verify the evidence itself, not just the in-memory protocol assertions.
+  assert_eq(
+    @fs.read_file(directory + "/stdin.ndjson").text(),
+    session.sent.join(""),
+  )
+  assert_eq(
+    @fs.read_file(directory + "/stdout.ndjson").text(),
+    session.received.join(""),
+  )
+  assert_eq(
+    @fs.read_file(directory + "/expectations.ndjson").text(),
+    session.expectations.map(value => value.stringify() + "\n").join(""),
+  )
+  put(
+    directory + "/result.json",
+    (
+      {
+        "state": "passed",
+        "requests": session.next_id,
+        "serverProcesses": 1,
+        "stdout": "NDJSON only",
+        "cancellationScope": "completed-ID notification then successful call; genuine in-flight cancellation is RPC suite responsibility",
+      } : Json).stringify(indent=2) +
+    "\n",
+  )
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  if args.length() == 3 && args[1] == "--prepare-only" {
+    prepare(args[2])
+    return
+  }
+  guard (args.length() == 6 || args.length() == 7) && args[1] == "--ready" else {
+    fail(
+      "expected --prepare-only NEW_LOG_DIR or --ready BINARY VOCAB SOURCE_ROOT PREPARED_LOG_DIR [SOURCE_REVISION]",
+    )
+  }
+  let binary = args[2]
+  let vocabulary = args[3]
+  let source = args[4]
+  let log = args[5]
+  assert_true(@fs.exists(log + "/prepared.json"))
+  let revision = if args.length() == 7 { Some(args[6]) } else { None }
+  let before = source_snapshot(source, binary, revision)
+  put(log + "/before.json", before.stringify(indent=2) + "\n")
+  // Archive after even when acceptance fails; never turn cancellation into success.
+  defer @async.protect_from_cancel(() => {
+    let after = source_snapshot(source, binary, revision)
+    put(log + "/after.json", after.stringify(indent=2) + "\n")
+    assert_eq(after, before)
+  })
+  run_session(binary, vocabulary, log, true)
+  run_session(binary, vocabulary, log, false)
+  for path, body in bodies() {
+    assert_eq(@fs.read_file(log + "/fixture/" + path).text(), body)
+  }
+  put(
+    log + "/result.json",
+    (
+      {
+        "state": "passed",
+        "serverProcesses": 2,
+        "protocols": ["2026-07-28", "2025-11-25"],
+        "independentTokenRecount": false,
+      } : Json).stringify(indent=2) +
+    "\n",
+  )
+  println("MCP aggregate passed; two server processes; raw protocols archived")
+}
