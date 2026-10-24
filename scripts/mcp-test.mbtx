@@ -94,8 +94,78 @@ fn bodies() -> Map[String, String] {
 }
 
 ///|
+fn normalized_path(path : String, windows : Bool) -> String {
+  // A backslash is a literal filename character on POSIX.
+  if windows {
+    path.replace_all(old="\\", new="/")
+  } else {
+    path
+  }
+}
+
+///|
+fn is_absolute_path(path : String, windows : Bool) -> Bool {
+  let path = normalized_path(path, windows)
+  if !windows {
+    return path.has_prefix("/")
+  }
+  if path.length() >= 3 &&
+    path[0] is ('A'..<='Z' | 'a'..<='z') &&
+    path[1] == ':' &&
+    path[2] == '/' {
+    return true
+  }
+  // UNC requires both a server and a share; /foo and C:foo are not
+  // fully qualified Windows paths (they depend on the current drive/cwd).
+  if path.has_prefix("//") {
+    let parts = path[2:].split("/").to_array()
+    return parts.length() >= 2 &&
+      parts[0] != "" &&
+      parts[0] != "." &&
+      parts[0] != ".." &&
+      parts[1] != "" &&
+      parts[1] != "." &&
+      parts[1] != ".."
+  }
+  false
+}
+
+///|
+fn check_path_contract() -> Unit raise {
+  for
+    path in [
+      "D:\\a\\_temp/mcp-stdio", "C:/fixture", "z:\\fixture", "\\\\server\\share\\fixture",
+      "//server/share", "\\\\server/share\\fixture",
+    ] {
+    assert_true(is_absolute_path(path, true), msg=path)
+  }
+  for
+    path in [
+      "", "relative", "C:relative", "C:", "1:/fixture", "/fixture", "\\fixture",
+      "//server", "//server/", "///share", "//server//fixture",
+    ] {
+    assert_false(is_absolute_path(path, true), msg=path)
+  }
+  assert_eq(
+    normalized_path("D:\\a\\_temp/mcp-stdio", true),
+    "D:/a/_temp/mcp-stdio",
+  )
+  assert_eq(
+    normalized_path("\\\\server\\share\\fixture", true),
+    "//server/share/fixture",
+  )
+  assert_eq(normalized_path("/tmp/literal\\name", false), "/tmp/literal\\name")
+  assert_true(is_absolute_path("/tmp/literal\\name", false))
+  assert_false(is_absolute_path("D:\\fixture", false))
+  assert_false(is_absolute_path("\\\\server\\share", false))
+  assert_false(is_absolute_path("relative", false))
+}
+
+///|
 async fn prepare(log : String) -> Unit {
-  assert_true(log.has_prefix("/"))
+  assert_true(
+    is_absolute_path(log, @env.get_env_var("OS") == Some("Windows_NT")),
+  )
   @fs.mkdir(log, permission=0o700)
   @fs.mkdir(log + "/fixture")
   @fs.mkdir(log + "/fixture/src")
@@ -803,9 +873,11 @@ async fn run_session(
 
 ///|
 async fn main {
+  check_path_contract()
   let args = @env.args()
+  let windows = @env.get_env_var("OS") == Some("Windows_NT")
   if args.length() == 3 && args[1] == "--prepare-only" {
-    prepare(args[2])
+    prepare(normalized_path(args[2], windows))
     return
   }
   guard (args.length() == 6 || args.length() == 7) && args[1] == "--ready" else {
@@ -813,10 +885,15 @@ async fn main {
       "expected --prepare-only NEW_LOG_DIR or --ready BINARY VOCAB SOURCE_ROOT PREPARED_LOG_DIR [SOURCE_REVISION]",
     )
   }
-  let binary = args[2]
-  let vocabulary = args[3]
-  let source = args[4]
-  let log = args[5]
+  // Normalize only filesystem arguments, not revisions or protocol values.
+  // These remain literal argv entries; no shell, dirname or realpath is needed.
+  let binary = normalized_path(args[2], windows)
+  let vocabulary = normalized_path(args[3], windows)
+  let source = normalized_path(args[4], windows)
+  let log = normalized_path(args[5], windows)
+  for path in [binary, vocabulary, source, log] {
+    assert_true(is_absolute_path(path, windows))
+  }
   assert_true(@fs.exists(log + "/prepared.json"))
   let revision = if args.length() == 7 { Some(args[6]) } else { None }
   let before = source_snapshot(source, binary, revision)
