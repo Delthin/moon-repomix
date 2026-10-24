@@ -9,9 +9,9 @@
 | 已发行 **v0.3.0** | 四格式、MoonBit/JavaScript/TypeScript/Python 骨架、Git 差异和历史、公开远程仓库、精确 `o200k_base` 计数、stdin 文件列表。使用 [Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.3.0) 或 [Mooncakes 0.3.0](https://mooncakes.io/docs/Delthin/moon_repomix@0.3.0)，查阅 [固定版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/README.md)。 |
 | **当前源码，尚未发行** | 新增混合全文/骨架、模板、展示控制、Go/Rust/Java 骨架、精确分卷、JSON stderr、输入总量限制、只读 MCP 和入选原因查询。需要从源码构建；见 [场景](docs/scenarios.md)、[0.3 → 0.4 接口迁移预览](docs/migration.md) 与 [Unreleased](CHANGELOG.md#unreleased)。 |
 
-本分支的使用文档描述当前源码接口。版本号尚未调整时，源码构建的 `--version` 也可能显示 `0.3.0`；排查问题请同时记录构建 commit。
+当前源码的版本标识为 `0.4.0`，表中的正式下载仍为 v0.3.0。以下新接口以当前源码为准，问题报告请附构建 commit。
 
-v0.3.0 在固定三仓库、六场景中已有 macOS 与 Linux 的 CLI 对照：macOS 耗时减少约 31%–76%，该轮 Linux 原版耗时约为本工具的 2.1–4.4 倍。测量版本、完整样本、内存和适用范围见 [性能测量](docs/performance.md)；新进程 CLI 与常驻 MCP 分别记录。
+v0.3.0 在固定三仓库、六场景的 macOS CLI 对照中耗时减少约 31%–76%。新增 35 MB TypeScript 大库中，Native CLI 耗时更高、RSS 更低；本次常驻 MCP 重复打包和完整读取更快。各场景的版本、选项、全部样本和平台范围见 [性能测量](docs/performance.md)。
 
 ## 安装与第一次运行
 
