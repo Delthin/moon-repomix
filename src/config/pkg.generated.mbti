@@ -48,6 +48,8 @@ pub(all) struct Cli {
   explain_paths : Array[String]
   report_json : Bool
   mcp : Bool
+  webui : Bool
+  webui_port : Int
   mcp_max_tokens : Int
   mcp_max_output_bytes : Int
   mcp_max_volumes : Int

@@ -1,0 +1,18 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Delthin/moon_repomix/webui"
+
+import {
+  "Delthin/moon_repomix",
+  "Delthin/moon_repomix/config",
+}
+
+// Values
+pub async fn serve(@config.Options, @moon_repomix.Runtime, String, port? : Int) -> Unit
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits

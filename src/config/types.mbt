@@ -150,6 +150,8 @@ pub(all) struct Cli {
   explain_paths : Array[String]
   report_json : Bool
   mcp : Bool
+  webui : Bool
+  webui_port : Int32
   mcp_max_tokens : Int32
   mcp_max_output_bytes : Int32
   mcp_max_volumes : Int32
@@ -374,6 +376,9 @@ fn append_unique(
 ///|
 /// Defaults -> selected JSON -> explicit CLI. No paths are resolved here.
 pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
+  if cli.webui && json is Some(_) {
+    raise Conflict("webui.config")
+  }
   let file = json.unwrap_or(Patch::empty())
   validate_patch(file)
   validate_patch(cli.patch)

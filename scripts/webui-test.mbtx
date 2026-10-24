@@ -1,0 +1,358 @@
+///|
+import {
+  "moonbitlang/async@0.19.2",
+  "moonbitlang/async@0.19.2/fs",
+  "moonbitlang/async@0.19.2/http",
+  "moonbitlang/async@0.19.2/io",
+  "moonbitlang/async@0.19.2/socket",
+  "moonbitlang/async@0.19.2/process",
+  "moonbitlang/core/env",
+  "moonbitlang/x@0.5.5/path",
+  "moonbitlang/core/json",
+  "moonbitlang/core/encoding/utf8",
+}
+
+///|
+// Read-only native HTTP integration on synthetic fixtures. No browser/network
+// services beyond the child-owned loopback port. Artifacts remain in tmpdir.
+// moon run --target native scripts/webui-test.mbtx -- ABS_BINARY ABS_VOCAB
+fn prop(value : Json, key : String) -> Json raise {
+  guard value is Object(fields) && fields.get(key) is Some(found) else {
+    fail("missing " + key)
+  }
+  found
+}
+
+///|
+fn text(value : Json) -> String raise {
+  guard value is String(found) else { fail("expected string") }
+  found
+}
+
+///|
+fn request(profile : String) -> Json {
+  {
+    "directory": "src",
+    "profile": profile,
+    "tokenBudget": 8000,
+    "includePatterns": [],
+    "keepFull": [],
+  }
+}
+
+///|
+async fn post(
+  url : String,
+  path : String,
+  value : Json,
+  expected : Int32,
+) -> Json {
+  let (response, body) = @http.post(url + path, value, headers={
+    "x-moon-repomix": "webui",
+    "content-type": "application/json",
+  })
+  assert_eq(response.code, expected, msg=path + " " + body.text())
+  body.json()
+}
+
+///|
+async fn raw(
+  port : Int32,
+  headers : String,
+  verb~ : String = "GET",
+  path~ : String = "/api/session",
+) -> String {
+  let conn = @socket.Tcp::connect(
+    @socket.Addr::parse("127.0.0.1:" + port.to_string()),
+  )
+  defer conn.close()
+  @io.Writer::write(
+    conn,
+    verb + " " + path + " HTTP/1.1\r\n" + headers + "Connection: close\r\n\r\n",
+  )
+  conn.read_all().text()
+}
+
+///|
+async fn snapshot(root : String, paths : Array[String]) -> Json {
+  let entries : Map[String, Json] = Map([])
+  for path in paths {
+    entries[path] = Json(@fs.read_file(root + "/" + path).text())
+  }
+  let names = @fs.readdir(root, include_hidden=true)
+  names.sort()
+  let children = @fs.readdir(root + "/src", include_hidden=true)
+  children.sort()
+  { "files": Json::object(entries), "root": names, "src": children }
+}
+
+///|
+async fn run(binary : String, vocab : String) -> Unit {
+  let log = @fs.tmpdir(prefix="moon-webui-http-")
+  println("HTTP evidence: " + log)
+  let root = log + "/workspace"
+  @fs.mkdir(root)
+  @fs.mkdir(root + "/src")
+  @fs.mkdir(root + "/node_modules")
+  @fs.mkdir(log + "/webui")
+  @fs.write_file(
+    log + "/webui/index.html",
+    "<!doctype html><title>native test</title>",
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    log + "/webui/app.css",
+    "body{color:black}",
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    log + "/webui/app.js",
+    "console.log('native test');",
+    create_mode=CreateNew,
+  )
+  @fs.symlink(target=vocab, log + "/vocab")
+  @fs.symlink(
+    target=@path.Path(vocab)
+      .dirname()
+      .join(@path.Path("tokenizer-unicode-16.0.0.txt"))
+      .to_string(),
+    log + "/tokenizer-unicode-16.0.0.txt",
+  )
+  @fs.write_file(
+    root + "/src/main.js",
+    "export function answer(value) {\n" +
+    "  // a long explanation which is not part of the function signature\n".repeat(
+      50,
+    ) +
+    "  return value + 42;\n}\n",
+    create_mode=CreateNew,
+  )
+  let fake_secret = "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+  @fs.write_file(
+    root + "/src/secret.txt",
+    "token=" + fake_secret + "\n",
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    root + "/repomix.config.json",
+    "{\"security\":{\"enableSecurityCheck\":false},\"output\":{\"filePath\":\"untrusted-output.xml\"}}",
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    log + "/outside.txt",
+    "OUTSIDE_ROOT_SENTINEL",
+    create_mode=CreateNew,
+  )
+  @fs.write_file(log + "/empty.json", "{}", create_mode=CreateNew)
+  @fs.symlink(target=log + "/outside.txt", root + "/src/outside.txt")
+  @fs.symlink(target=log, root + "/escape")
+  let paths = ["src/main.js", "src/secret.txt", "repomix.config.json"]
+  let before = snapshot(root, paths)
+  @fs.write_file(
+    log + "/before.json",
+    before.stringify(),
+    create_mode=CreateNew,
+  )
+  // Reserve a fresh OS-assigned loopback port, then close before starting our
+  // child. No retries: a port race/startup failure fails rather than using peers.
+  let reservation = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+  let port = reservation.addr.port()
+  reservation.close()
+  let url = "http://127.0.0.1:" + port.to_string()
+  let (output, stdout) = @process.read_from_process()
+  defer output.close()
+  let stderr = @process.redirect_to_file(
+    log + "/stderr.txt",
+    create_mode=CreateNew,
+  )
+  @async.with_task_group(group => {
+    ignore(
+      @process.spawn(
+        group,
+        binary,
+        [
+          root,
+          "--webui",
+          "--webui-port=" + port.to_string(),
+          "--tokenizer-path=" + log + "/vocab",
+        ],
+        stdout~,
+        stderr~,
+        cwd=root,
+      ),
+    )
+    let ready = @async.with_timeout(15000, () => output.read_some())
+    guard ready is Some(ready) else { fail("server did not start") }
+    @fs.write_file(log + "/stdout.txt", ready, create_mode=CreateNew)
+    assert_true(@utf8.decode(ready).contains(url))
+    let (session, body) = @http.get(url + "/api/session", headers={
+      "x-moon-repomix": "webui",
+    })
+    assert_eq(session.code, 200)
+    assert_eq(prop(body.json(), "workspaceName"), Json("workspace"))
+    assert_eq(prop(prop(body.json(), "limits"), "maxFiles"), Json(2000))
+    let listed = post(url, "/api/directories", { "directory": "." }, 200)
+    assert_eq(prop(listed, "directories"), Json(["src"]))
+    ignore(post(url, "/api/directories", { "directory": "../" }, 400))
+    ignore(post(url, "/api/directories", { "directory": "escape" }, 403))
+    let good_headers = "Host: 127.0.0.1:" +
+      port.to_string() +
+      "\r\nX-Moon-Repomix: webui\r\n"
+    assert_true(
+      raw(port, "Host: evil.invalid\r\nX-Moon-Repomix: webui\r\n").has_prefix(
+        "HTTP/1.1 403",
+      ),
+    )
+    assert_true(
+      raw(port, good_headers + "Origin: http://evil.invalid\r\n").has_prefix(
+        "HTTP/1.1 403",
+      ),
+    )
+    assert_true(
+      raw(port, good_headers, verb="OPTIONS").has_prefix("HTTP/1.1 403"),
+    )
+    assert_true(
+      raw(port, "Host: 127.0.0.1:" + port.to_string() + "\r\n").has_prefix(
+        "HTTP/1.1 403",
+      ),
+    )
+    let (oversize, _) = @http.post(url + "/api/pack", "x".repeat(65537), headers={
+      "x-moon-repomix": "webui",
+      "content-type": "application/json",
+    })
+    assert_eq(oversize.code, 413)
+    let (wrong_type, _) = @http.post(url + "/api/pack", "{}", headers={
+      "x-moon-repomix": "webui",
+    })
+    assert_eq(wrong_type.code, 400)
+    let packed = post(url, "/api/pack", request("raw"), 200)
+    @fs.write_file(log + "/raw.json", packed.stringify(), create_mode=CreateNew)
+    let result = prop(packed, "result")
+    let serialized = text(prop(result, "serialized"))
+    assert_eq(prop(result, "document"), @json.parse(serialized))
+    assert_eq(prop(packed, "baseline"), result)
+    assert_false(serialized.contains(fake_secret))
+    assert_false(serialized.contains("OUTSIDE_ROOT_SENTINEL"))
+    assert_eq(
+      prop(prop(prop(result, "report"), "bytes"), "total"),
+      Json(@utf8.encode(serialized).length().to_string()),
+    )
+    assert_eq(
+      prop(prop(prop(result, "report"), "security"), "status"),
+      Json("excluded"),
+    )
+    // Independent existing CLI route must produce exactly the same raw document.
+    let (code, oracle, _) = @process.collect_output(
+      binary,
+      [
+        root + "/src",
+        "--stdout",
+        "--style=json",
+        "--full-metadata",
+        "--config=" + log + "/empty.json",
+        "--tokenizer-path=" + vocab,
+      ],
+      cwd=root,
+    )
+    assert_eq(code, 0)
+    assert_eq(oracle.text(), serialized)
+    for profile in ["skeleton", "mixed"] {
+      let compressed = post(url, "/api/pack", request(profile), 200)
+      @fs.write_file(
+        log + "/" + profile + ".json",
+        compressed.stringify(),
+        create_mode=CreateNew,
+      )
+      assert_eq(
+        prop(prop(compressed, "baseline"), "serialized"),
+        Json(serialized),
+      )
+      let selected = prop(compressed, "result")
+      assert_eq(
+        prop(selected, "document"),
+        @json.parse(text(prop(selected, "serialized"))),
+      )
+      assert_true(text(prop(selected, "serialized")).contains("answer"))
+    }
+    let (html, html_body) = @http.get(url + "/")
+    assert_eq(html.code, 200)
+    assert_true(html_body.text().contains("native test"))
+    assert_eq(html.headers.get("x-content-type-options"), Some("nosniff"))
+    assert_eq(
+      html.headers.get("cross-origin-resource-policy"),
+      Some("same-origin"),
+    )
+    assert_true(
+      html.headers
+      .get("content-security-policy")
+      .unwrap()
+      .contains("script-src 'self'"),
+    )
+    assert_eq(html.headers.get("access-control-allow-origin"), None)
+    // Arbitrary resources and symlinked fixed assets are never served.
+    let (denied, _) = @http.get(url + "/../outside.txt")
+    assert_eq(denied.code, 400)
+    @fs.remove(log + "/webui/app.js")
+    @fs.symlink(target=log + "/outside.txt", log + "/webui/app.js")
+    let (linked, _) = @http.get(url + "/app.js")
+    assert_eq(linked.code, 500)
+    // Cancel/reap only this task group's owned child, not unrelated processes.
+    group.return_immediately(())
+  })
+  let after = snapshot(root, paths)
+  @fs.write_file(log + "/after.json", after.stringify(), create_mode=CreateNew)
+  assert_eq(after, before)
+  // A second owned child demonstrates a stricter host quota survives scope changes.
+  let reservation = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+  let port = reservation.addr.port()
+  reservation.close()
+  let url = "http://127.0.0.1:" + port.to_string()
+  let stderr = @process.redirect_to_file(
+    log + "/quota-stderr.txt",
+    create_mode=CreateNew,
+  )
+  let (output, stdout) = @process.read_from_process()
+  defer output.close()
+  @async.with_task_group(group => {
+    ignore(
+      @process.spawn(
+        group,
+        binary,
+        [
+          root,
+          "--webui",
+          "--webui-port=" + port.to_string(),
+          "--max-total-size=16",
+          "--tokenizer-path=" + vocab,
+        ],
+        stdout~,
+        stderr~,
+        cwd=root,
+      ),
+    )
+    guard @async.with_timeout(15000, () => output.read_some()) is Some(_) else {
+      fail("quota child failed")
+    }
+    let rejected = post(url, "/api/pack", request("raw"), 413)
+    assert_eq(
+      prop(prop(rejected, "error"), "code"),
+      Json("input_limit_exceeded"),
+    )
+    @fs.write_file(
+      log + "/quota.json",
+      rejected.stringify(),
+      create_mode=CreateNew,
+    )
+    group.return_immediately(())
+  })
+  println(
+    "PASS: native HTTP, CLI oracle, profiles, Host/Origin/preflight, scope/symlink, body/quota, static CSP, readonly",
+  )
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 3 else { fail("expected ABS_BINARY ABS_VOCAB") }
+  @async.with_timeout(120000, () => run(args[1], args[2]))
+}

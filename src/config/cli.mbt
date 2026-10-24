@@ -111,6 +111,10 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
   let explain_paths : Array[String] = []
   let mut report_json = false
   let mut mcp = false
+  let mut webui = false
+  let mut webui_port = 8765
+  let mut webui_port_set = false
+  let webui_other_options : Array[String] = []
   let mut mcp_max_tokens = 16000
   let mut mcp_max_output_bytes = 16777216
   let mut mcp_max_volumes = 64
@@ -136,6 +140,12 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
     let (key, inline) = match arg.split_once("=") {
       Some((key, value)) => (key.to_owned(), Some(value.to_owned()))
       None => (arg, None)
+    }
+    if ![
+        "--webui", "--webui-port", "--tokenizer-path", "--max-files", "--max-total-size",
+        "--max-file-size",
+      ].contains(key) {
+      webui_other_options.push(key)
     }
     if key == "--token-count-tree" {
       // Like Repomix's optional argument, a following non-option is a threshold.
@@ -171,7 +181,9 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       | "--remote-branch"
       | "--max-git-bytes"
       | "--max-files"
+      | "--max-file-size"
       | "--max-total-size"
+      | "--webui-port"
       | "--mcp-max-tokens"
       | "--mcp-max-output-bytes"
       | "--mcp-max-volumes"
@@ -252,12 +264,23 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
           patch.max_git_bytes = Some(
             cli_positive_int(value, "input.maxGitBytes"),
           )
+        "--max-file-size" =>
+          patch.max_file_size = Some(
+            cli_positive_int(value, "input.maxFileSize"),
+          )
         "--max-files" =>
           patch.max_files = Some(nonnegative_int(value, "input.maxFiles"))
         "--max-total-size" =>
           patch.max_total_size = Some(
             nonnegative_size(value, "input.maxTotalSize"),
           )
+        "--webui-port" => {
+          webui_port = cli_positive_int(value, "webui.port")
+          webui_port_set = true
+          if webui_port > 65535 {
+            raise InvalidValue("webui.port")
+          }
+        }
         "--mcp-max-tokens" =>
           mcp_max_tokens = cli_positive_int(value, "mcp.maxTokens")
         "--mcp-max-output-bytes" => {
@@ -297,6 +320,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       }
       match key {
         "--mcp" => mcp = true
+        "--webui" => webui = true
         "--stdout" => stdout = true
         "--stdin" => {
           if stdin_mode == Nul {
@@ -369,6 +393,12 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
     ) {
     raise Conflict("explain")
   }
+  if webui_port_set && !webui {
+    raise Conflict("webui.port/webui")
+  }
+  if webui && !webui_other_options.is_empty() {
+    raise Conflict("webui.options")
+  }
   validate_patch(patch)
   {
     directory: directory.unwrap_or("."),
@@ -379,6 +409,8 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
     explain_paths,
     report_json,
     mcp,
+    webui,
+    webui_port,
     mcp_max_tokens,
     mcp_max_output_bytes,
     mcp_max_volumes,

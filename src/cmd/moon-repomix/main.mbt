@@ -4,7 +4,7 @@ extern "c" fn exit(code : Int32) -> Unit = "exit"
 ///|
 async fn read_config(cli : @config.Cli, cwd : String) -> @config.Patch? {
   let explicit = cli.config_path is Some(_)
-  if cli.mcp && !explicit {
+  if (cli.mcp || cli.webui) && !explicit {
     return None
   }
   if !explicit && cli.patch.remote is Some(_) {
@@ -183,6 +183,10 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
     None => @platform.tokenizer_path() catch { _ => raise Resource }
   }
   let runtime = @repomix.Runtime::load(resource)
+  if cli.webui {
+    @webui.serve(options, runtime, resource, port=cli.webui_port)
+    return 0
+  }
   if cli.mcp {
     @mcp.serve(
       options,

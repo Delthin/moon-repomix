@@ -1,0 +1,20 @@
+import {
+  "Delthin/moon_repomix" @repomix,
+  "Delthin/moon_repomix/config",
+  "Delthin/moon_repomix/platform",
+  "Delthin/moon_repomix/selection",
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/http",
+  "moonbitlang/async/io",
+  "moonbitlang/async/socket",
+  "moonbitlang/async/stdio",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/json",
+}
+
+import {
+  "moonbitlang/core/env",
+} for "wbtest"
+
+supported_targets = "native"
