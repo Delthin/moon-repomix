@@ -32,7 +32,7 @@ struct Run {
   write_log : String
   root : String
   files : Array[Json]
-  cap : Int
+  mut cap : Int
   reuse_cli : Int
   mut cli_count : Int
 }
@@ -589,6 +589,22 @@ async fn run_cli(r : Run) -> (Json, Map[String, String], Json) {
       }
     }
   }
+  // Absolute display prefixes vary by runner. Keep the full-document overflow
+  // deterministic instead of assuming one fixed fixture cost on every host.
+  let whole_tokens = decimal(prop(prop(display_report, "tokens"), "documents"))
+  assert_true(whole_tokens > 128)
+  let configured_cap = r.cap
+  r.cap = if configured_cap < whole_tokens - 128 {
+    configured_cap
+  } else {
+    whole_tokens - 128
+  }
+  assert_true(r.cap > 0 && whole_tokens > r.cap)
+  put(r.write_log + "/volume-limit.json", ({
+    "configuredMaxTokens": configured_cap,
+    "displayedWholeDocumentTokens": whole_tokens,
+    "effectiveMaxTokens": r.cap,
+  } : Json).stringify(indent=2) + "\n")
   let (volume_stdout, volume_report) = cli(r, "volumes", base + mixed(r) + presentation(r) +
     ["--stdin0", "--style=json", "--report-json", "--split-output", r.cap.to_string(),
      "--output", r.write_log + "/volumes"], true, 0)

@@ -165,7 +165,11 @@ jobs:
         if: always()
         with:
           name: context-workflow-${{ matrix.platform }}
-          path: ${{ runner.temp }}/context-workflow
+          # The JSON manifest preserves all fixture paths and text. Raw POSIX
+          # LF filenames cannot be uploaded as cross-platform artifact entries.
+          path: |
+            ${{ runner.temp }}/context-workflow
+            !${{ runner.temp }}/context-workflow/fixture/**
           if-no-files-found: ignore
       - name: Pinned Node for Linux performance comparison
         if: runner.os == 'Linux'
