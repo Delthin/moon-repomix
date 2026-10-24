@@ -46,6 +46,12 @@ async fn main {
     "assets/tokenizer-unicode-16.0.0.txt",
     stage + "/share/moon-repomix/tokenizer-unicode-16.0.0.txt",
   )
+  @fs.mkdir(stage + "/share/moon-repomix/webui", recursive=true)
+  for name in ["index.html", "app.css", "app.js"] {
+    copy("assets/webui/" + name, stage + "/share/moon-repomix/webui/" + name)
+  }
+  @fs.mkdir(stage + "/assets/demo", recursive=true)
+  copy("assets/demo/webui.gif", stage + "/assets/demo/webui.gif")
   @fs.mkdir(stage + "/docs", recursive=true)
   for name in @fs.readdir("docs") {
     if @fs.kind("docs/" + name, follow_symlink=false) is Regular {

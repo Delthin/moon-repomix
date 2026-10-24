@@ -1,17 +1,27 @@
 # moon-repomix
 
-把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。当前源码支持七类语言的 AST 骨架、全文/骨架混合、Git 差异与历史、精确预算分卷和固定本地根的只读 MCP。使用 MoonBit native 实现，提供 CLI 与 SDK；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
+把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。当前源码支持七类语言的 AST 骨架、全文/骨架混合、Git 差异与历史、精确预算分卷和固定本地根的只读 MCP。使用 MoonBit native 实现，提供 CLI、SDK 和本地浏览器工作台；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
 
 ## 选择版本
 
 | 版本 | 可用能力与获取方式 |
 | --- | --- |
 | 已发行 **v0.3.0** | 四格式、MoonBit/JavaScript/TypeScript/Python 骨架、Git 差异和历史、公开远程仓库、精确 `o200k_base` 计数、stdin 文件列表。使用 [Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.3.0) 或 [Mooncakes 0.3.0](https://mooncakes.io/docs/Delthin/moon_repomix@0.3.0)，查阅 [固定版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/README.md)。 |
-| **当前源码，尚未发行** | 新增混合全文/骨架、模板、展示控制、Go/Rust/Java 骨架、精确分卷、JSON stderr、输入总量限制、只读 MCP 和入选原因查询。需要从源码构建；见 [场景](docs/scenarios.md)、[0.3 → 0.4 接口迁移预览](docs/migration.md) 与 [Unreleased](CHANGELOG.md#unreleased)。 |
+| **当前源码，尚未发行** | 新增本地浏览器工作台、混合全文/骨架、模板、展示控制、Go/Rust/Java 骨架、精确分卷、JSON stderr、输入总量限制、只读 MCP 和入选原因查询。需要从源码构建；见 [场景](docs/scenarios.md)、[0.3 → 0.4 接口迁移预览](docs/migration.md) 与 [Unreleased](CHANGELOG.md#unreleased)。 |
 
 当前源码的版本标识为 `0.4.0`，表中的正式下载仍为 v0.3.0。以下新接口以当前源码为准，问题报告请附构建 commit。
 
 v0.3.0 在固定三仓库、六场景的 macOS CLI 对照中耗时减少约 31%–76%。新增 35 MB TypeScript 大库中，Native CLI 耗时更高、RSS 更低；本次常驻 MCP 重复打包和完整读取更快。各场景的版本、选项、全部样本和平台范围见 [性能测量](docs/performance.md)。
+
+## 浏览器工作台（当前源码）
+
+![选择目录、生成混合上下文、查看代码对照与预算](assets/demo/webui.gif)
+
+```sh
+moon-repomix ./project --webui
+```
+
+打开 `http://127.0.0.1:8765`，在授权工作区内选择目录，生成全文、骨架或混合上下文，比较代码和完整文档 token 数，再下载 JSON。动图来自实际 MoonBit Native 服务。页面资源随当前源码安装，不需要 Node.js；启动方式、输入限额和本地服务边界见 [工作台指南](docs/webui.md)。
 
 ## 安装与第一次运行
 
@@ -99,7 +109,7 @@ let result = @repomix.pack(options, runtime)
 
 ## 文档与贡献
 
-[场景](docs/scenarios.md) · [配置](docs/configuration.md) · [输出格式](docs/output.md) · [分卷](docs/partition.md) · [机器报告](docs/reports.md) · [MCP](docs/mcp.md) · [入选原因](docs/selection-explanation.md) · [分词](docs/tokenization.md) · [错误处理](docs/errors.md)
+[工作台](docs/webui.md) · [场景](docs/scenarios.md) · [配置](docs/configuration.md) · [输出格式](docs/output.md) · [分卷](docs/partition.md) · [机器报告](docs/reports.md) · [MCP](docs/mcp.md) · [入选原因](docs/selection-explanation.md) · [分词](docs/tokenization.md) · [错误处理](docs/errors.md)
 
 [贡献指南](CONTRIBUTING.md) 说明定点测试、格式与接口更新、资源许可；[工具链](docs/toolchain.md) 说明本地构建和归档。[演示指南](docs/demo.md) 提供可保留产物的三步演示。[三平台 CI](https://github.com/Delthin/moon-repomix/actions/workflows/ci.yml) 覆盖 macOS arm64、Linux x64 和 Windows x64。
 

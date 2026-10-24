@@ -89,6 +89,11 @@ jobs:
           assets/tokenizer-o200k_base.tiktoken
           --log-dir "${{ runner.temp }}/volume-cli"
           ${{ runner.os == 'Linux' && '--xml-oracle' || '' }}
+      - name: Native WebUI HTTP functional test
+        run: >-
+          moon run --target native scripts/webui-test.mbtx --
+          "${{ github.workspace }}/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe"
+          "${{ github.workspace }}/assets/tokenizer-o200k_base.tiktoken"
       - name: Prepare fixed MCP stdio fixture
         run: >-
           moon run --target native scripts/mcp-test.mbtx --

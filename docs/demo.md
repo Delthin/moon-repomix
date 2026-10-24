@@ -1,10 +1,16 @@
-# 三步演示
+# 演示
 
-这个示例用一个微型 MoonBit / TypeScript 目录，展示忽略规则、密钥排除、两种输出格式，以及预算超限时的行为。只在本地运行，不需要 AI 服务或 Node.js。
+## 浏览器工作台
 
-## 运行
+从当前源码安装后运行 `moon-repomix . --webui`，打开终端显示的 loopback 地址。选择授权目录、生成混合上下文，在同一页面对照源码与骨架、查看完整文档预算并下载 JSON。[README 动图](../README.md#浏览器工作台当前源码) 记录了真实 Native 请求；[工作台指南](webui.md) 说明启动和资源限制。
 
-准备好 [README](../README.md#最快上手) 中的 MoonBit 与 native C 工具链，在仓库根目录运行：
+## 三步 CLI 演示
+
+以下示例用一个微型 MoonBit / TypeScript 目录，展示忽略规则、密钥排除、两种输出格式，以及预算超限时的行为。只在本地运行，不需要 AI 服务或 Node.js。
+
+### 运行
+
+准备好 [README](../README.md#安装与第一次运行) 中的 MoonBit 与 native C 工具链，在仓库根目录运行：
 
 ```sh
 moon update
@@ -21,7 +27,7 @@ moon run --target native scripts/demo.mbtx "dist/my demo"
 
 输出路径已存在时脚本报错，再次演示请换一个新目录。演示输入、输出及失败时已生成的文件都保留在该目录；CLI 构建产物位于 `_build/`。
 
-## 演示步骤与输出
+### 演示步骤与输出
 
 脚本依次运行以下三步并核对结果；任意一步不符合预期都会失败：
 
@@ -35,7 +41,7 @@ moon run --target native scripts/demo.mbtx "dist/my demo"
 
 分享前检查 `context.xml` 或 `context.md`；`input/` 中仍保留合成凭证。扫描的覆盖范围见 [扫描规则](security.md)。
 
-## 手动调整
+### 手动调整
 
 安装版可对同一份输入直接运行（以下路径以默认输出目录为例）：
 

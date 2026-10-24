@@ -22,6 +22,16 @@ async fn smoke(binary : String, cwd : String) -> Unit {
 }
 
 ///|
+async fn check_webui(prefix : String) -> Unit {
+  for name in ["index.html", "app.css", "app.js"] {
+    assert_eq(
+      @fs.read_file(prefix + "/share/moon-repomix/webui/" + name).text(),
+      @fs.read_file("assets/webui/" + name).text(),
+    )
+  }
+}
+
+///|
 async fn main {
   let args = @env.args()
   guard args.length() == 2 else {
@@ -49,9 +59,11 @@ async fn main {
     "run", "--target", "native", "scripts/install.mbtx", prefix,
   ])
   assert_eq(installed, 0)
+  check_webui(prefix)
   smoke(prefix + "/bin/moon-repomix" + suffix, fixture)
   let moved = temp + "/relocated"
   @fs.rename(prefix, moved)
+  check_webui(moved)
   smoke(moved + "/bin/moon-repomix" + suffix, fixture)
   if !windows {
     let link = temp + "/alias"
@@ -87,11 +99,13 @@ async fn main {
       ),
     )
   }
+  check_webui(unpacked + "/moon-repomix-" + platform)
+  assert_true(@fs.exists(unpacked + "/moon-repomix-" + platform + "/assets/demo/webui.gif"))
   smoke(
     unpacked + "/moon-repomix-" + platform + "/bin/moon-repomix" + suffix,
     fixture,
   )
   println(
-    "PASS: install, relocation, native compression, parser licenses and extracted archive",
+    "PASS: install, relocation, WebUI assets, native compression, parser licenses and extracted archive",
   )
 }

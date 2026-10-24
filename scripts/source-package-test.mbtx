@@ -26,7 +26,9 @@ async fn main {
       "src/compression/vendor/java/src/parser.c", "LICENSES/tree-sitter-go-MIT.txt",
       "LICENSES/tree-sitter-rust-MIT.txt", "LICENSES/tree-sitter-java-MIT.txt", "src/platform/directory.c",
       "src/partition/reindex.mbt", "src/mcp/server.mbt", "src/mcp_rpc/dispatch.mbt",
-      "docs/mcp.md", "docs/reports.md",
+      "docs/mcp.md", "docs/reports.md", "docs/webui.md",
+      "assets/webui/index.html", "assets/webui/app.css", "assets/webui/app.js",
+      "assets/demo/webui.gif",
     ] {
     assert_true(@fs.exists(temp + "/" + path))
   }

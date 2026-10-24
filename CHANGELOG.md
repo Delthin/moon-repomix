@@ -6,6 +6,7 @@
 
 ### Added
 
+- `--webui` 启动仅监听 loopback 的本地浏览器工作台，支持授权子目录选择、真实 Native 全文/骨架/混合生成、预算比较、代码对照与 JSON 下载；页面资源随安装包提供。
 - `--keep-full` / `output.keepFull` 在骨架模式中保留指定文件全文；SDK 对应 `keep_full_patterns`。
 - 扫描后的 header 与本地 instruction 模板，支持 CLI、JSON 配置和 SDK。
 - 章节显示控制、输出行号、目标根/cwd/绝对三种显示路径；规范文档仍保留原始正文、根相对路径和行映射。

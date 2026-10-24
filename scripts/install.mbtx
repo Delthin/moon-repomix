@@ -47,6 +47,14 @@ async fn main {
     prefix + "/share/moon-repomix/tokenizer-unicode-16.0.0.txt",
     false,
   )
+  @fs.mkdir(prefix + "/share/moon-repomix/webui", recursive=true)
+  for name in ["index.html", "app.css", "app.js"] {
+    install_file(
+      "assets/webui/" + name,
+      prefix + "/share/moon-repomix/webui/" + name,
+      false,
+    )
+  }
   let binary = prefix +
     "/bin/moon-repomix" +
     (if windows { ".exe" } else { "" })
