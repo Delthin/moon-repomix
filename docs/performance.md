@@ -1,8 +1,8 @@
 # 性能与测量方法
 
-当前源码在三个固定仓库的原文、结构压缩场景中，与 Repomix 1.18.1 比较端到端耗时。下面分别记录 macOS 单机和 Linux CI 结果；它们说明这些工作负载的性能，不代表任意仓库、选项或平台都必然更快。
+下面保留先前六个小场景的 macOS/Linux 结果，并补充 [2026-10-24 大库、Go/Rust 与常驻 MCP](#2026-10-24-大库gorust-与常驻-mcp) 的独立数据。新增的 TypeScript 大库上原版 CLI 更快、Native 峰值 RSS 较低；常驻 MCP 的 pack/read 另行统计。这些结果只描述各自输入、选项和平台，不代表所有工作负载都更快。
 
-## 测量环境
+## 先前六个小场景：测量环境
 
 - 本工具源码：`b0d1bbbb54c2ea7486b03ae5b9bed817cb9a06a1`，MoonBit `0.10.15+943464bfa`，native release。
 - 本工具二进制 SHA-256：`5f1e7d8016ca3f8142709eac9747ee73b7b93f12c34dab4411d742e4fa1ee43f`。
@@ -108,10 +108,105 @@ Linux CI 复用已有 release CLI，运行同样六场景；macOS/Windows 功能
 
 工具独立导入 [moonbitlang/async 0.22.5](https://github.com/moonbitlang/async)（Apache-2.0），不修改产品运行时依赖；对照使用 [Node.js 25.9.0](https://nodejs.org/)（MIT，含第三方声明）和 [Repomix 1.18.1](https://www.npmjs.com/package/repomix/v/1.18.1)（MIT，其 npm 依赖另有各自许可）。三个语料来自前述固定公共 Git commit：Repomix、Express 为 MIT，Requests 为 Apache-2.0；准备阶段保留各仓库 `LICENSE`。它们只作开发测试输入，不打进产品发行包；再分发语料或 npm 依赖时应同时遵守各自许可/声明。
 
-原版 parsable-style 也计数完整文档；其大于 1,000,000 UTF-16 单位的输出会分块处理。本批都低于该阈值。本工具始终计数完整输出，不用分块或逐文件求和代替预算计数。
+原版 parsable-style 也计数完整文档；其大于 1,000,000 UTF-16 单位的输出会分块处理。上述先前六个小场景都低于该阈值。本工具始终计数完整输出，不用分块或逐文件求和代替预算计数。
 
 ## MoonBit 压缩是单独能力
 
 原版未提供 MoonBit grammar，不能把其未执行 MoonBit 压缩算作同功能性能胜利。本工具当前 76 份源码/接口都能通过 AST 解析；默认安全流程排除含合成测试凭据的一份文件，实际导出其余 75 份。
 
 在同一接受集合上，完整 JSON 从 87,133 降至 19,389 tokens，减少 77.7%；60 份应用压缩，15 份保持原文，包括完整保留的 12 份 `.mbti`。另核对了 235 个完整声明 header 与原始行范围。完整元数据模式为 28,186 tokens，按需选择；两种模式文件正文相同。
+
+## 2026-10-24 大库、Go/Rust 与常驻 MCP
+
+这批使用冻结的 native release：源码 `4a8c3e3c8f9ef89e14d624e9586b19799eded96e`，二进制 SHA-256 `67da22e745ca556a0e37bb9ea86d1813371d4951c7f504a431e016f3d07327b9`。工具链为 MoonBit `0.10.15+943464bfa`、脚本复用 async `0.22.5` 与 moonbitlang/x `0.5.5` crypto（均 Apache-2.0）；对照复用已隔离安装、带 package-lock 的 Repomix `1.18.1` 和 Node `v25.9.0`。o200k_base 产品资源 SHA-256 为 `446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d`。本次只执行 Apple M4 / macOS 26.2；下列数据没有新增 Linux 或 Windows 复验。
+
+### 固定输入与新进程 CLI
+
+| 来源 | 固定版本 / commit | 预先选定范围 | 源文件数 | 原始 bytes |
+| --- | --- | --- | ---: | ---: |
+| Microsoft TypeScript | v5.9.3 / `c63de15a992d37f0d6cec03ac7631872838602cb` | `src/**,LICENSE.txt` | 736 | 35,182,011 |
+| go-chi/chi | `71307f9b7e4e9527638bc951c42b782cd1560331` | 7 份根目录 Go 源码与 LICENSE | 8 | 50,684 |
+| dtolnay/itoa | `8ee97f64bf3cbfa42d357a2c39955fd062492e7d` | `src/**,LICENSE-MIT,LICENSE-APACHE` | 4 | 23,718 |
+
+公开准备入口默认从三个公共 HTTPS Git URL 按上述固定 commit 稀疏检出，并验证 HEAD；TypeScript 还核对 v5.9.3 tag。本表使用的 Go/Rust 源副本逐一符合内置的 12 份源码/许可 SHA-256；原定的全部声明/导入锚点也内置在脚本中，在线和离线准备均核对相同常量。TypeScript 为 Apache-2.0，chi 为 MIT，itoa 为 MIT/Apache-2.0 双许可；许可文件随语料保留，语料只作开发输入。独立输入只含选定文件、空 `.git` 边界及安全 JSON 配置，不执行仓库代码、JS 配置或 processors。TypeScript 不是从大库挑出的性能小样本。
+
+每来源、模式、端点预热一次，接着交替先后顺序运行五个新进程：共 **60 次正式计时、12 次预热**。白名单环境中的独立 HOME/XDG/TMP/token cache 批内保留，普通线程池和安全扫描开启。这里的“新进程”不表示冷磁盘、冷 OS 页缓存或每轮清空 token cache。本表的压缩行是 Native **完整元数据压缩**（`--compress --full-metadata`）对照原版自身压缩，和前面六个小场景的 Native 默认轻量压缩不是同一工作。保留原有 72 份产物；18 份 Native 完整元数据压缩输出在计时外检查 ranges。
+
+| CLI 场景 | Native wall 中位数 s | 原版 wall 中位数 s | Native RSS 中位数 bytes | 原版 RSS 中位数 bytes |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript 原文 | 2.89 | **1.61** | 412,352,512 | 1,426,980,864 |
+| TypeScript 完整元数据压缩 | 4.45 | **1.97** | 384,057,344 | 1,152,647,168 |
+| chi 原文 | 0.04 | 0.21 | 26,116,096 | 160,448,512 |
+| chi 完整元数据压缩 | 0.04 | 0.23 | 27,590,656 | 188,940,288 |
+| itoa 原文 | 0.04 | 0.21 | 26,083,328 | 159,514,624 |
+| itoa 完整元数据压缩 | 0.04 | 0.24 | 27,688,960 | 190,693,376 |
+
+TypeScript 两项都是 Native 更慢；Go/Rust 四项 wall 和 RSS 中位数较低。macOS `/usr/bin/time -lp` 的 RSS 本来就是 bytes，表示被测进程峰值而非子进程之和，wall 分辨率为 0.01 s。每批 `report/summary.json` 保存全部五轮 wall、user、sys、RSS 样本及 median/min/max/MAD；`logs/` 保存命令、退出码和原始 time 输出。统计包含全部慢样本、回退和输出差异。
+
+Native 的 `--quiet --report-json` 在 **stderr** 输出 schema-1 JSON，time 行另行解析。36 份保留报告均为 `status=ok`、`operation=pack`、`publication=committed`、`exitCode=0`、`style=json`，单文件输出，安全检查开启；`maxFiles=20000`、`maxTotalSize=209715200` bytes，token limit 为 null、exceeded=false，index tokens/bytes 均为 0。接受集合、声明 bytes 与实际输出、documents/index/total 算术、精确计数字符串、相同输出 SHA 的计数稳定性和 time 指标均离线核对。
+
+| Native CLI 场景 | 接受 / 跳过 | 安全状态 / findings | 完整文档精确 tokens | 输出 bytes |
+| --- | ---: | --- | ---: | ---: |
+| TypeScript 原文 | 735 / 2 | excluded / 1 | 9,709,413 | 37,206,811 |
+| TypeScript 完整元数据压缩 | 735 / 2 | excluded / 1 | 7,739,936 | 28,488,489 |
+| chi 原文 | 8 / 1 | passed / 0 | 16,410 | 55,329 |
+| chi 完整元数据压缩 | 8 / 1 | passed / 0 | 11,007 | 44,274 |
+| itoa 原文 | 4 / 1 | passed / 0 | 6,214 | 24,648 |
+| itoa 完整元数据压缩 | 4 / 1 | passed / 0 | 6,199 | 25,112 |
+
+这里的 tokens 来自保留的 Native 完整文档精确计数报告；离线复核不再次编码或启动 CLI。itoa 的完整元数据压缩产物 bytes 比原文更大，不能把正文压缩等同完整输出变小。
+
+内容与工作差异直接影响解读：
+
+- Native 实际接受 TypeScript **735/736** 份；`src/testRunner/unittests/services/colorization.ts` 的合成 `token: string` 测试命中 `credential-assignment`，被安全扫描排除。原版接受 736 份。只读路径解释保留了 `SecurityFinding`、规则和 19,156 readBytes；输入与扫描器保持原样。这不是相同接受集合的对比。Go/Rust 两端接受集合相同。
+- Native 每份 TypeScript 压缩输出都为 535 applied、116 `not-fewer-tokens`、45 `not-smaller`、35 `unsupported`、4 `parse-error`；六轮一致，没有观察到 timeout。四份解析回退为 `src/compiler/transformers/utilities.ts`、`src/compiler/types.ts`、`src/lib/es2015.symbol.wellknown.d.ts`、`src/services/exportInfoMap.ts`，全部保留原文、空 ranges，而不是关闭保护。chi 为 7 applied + 1 许可原文，itoa 为 2 applied + 2 许可原文。
+- 原文检查遵循各自输入契约：Native 仅去掉一个初始 UTF-8 BOM，原版 trim；原始 bytes/SHA 始终对磁盘文件统计。Native 的接受集合、回退正文、完整记录、有序有界 ranges 和抽样声明源行覆盖均严格检查。
+- TypeScript 的 7 个声明/导入锚点在 Native 全部保留。原版压缩保留抽样声明，但省去 program 的 performance 导入和 session 的 protocol 导入。Go/Rust 的 42 个预定 API/图锚点在 Native 全部保留；原版 itoa 压缩缺少 `#![no_std]`、关联 `Buffer` 类型、`write` trait 方法和 no-panic 属性四项。它们是内容策略差异，不包装成同功能速度收益。另在源文件上核对了两条 TypeScript import 的目标以及 Rust `mod udiv128` 的目标文件与散列。
+- 原版对大于 1,000,000 UTF-16 单位的文档，按 200,000 单位切片独立计数再求和。TypeScript 原版原文为 36,661,647 单位 / **184 块**，压缩为 26,099,066 单位 / **131 块**；Native 仍精确计数完整文档。因此不能称为同一种完整文档计数工作。Go/Rust 未超过阈值。
+
+### 真正常驻 MCP：同一 PID 的重复 pack/read
+
+固定在同一 TypeScript commit，测量前将范围限定为 **`src/server/**,LICENSE.txt`，18 份、817,532 原始 bytes**。这与上述 35 MB 单库 CLI 是不同工作负载。先通过原版真实 `tools/list` 检查 schema，确认安装版本的 `pack_codebase` 支持 `style:"json"`，`read_repomix_output` 支持完整读取；未替换或修改 SDK。
+
+两端协商 **2025-06-18**。每模式每端各启动一个真实常驻服务器，在同一进程中执行 1 次预热 + 5 次重复事务：pack 后读完所有产物。共 **4 个正式服务器、4 次预热、20 次正式事务**，另有 1 个只读 schema 探测进程。Native 使用 `pack_repository` + 逐资源 `resources/read`，原版使用 `pack_codebase` + 无行范围的 `read_repomix_output`，校验 `linesRead == totalLines`。每轮 PID 和 wrapper/PPID/RSS 收据证明没有在轮间重启。
+
+Native host 为每卷 96,000 tokens、总输出上限 16,777,216 bytes、最多 32 卷，单资源 4 MiB 保护保持开启。原文读 4 卷 + index，共 862,593 bytes；压缩读 2 卷 + index，共 462,422 bytes（index 包含压缩 ranges）。原版分别读 1 份 862,303 / 408,088 bytes 的 JSON，工具的 `topFilesLength` schema 最小值为 1。两端都接受全部 18 份，原文与三项声明/导入锚点核对通过；原版压缩依然省去 protocol 导入，Native 保留。
+
+| 模式 / 端点 | spawn 至 initialize ms | pack 中位数 ms | 读全中位数 ms | pack+读全中位数 ms | 生命周期 peak RSS bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 原文 Native | 38 | 86 | 350 | 436 | 40,878,080 |
+| 原文 原版 | 227 | 112 | 3,703 | 3,815 | 251,002,880 |
+| 压缩 Native | 39 | 130 | 170 | 300 | 40,271,872 |
+| 压缩 原版 | 224 | 201 | 875 | 1,078 | 287,621,120 |
+
+这些是此本地客户端的实际事务时间：包含 RPC 传输、MoonBit 客户端 JSON 解码、完整 NDJSON 归档和官方 read 工具的包装，不是纯服务器计算时间。原版响应中的正文包装/重复、Native 的资源分卷与压缩索引、产物字节数也不同；不据此给出算法速度倍数。pack 时间不含后续读全，initialize 单列、不摊入五轮。全部五轮分别保留 pack/read/e2e 的样本与 median/min/max/MAD；例如 Native 原文 e2e 为 `[436,435,455,435,818]` ms，818 ms 慢轮同样纳入，压缩读全 431 ms 的慢轮也保留。
+
+RSS 的两种测量分别保留：`time -lp` 覆盖整个服务器生命周期；`ps` 在 initialize 和每轮响应/计时外校验后采样实际子进程，KiB 乘 1024 转为 bytes。初始化 → 第五轮 idle RSS，原文 Native 为 25,640,960 → 40,861,696，原版为 83,296,256 → 224,198,656；压缩 Native 为 25,657,344 → 40,255,488，原版为 83,165,184 → 255,279,104。没有强制 GC；idle 不是最小稳态内存。
+
+Native 每次 pack 后旧 URI 返回 `-32002`，`release_context` 后资源列表为空、最后 URI 也失效；释放后 RSS 未立即下降，不能把资源失效等同 allocator 归还。原版没有相同释放工具，旧 outputId 仍可真实读出，临时文件在本批 owned TMP 下保留。旧 ID 检查在计时外完成，生命周期 RSS 也包括这些检查。Native stdin EOF 正常退出 0；两次原版会话在全部六次事务完成后对核验的自有 PID 发送 SIGTERM，实际退出 **-15，并非干净退出 0**，原始收据为准。
+
+### 复现与离线检查
+
+从产品根运行这两个聚焦 `.mbtx`。`CLI_WORK`、`MCP_WORK` 为尚不存在的绝对路径；`REFERENCE_CLI` 为已有隔离 npm 项目中 Repomix 1.18.1 的 `bin/repomix.cjs` 绝对路径，项目根须保留 `package-lock.json` 以便归档（脚本不安装依赖）。默认 `prepare` 仅需这两个参数，不需要外部 hash/anchor 文件或私有源码目录：它按公开 URL 和固定 SHA 安全检出 TypeScript、chi、itoa，只复制选定源码与许可，不执行这些仓库的代码或 JS 配置。
+
+`FROZEN_NATIVE` 是上述固定 SHA256 二进制的绝对路径，`VOCAB_ABSOLUTE` 是仓库 `assets/tokenizer-o200k_base.tiktoken` 的绝对路径。本组 `run` 明确校验冻结产品/词表/原版身份；不同的自建 binary 需要维护者显式更新固定身份、另建批次，不可冒用本表。
+
+```sh
+moon run --target native scripts/benchmark-workloads.mbtx -- prepare "$CLI_WORK" "$REFERENCE_CLI"
+moon run --target native scripts/benchmark-workloads.mbtx -- run "$CLI_WORK" \
+  "$FROZEN_NATIVE" assets/tokenizer-o200k_base.tiktoken
+moon run --target native scripts/benchmark-workloads.mbtx -- verify "$CLI_WORK"
+
+moon run --target native scripts/benchmark-resident.mbtx -- prepare "$MCP_WORK" "$CLI_WORK"
+moon run --target native scripts/benchmark-resident.mbtx -- probe "$MCP_WORK" \
+  "$FROZEN_NATIVE" "$VOCAB_ABSOLUTE" "$REFERENCE_CLI"
+moon run --target native scripts/benchmark-resident.mbtx -- run "$MCP_WORK" \
+  "$FROZEN_NATIVE" "$VOCAB_ABSOLUTE" "$REFERENCE_CLI"
+moon run --target native scripts/benchmark-resident.mbtx -- verify "$MCP_WORK" "$CLI_WORK"
+```
+
+若已有同范围源副本，可选 `benchmark-workloads.mbtx -- local NEW_CLI_WORK REFERENCE_CLI SOURCE_ROOT`；`SOURCE_ROOT` 下是 `typescript/`、`chi/`、`itoa/`。该入口不联网，仍核对内置 12 SHA、文件数/bytes 和全部锚点，但不把本地 TypeScript 声称为已验证远端 HEAD。`verify-prepared NEW_CLI_WORK PRIOR_CLI_WORK` 可逐文件比较已验证源批的全部 748 个 SHA，确认准备逻辑没有换语料。
+
+每批自带 `manifest/`（固定来源、逐文件 SHA、配置及运行身份）、`logs/`（完整 argv、退出码、stdout/stderr/time）、`documents/` 和 `report/`。CLI `verify` 同时产出 `report/native-stderr-audit.json`；`audit-reports CLI_WORK` 可仅复核原生 stderr 报告。常驻各 session 保存真实工具 schema、NDJSON、pack/read 正文、固定 PID/PPID/RSS、退出码及全部五轮统计；`verify` 的末尾可选新收据路径，避免覆盖旧证据。关闭结果以 `exit.json` / `shutdown-result.json` 的实际状态为准，`/bin/kill` 返回 0 只证明信号发送成功。
+
+脚本不安装原版依赖、不清理用户缓存，已有目录拒绝覆盖；没有盲重试。可用 `--target-dir` 将编译产物放到独立目录。此组仅实测 macOS，未测 Linux/Windows、冷页缓存、付费模型；协议、内容与性能结果不能外推。

@@ -1,0 +1,1193 @@
+///|
+/// Fixed-source macOS resident MCP evidence; never modifies SDK or product limits.
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/encoding/hex",
+  "moonbitlang/x@0.5.5/crypto",
+}
+
+///|
+struct Session {
+  input : @process.WriteToProcess
+  output : @process.ReadFromProcess
+  log : String
+  mut pending : Bytes
+  mut id : Int32
+}
+
+///|
+fn prop(j : Json, k : String) -> Json raise {
+  guard j is Object(m) && m.get(k) is Some(v) else {
+    fail("Missing field: " + k)
+  }
+  v
+}
+
+///|
+fn text(j : Json) -> String raise {
+  guard j is String(s) else { fail("Expected string") }
+  s
+}
+
+///|
+fn rows(j : Json) -> Array[Json] raise {
+  guard j is Array(a) else { fail("Expected array") }
+  a
+}
+
+///|
+async fn put(path : String, j : Json) -> Unit {
+  @fs.write_file(path, j.stringify(indent=2) + "\n", create_mode=CreateNew)
+}
+
+///|
+async fn digest(path : String) -> String {
+  @hex.encode(
+    Bytes::from_array(@crypto.sha256(@fs.read_file(path).binary())[:]),
+  )
+}
+
+///|
+async fn walk(root : String, path : String, result : Array[String]) -> Unit {
+  match @fs.kind(root + "/" + path, follow_symlink=false) {
+    Regular => result.push(path)
+    Directory =>
+      for entry in @fs.readdir(root + "/" + path, include_hidden=true) {
+        walk(root, path + "/" + entry, result)
+      }
+    _ => fail("Nonregular corpus entry")
+  }
+}
+
+///|
+fn environment(work : String) -> Map[String, String] {
+  {
+    "PATH": @env.get_env_var("PATH").unwrap_or("/usr/bin:/bin"),
+    "HOME": work + "/home",
+    "XDG_CONFIG_HOME": work + "/config",
+    "XDG_CACHE_HOME": work + "/cache",
+    "TMPDIR": work + "/tmp",
+    "TMP": work + "/tmp",
+    "TEMP": work + "/tmp",
+    "REPOMIX_TOKEN_CACHE_PATH": work + "/cache/token-counts.json",
+    "REPOMIX_LOG_LEVEL": "1",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_ATTR_NOSYSTEM": "1",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_ASKPASS": "/usr/bin/false",
+    "NO_COLOR": "1",
+    "CI": "1",
+    "LC_ALL": "C",
+  }
+}
+
+///|
+async fn prepare(work : String, cli_work : String) -> Unit {
+  guard work.has_prefix("/") else { fail("New absolute workspace required") }
+  @fs.mkdir(work)
+  @fs.mkdir(work + "/source")
+  @fs.mkdir(work + "/source/.git")
+  let paths = ["LICENSE.txt"]
+  walk(cli_work + "/inputs/typescript", "src/server", paths)
+  paths.sort()
+  let hashes : Map[String, String] = Map([])
+  let source = @json.parse(
+    @fs.read_file(cli_work + "/manifest/typescript-source.json").text(),
+  )
+  let mut bytes = 0
+  for path in paths {
+    assert_eq(
+      Json(digest(cli_work + "/inputs/typescript/" + path)),
+      prop(source, path),
+    )
+    if path.rev_find("/") is Some(end) {
+      @fs.mkdir(
+        work + "/source/" + path[0:end].to_owned(),
+        recursive=true,
+        allow_exist=true,
+      )
+    }
+    let body = @fs.read_file(cli_work + "/inputs/typescript/" + path)
+    @fs.write_file(work + "/source/" + path, body, create_mode=CreateNew)
+    hashes[path] = digest(work + "/source/" + path)
+    bytes += body.binary().length()
+  }
+  @fs.write_file(
+    work + "/source/repomix.config.json",
+    @fs.read_file(cli_work + "/node.config.json"),
+    create_mode=CreateNew,
+  )
+  @fs.write_file(
+    work + "/source/native.config.json",
+    @fs.read_file(cli_work + "/native.config.json"),
+    create_mode=CreateNew,
+  )
+  put(work + "/sources.json", Json(hashes))
+  put(work + "/scope.json", {
+    "files": Json(paths.length()),
+    "raw_bytes": Json(bytes),
+    "scope": "src/server/**,LICENSE.txt",
+    "commit": "c63de15a992d37f0d6cec03ac7631872838602cb",
+  })
+}
+
+///|
+async fn send(s : Session, j : Json) -> Unit {
+  let line = j.stringify() + "\n"
+  @fs.write_file(
+    s.log + "/stdin.ndjson",
+    line,
+    append=true,
+    create_mode=OpenExisting,
+  )
+  s.input.write(line)
+}
+
+///|
+async fn rpc(s : Session, operation : String, params : Json) -> Json {
+  s.id += 1
+  let id = s.id
+  send(s, {
+    "jsonrpc": "2.0",
+    "id": Json(id),
+    "method": Json(operation),
+    "params": params,
+  })
+  @async.with_timeout(180000, () => {
+    for ;; {
+      let line = for ;; {
+        if s.pending.find(b"\n") is Some(end) {
+          let line = @utf8.decode(s.pending[:end + 1])
+          s.pending = s.pending[end + 1:].to_owned()
+          break line
+        }
+        guard s.output.read_some() is Some(chunk) else {
+          fail("Unexpected MCP EOF")
+        }
+        @fs.write_file(
+          s.log + "/stdout.ndjson",
+          chunk,
+          append=true,
+          create_mode=OpenExisting,
+        )
+        s.pending = s.pending + chunk
+        guard s.pending.length() <= 32 * 1024 * 1024 else {
+          fail("Benchmark response bound exceeded")
+        }
+      }
+      let response = @json.parse(line)
+      assert_eq(prop(response, "jsonrpc"), Json("2.0"))
+      if response is { "id": got, .. } {
+        assert_eq(got, Json(id))
+        break response
+      }
+      assert_eq(
+        prop(response, "method"),
+        Json("notifications/resources/list_changed"),
+      )
+    }
+  })
+}
+
+///|
+fn result(response : Json) -> Json raise {
+  guard response is { "result": r, .. } else {
+    fail("MCP error: " + response.stringify())
+  }
+  guard !(r is { "isError": True, .. }) else {
+    fail("Tool error: " + r.stringify())
+  }
+  r
+}
+
+///|
+async fn tool(s : Session, name : String, args : Json) -> Json {
+  result(rpc(s, "tools/call", { "name": Json(name), "arguments": args }))
+}
+
+///|
+async fn pid_rss(
+  log : String,
+  wrapper : Int32,
+  expected : Int32?,
+  label : String,
+) -> (Int32, Double) {
+  let (find_exit, child_ids, find_err) = @process.collect_output(
+    "/usr/bin/pgrep",
+    ["-P", wrapper.to_string()],
+  )
+  assert_eq(find_exit, 0, msg=find_err.text())
+  let ids = child_ids.text().trim().split("\n").collect()
+  assert_eq(ids.length(), 1)
+  let argv = ["-o", "pid=,ppid=,rss=,comm=", "-p", ids[0].to_owned()]
+  let (exit, out, err) = @process.collect_output("/bin/ps", argv)
+  @fs.write_file(log + "/ps-" + label + ".txt", out, create_mode=CreateNew)
+  assert_eq(exit, 0, msg=err.text())
+  let lines = out.text().split("\n").filter(x => !x.trim().is_empty()).collect()
+  assert_eq(lines.length(), 1)
+  let cols = lines[0].trim().split(" ").filter(x => !x.is_empty()).collect()
+  let pid = @string.parse_int(cols[0])
+  assert_eq(@string.parse_int(cols[1]), wrapper)
+  let rss = @string.parse_double(cols[2]) * 1024.0
+  if expected is Some(expected) {
+    assert_eq(pid, expected)
+  }
+  put(log + "/ps-" + label + ".json", {
+    "program": "/bin/ps",
+    "argv": Json(argv),
+    "wrapper_pid": Json(wrapper),
+    "server_pid": Json(pid),
+    "rss_bytes": Json(rss),
+    "ps_rss_unit": "KiB multiplied by 1024",
+    "child_lookup": "pgrep -P verified wrapper, exactly one child, ps PPID rechecked",
+  })
+  (pid, rss)
+}
+
+///|
+fn bodies(document : String) -> Map[String, String] raise {
+  guard prop(@json.parse(document), "files") is Object(m) else {
+    fail("Expected JSON files map")
+  }
+  m.map((_, value) => text(value))
+}
+
+///|
+fn normalize(s : String) -> String {
+  s
+  .replace_all(old="\r", new="")
+  .split("\n")
+  .map(line => line.trim().to_owned())
+  .collect()
+  .join("\n")
+}
+
+///|
+async fn validate(
+  work : String,
+  implementation : String,
+  compressed : Bool,
+  documents : Array[(String, String)],
+) -> Json {
+  let merged : Map[String, String] = Map([])
+  let sizes : Array[Json] = []
+  for (name, doc) in documents {
+    sizes.push({
+      "name": Json(name),
+      "utf8_bytes": Json(@utf8.encode(doc).length()),
+      "utf16_units": Json(doc.length()),
+      "node_chunked_output_count": Json(
+        implementation == "node" && doc.length() > 1000000,
+      ),
+    })
+    if name == "index.json" {
+      continue
+    }
+    for path, body in bodies(doc) {
+      guard !merged.contains(path) else {
+        fail("Duplicate file across volumes")
+      }
+      merged[path] = body
+    }
+  }
+  guard @json.parse(@fs.read_file(work + "/sources.json").text())
+    is Object(expected) else {
+    fail("No source map")
+  }
+  let accepted = merged.keys().collect()
+  accepted.sort()
+  let paths = expected.keys().collect()
+  paths.sort()
+  assert_eq(accepted, paths)
+  for path, sha in expected {
+    assert_eq(Json(digest(work + "/source/" + path)), sha)
+    if !compressed {
+      let source = @fs.read_file(work + "/source/" + path).text()
+      assert_eq(
+        merged[path],
+        if implementation == "node" {
+          source.trim().to_owned()
+        } else {
+          source
+        },
+      )
+    }
+  }
+  let obligations : Array[Json] = []
+  let mut api_ok = true
+  for
+    (path, fragment) in [
+      ("src/server/session.ts", "export class Session<"),
+      ("src/server/session.ts", "import * as protocol from \"./protocol.js\";"),
+      ("src/server/editorServices.ts", "export class ProjectService"),
+    ] {
+    assert_true(
+      normalize(@fs.read_file(work + "/source/" + path).text()).contains(
+        fragment,
+      ),
+    )
+    let present = normalize(merged[path]).contains(fragment)
+    obligations.push({
+      "path": Json(path),
+      "fragment": Json(fragment),
+      "present": Json(present),
+    })
+    api_ok = api_ok && present
+  }
+  guard api_ok || (compressed && implementation == "node") else {
+    fail("Native/raw API preservation failed")
+  }
+  {
+    "accepted": Json(accepted),
+    "source_hashes_unchanged": true,
+    "api_ok": Json(api_ok),
+    "anchors": Json(obligations),
+    "documents": Json(sizes),
+  }
+}
+
+///|
+async fn session(
+  work : String,
+  native : String,
+  vocabulary : String,
+  node_cli : String,
+  implementation : String,
+  compressed : Bool,
+  probe~ : Bool = false,
+) -> Unit {
+  let mode = if compressed { "compressed" } else { "raw" }
+  let log = work +
+    "/" +
+    (if probe { "probe" } else { mode + "-" + implementation })
+  @fs.mkdir(log)
+  for d in ["home", "config", "cache", "tmp"] {
+    @fs.mkdir(log + "/" + d)
+  }
+  for f in ["stdin.ndjson", "stdout.ndjson", "stderr.bin"] {
+    @fs.write_file(log + "/" + f, "", create_mode=CreateNew)
+  }
+  let root = work + "/source"
+  let program = if implementation == "native" { native } else { "node" }
+  let args = if implementation == "native" {
+    [
+      root,
+      "--mcp",
+      "--mcp-max-tokens",
+      "96000",
+      "--mcp-max-output-bytes",
+      "16777216",
+      "--mcp-max-volumes",
+      "32",
+      "--include",
+      "src/server/**,LICENSE.txt",
+      "--config",
+      root + "/native.config.json",
+      "--tokenizer-path",
+      vocabulary,
+    ]
+  } else {
+    [node_cli, "--mcp"]
+  }
+  let time_args = ["-lp", "-o", log + "/lifecycle-time.txt", program] + args
+  put(log + "/command.json", {
+    "program": "/usr/bin/time",
+    "argv": Json(time_args),
+    "cwd": Json(root),
+    "environment": Json(environment(log)),
+  })
+  let (stdin, input) = @process.write_to_process()
+  let (output, stdout) = @process.read_from_process()
+  let (errors, stderr) = @process.read_from_process()
+  defer input.close()
+  defer output.close()
+  defer errors.close()
+  let s : Session = { input, output, log, pending: b"", id: 0, }
+  let children : Array[@process.Process] = []
+  defer @async.protect_from_cancel(() => {
+    for child in children {
+      put(log + "/exit.json", {
+        "wrapper_pid": Json(child.pid),
+        "exit": Json(child.wait()),
+      })
+    }
+  })
+  let samples : Array[Json] = []
+  let idle : Array[Double] = []
+  @async.with_task_group(group => {
+    let start = @env.now()
+    let child = @process.spawn(
+      group,
+      "/usr/bin/time",
+      time_args,
+      stdin~,
+      stdout~,
+      stderr~,
+      cwd=root,
+      inherit_env=false,
+      extra_env=environment(log),
+    )
+    children.push(child)
+    let diagnostics = group.spawn(() => {
+      while errors.read_some() is Some(chunk) {
+        @fs.write_file(
+          log + "/stderr.bin",
+          chunk,
+          append=true,
+          create_mode=OpenExisting,
+        )
+      }
+    })
+    let init = result(
+      rpc(s, "initialize", {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": { "name": "fixed-workload-evidence", "version": "1" },
+      }),
+    )
+    let init_ms = (@env.now() - start).to_double()
+    assert_eq(prop(init, "protocolVersion"), Json("2025-06-18"))
+    send(s, { "jsonrpc": "2.0", "method": "notifications/initialized" })
+    let catalog = result(rpc(s, "tools/list", {}))
+    put(log + "/tools-list.json", catalog)
+    put(log + "/initialize.json", {
+      "response": init,
+      "spawn_to_initialize_ms": Json(init_ms),
+    })
+    let tools = rows(prop(catalog, "tools"))
+    if implementation == "node" {
+      let pack = tools.filter(t => prop(t, "name") == Json("pack_codebase"))[0]
+      let schema = prop(prop(pack, "inputSchema"), "properties")
+      assert_true(
+        rows(prop(prop(schema, "style"), "enum")).contains(Json("json")),
+      )
+      for
+        field in ["directory", "compress", "includePatterns", "topFilesLength"] {
+        prop(schema, field) |> ignore
+      }
+      assert_true(
+        tools.iter().any(t => prop(t, "name") == Json("read_repomix_output")),
+      )
+    }
+    let (server_pid, initial_rss) = pid_rss(log, child.pid, None, "initialized")
+    idle.push(initial_rss)
+    put(log + "/identity.json", {
+      "server_pid": Json(server_pid),
+      "wrapper_pid": Json(child.pid),
+      "wrapper_spawns": 1,
+      "server_launches": 1,
+      "binary_sha256": Json(
+        digest(if implementation == "native" { native } else { node_cli }),
+      ),
+      "script_sha256": Json(
+        digest(@fs.realpath("scripts/benchmark-resident.mbtx")),
+      ),
+      "source_commit": "c63de15a992d37f0d6cec03ac7631872838602cb",
+      "native_source_commit": "4a8c3e3c8f9ef89e14d624e9586b19799eded96e",
+    })
+    let mut previous = ""
+    if !probe {
+      for round in 0..<=5 {
+        let begin = @env.now()
+        let packed = tool(
+          s,
+          if implementation == "native" {
+            "pack_repository"
+          } else {
+            "pack_codebase"
+          },
+          if implementation == "native" {
+            {
+              "compress": Json(compressed),
+              "style": "json",
+              "maxTokens": 96000,
+            }
+          } else {
+            {
+              "directory": Json(root),
+              "compress": Json(compressed),
+              "style": "json",
+              "includePatterns": "src/server/**,LICENSE.txt",
+              "topFilesLength": 1,
+            }
+          },
+        )
+        let pack_end = @env.now()
+        let structured = prop(packed, "structuredContent")
+        let documents : Array[(String, String)] = []
+        let current = if implementation == "native" {
+          assert_eq(prop(structured, "ok"), Json(true))
+          assert_eq(prop(structured, "security"), Json("passed"))
+          let resources = rows(prop(structured, "resources"))
+          for resource in resources {
+            let uri = text(prop(resource, "uri"))
+            let response = result(
+              rpc(s, "resources/read", { "uri": Json(uri) }),
+            )
+            let contents = rows(prop(response, "contents"))
+            assert_eq(contents.length(), 1)
+            let doc = text(prop(contents[0], "text"))
+            assert_eq(
+              @utf8.encode(doc).length(),
+              @string.parse_int(text(prop(resource, "bytes"))),
+            )
+            assert_true(@utf8.encode(doc).length() <= 4194304)
+            documents.push((text(prop(resource, "name")), doc))
+          }
+          text(prop(resources[0], "uri"))
+        } else {
+          let output_id = text(prop(structured, "outputId"))
+          let read = prop(
+            tool(s, "read_repomix_output", { "outputId": Json(output_id) }),
+            "structuredContent",
+          )
+          assert_eq(prop(read, "linesRead"), prop(read, "totalLines"))
+          documents.push(("output.json", text(prop(read, "content"))))
+          output_id
+        }
+        let read_end = @env.now()
+        let tag = round.to_string()
+        let row : Json = {
+          "round": Json(round),
+          "warmup": Json(round == 0),
+          "server_pid": Json(server_pid),
+          "pack_ms": Json((pack_end - begin).to_double()),
+          "read_all_ms": Json((read_end - pack_end).to_double()),
+          "end_to_end_ms": Json((read_end - begin).to_double()),
+          "pack_receipt": structured,
+        }
+        put(log + "/round-" + tag + ".json", row)
+        samples.push(row)
+        for (name, doc) in documents {
+          @fs.write_file(
+            log + "/round-" + tag + "-" + name,
+            doc,
+            create_mode=CreateNew,
+          )
+        }
+        put(
+          log + "/contract-" + tag + ".json",
+          validate(work, implementation, compressed, documents),
+        )
+        let (_, rss) = pid_rss(log, child.pid, Some(server_pid), "round-" + tag)
+        idle.push(rss)
+        if !previous.is_empty() {
+          let old = if implementation == "native" {
+            rpc(s, "resources/read", { "uri": Json(previous) })
+          } else {
+            rpc(s, "tools/call", {
+              "name": "read_repomix_output",
+              "arguments": { "outputId": Json(previous) },
+            })
+          }
+          if implementation == "native" {
+            assert_eq(prop(prop(old, "error"), "code"), Json(-32002))
+          } else {
+            result(old) |> ignore
+          }
+          put(log + "/previous-" + tag + ".json", {
+            "old_id": Json(previous),
+            "retained": Json(implementation == "node"),
+            "response": if implementation == "native" {
+              old
+            } else {
+              Json("Successful actual full read archived in stdout.ndjson")
+            },
+          })
+        }
+        previous = current
+        println(
+          mode +
+          "-" +
+          implementation +
+          " round=" +
+          tag +
+          " pack/read/e2e=" +
+          (pack_end - begin).to_string() +
+          "/" +
+          (read_end - pack_end).to_string() +
+          "/" +
+          (read_end - begin).to_string() +
+          "ms pid=" +
+          server_pid.to_string(),
+        )
+      }
+      if implementation == "native" {
+        tool(s, "release_context", {}) |> ignore
+        assert_true(
+          rows(prop(result(rpc(s, "resources/list", {})), "resources")).is_empty(),
+        )
+        let released = rpc(s, "resources/read", { "uri": Json(previous) })
+        assert_eq(prop(prop(released, "error"), "code"), Json(-32002))
+        put(log + "/released.json", released)
+        let (_, rss) = pid_rss(log, child.pid, Some(server_pid), "released")
+        idle.push(rss)
+      }
+    }
+    input.close()
+    if implementation == "node" {
+      // End only the verified owned child after every transaction. Record its actual exit, including -15.
+      let (exit, out, err) = @process.collect_output("/bin/kill", [
+        "-TERM",
+        server_pid.to_string(),
+      ])
+      put(log + "/shutdown.json", {
+        "program": "/bin/kill",
+        "argv": ["-TERM", Json(server_pid.to_string())],
+        "exit": Json(exit),
+        "stdout": Json(out.text()),
+        "stderr": Json(err.text()),
+      })
+      assert_eq(exit, 0)
+    }
+    let trailing = @async.with_timeout(10000, () => output.read_all().binary())
+    assert_true(trailing.is_empty() && s.pending.is_empty())
+    let exit = @async.with_timeout(10000, () => child.wait())
+    put(log + "/shutdown-result.json", {
+      "exit": Json(exit),
+      "clean_exit": Json(exit == 0),
+      "all_transactions_finished_before_shutdown": true,
+      "owned_sigterm_sent": Json(implementation == "node"),
+    })
+    if implementation == "native" {
+      assert_eq(exit, 0)
+    } else {
+      guard exit == 0 || exit == -15 else {
+        fail("Unexpected post-transaction shutdown status")
+      }
+    }
+    diagnostics.wait()
+  })
+  let diagnostic = @fs.read_file(log + "/stderr.bin").text()
+  for
+    warning in [
+      "Failed to count tokens", "Error during", "Error in token counting worker",
+    ] {
+    guard !diagnostic.contains(warning) else {
+      fail("Counting warning retained: " + log)
+    }
+  }
+  let lifetime = @fs.read_file(log + "/lifecycle-time.txt").text()
+  let mut peak = 0.0
+  for line in lifetime.split("\n") {
+    if line.contains("maximum resident set size") {
+      peak = @string.parse_double(line.trim().split(" ").next().unwrap())
+    }
+  }
+  assert_true(peak > 0.0)
+  let summary : Map[String, Json] = Map([])
+  for metric in ["pack_ms", "read_all_ms", "end_to_end_ms"] {
+    let values = samples
+      .filter(r => prop(r, "round") != Json(0))
+      .map(r => {
+        match prop(r, metric) {
+          Number(n, ..) => n
+          _ => fail("Invalid metric")
+        }
+      })
+    if !values.is_empty() {
+      summary[metric] = stats(values)
+    }
+  }
+  put(log + "/summary.json", {
+    "statistics": Json(summary),
+    "samples": Json(samples),
+    "idle_rss_bytes": Json(idle),
+    "lifecycle_peak_rss_bytes": Json(peak),
+    "peak_method": "macOS /usr/bin/time -lp, one entire server lifecycle, process peak not worker-process sum",
+    "idle_method": "ps RSS KiB * 1024, after response/untimed contract validation, not forced GC or allocator release",
+    "warmups": Json(if probe { 0 } else { 1 }),
+    "measured_transactions": Json(if probe { 0 } else { 5 }),
+    "protocol": "2025-06-18",
+    "shutdown": @json.parse(@fs.read_file(log + "/shutdown-result.json").text()),
+    "shutdown_method": Json(
+      if implementation == "node" {
+        "SIGTERM of verified owned PID after all transactions; /bin/kill exit is not server exit"
+      } else {
+        "stdin EOF"
+      },
+    ),
+  })
+}
+
+///|
+/// Old raw-Node sessions predate shutdown-result.json. Derive a separate audit value, never edit that evidence.
+async fn shutdown_receipt(log : String) -> Json {
+  let actual = prop(
+    @json.parse(@fs.read_file(log + "/exit.json").text()),
+    "exit",
+  )
+  if @fs.exists(log + "/shutdown-result.json") {
+    let receipt = @json.parse(
+      @fs.read_file(log + "/shutdown-result.json").text(),
+    )
+    assert_eq(prop(receipt, "exit"), actual)
+    assert_eq(prop(receipt, "clean_exit"), Json(actual == Json(0)))
+    return receipt
+  }
+  let signal = @json.parse(@fs.read_file(log + "/shutdown.json").text())
+  assert_eq(prop(signal, "program"), Json("/bin/kill"))
+  assert_eq(prop(signal, "exit"), Json(0))
+  assert_true(actual == Json(0) || actual == Json(-15))
+  for round in 0..<=5 {
+    assert_eq(
+      prop(
+        @json.parse(
+          @fs.read_file(log + "/contract-" + round.to_string() + ".json").text(),
+        ),
+        "source_hashes_unchanged",
+      ),
+      Json(true),
+    )
+  }
+  {
+    "exit": actual,
+    "clean_exit": Json(actual == Json(0)),
+    "all_transactions_finished_before_shutdown": true,
+    "owned_sigterm_sent": true,
+    "provenance": "Derived legacy audit: exit.json plus six complete contracts and successful /bin/kill receipt; original shutdown-result.json absent and not fabricated",
+  }
+}
+
+///|
+/// Recover only statistics from all retained successful transactions; never respawn.
+async fn summarize_retained(log : String) -> Unit {
+  let samples : Array[Json] = []
+  let summary : Map[String, Json] = Map([])
+  for round in 0..<=5 {
+    let tag = round.to_string()
+    let row = @json.parse(@fs.read_file(log + "/round-" + tag + ".json").text())
+    let contract = @json.parse(
+      @fs.read_file(log + "/contract-" + tag + ".json").text(),
+    )
+    assert_eq(prop(contract, "source_hashes_unchanged"), Json(true))
+    samples.push(row)
+  }
+  for metric in ["pack_ms", "read_all_ms", "end_to_end_ms"] {
+    summary[metric] = stats(
+      samples[1:]
+      .to_owned()
+      .map(r => {
+        match prop(r, metric) {
+          Number(n, ..) => n
+          _ => fail("Invalid metric")
+        }
+      }),
+    )
+  }
+  let idle : Array[Json] = []
+  for
+    name in [
+      "initialized", "round-0", "round-1", "round-2", "round-3", "round-4", "round-5",
+    ] {
+    idle.push(
+      prop(
+        @json.parse(@fs.read_file(log + "/ps-" + name + ".json").text()),
+        "rss_bytes",
+      ),
+    )
+  }
+  let mut peak = 0.0
+  for line in @fs.read_file(log + "/lifecycle-time.txt").text().split("\n") {
+    if line.contains("maximum resident set size") {
+      peak = @string.parse_double(line.trim().split(" ").next().unwrap())
+    }
+  }
+  put(log + "/summary.json", {
+    "statistics": Json(summary),
+    "samples": Json(samples),
+    "idle_rss_bytes": Json(idle),
+    "lifecycle_peak_rss_bytes": Json(peak),
+    "shutdown": @json.parse(@fs.read_file(log + "/exit.json").text()),
+    "shutdown_result": shutdown_receipt(log),
+    "shutdown_note": "Actual server exit above; /bin/kill success is a separate receipt, not a clean server exit",
+    "recovery": "offline statistics only; no product invocation",
+    "measured_transactions": 5,
+    "warmups": 1,
+  })
+}
+
+///|
+/// Evidence digest from retained outputs only, no product execution.
+async fn audit_cli(work : String, destination~ : String = "") -> Unit {
+  let reports = rows(
+    prop(
+      @json.parse(
+        @fs.read_file(work + "/report/native-stderr-audit.json").text(),
+      ),
+      "rows",
+    ),
+  )
+  assert_eq(reports.length(), 36)
+  let facts : Array[Json] = []
+  for repo in ["typescript", "chi", "itoa"] {
+    for mode in ["raw", "compressed"] {
+      for implementation in ["native", "node"] {
+        let id = repo + "-" + mode + "-" + implementation + "-0"
+        let document = @fs.read_file(work + "/documents/" + id + ".json").text()
+        let contract = @json.parse(
+          @fs.read_file(work + "/report/" + id + "-contract.json").text(),
+        )
+        let exceptions : Array[Json] = []
+        let reasons : Map[String, Int32] = Map([])
+        if implementation == "native" && mode == "compressed" {
+          for round in 0..<=5 {
+            let j = @json.parse(
+              @fs.read_file(
+                work +
+                "/documents/" +
+                repo +
+                "-compressed-native-" +
+                round.to_string() +
+                ".json",
+              ).text(),
+            )
+            for record in rows(prop(prop(j, "metadata"), "compression")) {
+              let reason = prop(record, "reason")
+              let category = if prop(record, "applied") == Json(true) {
+                "applied"
+              } else {
+                text(reason)
+              }
+              let key = round.to_string() + ":" + category
+              reasons[key] = reasons.get(key).unwrap_or(0) + 1
+              if [
+                  "parse-error", "timeout", "resource-limit", "parser-unavailable",
+                ].contains(category) {
+                exceptions.push({ "round": Json(round), "record": record })
+              }
+            }
+          }
+        }
+        let missing = rows(prop(contract, "api_anchors")).filter(a => {
+          prop(a, "present") == Json(false)
+        })
+        facts.push({
+          "case": Json(id),
+          "scope": @json.parse(
+            @fs.read_file(work + "/manifest/" + repo + "-scope.json").text(),
+          ),
+          "accepted": Json(bodies(document).length()),
+          "output_bytes": Json(@utf8.encode(document).length()),
+          "output_utf16_units": prop(contract, "output_utf16_units"),
+          "node_chunked": prop(
+            contract, "node_parallel_chunk_threshold_exceeded",
+          ),
+          "node_chunk_count": Json(
+            if implementation == "node" && document.length() > 1000000 {
+              (document.length() + 199999) / 200000
+            } else {
+              1
+            },
+          ),
+          "missing_anchors": Json(missing),
+          "fallback_counts_all_rounds": Json(reasons),
+          "exceptions": Json(exceptions),
+          "metadata": if implementation == "native" && mode == "compressed" {
+            Json("full records retained; counts above")
+          } else {
+            prop(contract, "metadata")
+          },
+          "native_scanner_receipt": if implementation == "native" {
+            let matching = reports.filter(row => prop(row, "id") == Json(id))
+            assert_eq(matching.length(), 1)
+            prop(matching[0], "report")
+          } else {
+            Json(
+              "scanner enabled in explicit JSON and pack tool options; accepted-set/secretlint diagnostics retained",
+            )
+          },
+        })
+      }
+    }
+  }
+  put(
+    if destination.is_empty() {
+      work + "/report/facts.json"
+    } else {
+      destination
+    },
+    Json(facts),
+  )
+}
+
+///|
+/// Offline identity, lifecycle and resource checks for all four retained sessions.
+async fn verify_resident(
+  work : String,
+  cli_work : String,
+  destination~ : String = "",
+) -> Unit {
+  let identities : Array[Json] = []
+  let shutdowns : Array[Json] = []
+  for mode in ["raw", "compressed"] {
+    for implementation in ["native", "node"] {
+      let log = work + "/" + mode + "-" + implementation
+      let identity = @json.parse(@fs.read_file(log + "/identity.json").text())
+      let pid = prop(identity, "server_pid")
+      for round in 0..<=5 {
+        let tag = round.to_string()
+        let row = @json.parse(
+          @fs.read_file(log + "/round-" + tag + ".json").text(),
+        )
+        assert_eq(prop(row, "server_pid"), pid)
+        assert_eq(
+          prop(
+            @json.parse(
+              @fs.read_file(log + "/ps-round-" + tag + ".json").text(),
+            ),
+            "server_pid",
+          ),
+          pid,
+        )
+        let receipt = prop(row, "pack_receipt")
+        let documents : Array[(String, String)] = []
+        if implementation == "native" {
+          assert_eq(prop(receipt, "security"), Json("passed"))
+          for resource in rows(prop(receipt, "resources")) {
+            assert_true(
+              @string.parse_int(text(prop(resource, "tokens"))) <= 96000,
+            )
+            let name = text(prop(resource, "name"))
+            documents.push(
+              (name, @fs.read_file(log + "/round-" + tag + "-" + name).text()),
+            )
+          }
+        } else {
+          documents.push(
+            (
+              "output.json",
+              @fs.read_file(log + "/round-" + tag + "-output.json").text(),
+            ),
+          )
+        }
+        assert_eq(
+          validate(work, implementation, mode == "compressed", documents),
+          @json.parse(@fs.read_file(log + "/contract-" + tag + ".json").text()),
+        )
+        if round > 0 {
+          let previous = @json.parse(
+            @fs.read_file(log + "/previous-" + tag + ".json").text(),
+          )
+          assert_eq(prop(previous, "retained"), Json(implementation == "node"))
+        }
+      }
+      if implementation == "native" {
+        assert_eq(
+          prop(@json.parse(@fs.read_file(log + "/exit.json").text()), "exit"),
+          Json(0),
+        )
+        assert_eq(
+          prop(
+            prop(
+              @json.parse(@fs.read_file(log + "/released.json").text()),
+              "error",
+            ),
+            "code",
+          ),
+          Json(-32002),
+        )
+      } else {
+        // Check actual server status, independently of successful delivery of /bin/kill.
+        let actual = prop(
+          @json.parse(@fs.read_file(log + "/exit.json").text()),
+          "exit",
+        )
+        assert_true(actual == Json(0) || actual == Json(-15))
+        let shutdown = shutdown_receipt(log)
+        assert_eq(prop(shutdown, "exit"), actual)
+        assert_eq(prop(shutdown, "clean_exit"), Json(actual == Json(0)))
+        assert_eq(
+          prop(shutdown, "all_transactions_finished_before_shutdown"),
+          Json(true),
+        )
+        assert_eq(prop(shutdown, "owned_sigterm_sent"), Json(true))
+        shutdowns.push({
+          "mode": Json(mode),
+          "actual": shutdown,
+          "shutdown_result_receipt_present": Json(
+            @fs.exists(log + "/shutdown-result.json"),
+          ),
+          "original_summary_shutdown": prop(
+            @json.parse(@fs.read_file(log + "/summary.json").text()),
+            "shutdown",
+          ),
+        })
+        assert_eq(
+          prop(
+            @json.parse(@fs.read_file(log + "/shutdown.json").text()),
+            "exit",
+          ),
+          Json(0),
+        )
+      }
+      identities.push(identity)
+    }
+  }
+  let edges : Array[Json] = []
+  for
+    (from, target, syntax) in [
+      (
+        "typescript/src/compiler/program.ts", "typescript/src/compiler/_namespaces/ts.performance.ts",
+        "import * as performance from \"./_namespaces/ts.performance.js\";",
+      ),
+      (
+        "typescript/src/server/session.ts", "typescript/src/server/protocol.ts",
+        "import * as protocol from \"./protocol.js\";",
+      ),
+      ("itoa/src/lib.rs", "itoa/src/udiv128.rs", "mod udiv128;"),
+    ] {
+    let source = cli_work + "/inputs/" + from
+    assert_true(@fs.read_file(source).text().contains(syntax))
+    assert_true(
+      @fs.kind(cli_work + "/inputs/" + target, follow_symlink=false) == Regular,
+    )
+    edges.push({
+      "from": Json(from),
+      "target": Json(target),
+      "syntax": Json(syntax),
+      "target_sha256": Json(digest(cli_work + "/inputs/" + target)),
+    })
+  }
+  put(
+    if destination.is_empty() {
+      work + "/offline-verified.json"
+    } else {
+      destination
+    },
+    {
+      "transactions_revalidated": 24,
+      "identities": Json(identities),
+      "source_graph_edges": Json(edges),
+      "native_uri_expired_and_released": true,
+      "original_old_output_ids_remain_readable": true,
+      "node_clean_exit": Json(
+        shutdowns
+        .iter()
+        .all(row => prop(prop(row, "actual"), "clean_exit") == Json(true)),
+      ),
+      "node_shutdowns": Json(shutdowns),
+      "node_shutdown_note": "Actual exit.json and shutdown-result.json are authoritative; a nominal old summary label or successful /bin/kill exit is not a clean server exit",
+      "probe": "Read-only tools/list evidence retained; not a pack transaction",
+    },
+  )
+  println(
+    "Offline verified 24 resident transactions, same PID per session, caps, release/old IDs, three source graph edges, and actual Node shutdown receipts",
+  )
+}
+
+///|
+fn median(a : Array[Double]) -> Double {
+  let a = a.copy()
+  a.sort()
+  a[a.length() / 2]
+}
+
+///|
+fn stats(a : Array[Double]) -> Json {
+  let m = median(a)
+  let sorted = a.copy()
+  sorted.sort()
+  {
+    "samples": Json(a),
+    "median": Json(m),
+    "min": Json(sorted[0]),
+    "max": Json(sorted[sorted.length() - 1]),
+    "mad": Json(median(a.map(x => if x < m { m - x } else { x - m }))),
+  }
+}
+
+///|
+async fn main {
+  let argv = @env.args()
+  match argv[1:] {
+    ["prepare", work, cli_work] => prepare(work, cli_work)
+    ["probe", work, native, vocabulary, node_cli] =>
+      session(work, native, vocabulary, node_cli, "node", false, probe=true)
+    ["verify", work, cli_work] => verify_resident(work, cli_work)
+    ["verify", work, cli_work, destination] =>
+      verify_resident(work, cli_work, destination~)
+    ["audit-cli", work] => audit_cli(work)
+    ["audit-cli", work, destination] => audit_cli(work, destination~)
+    ["summarize", log] => summarize_retained(log)
+    ["remaining", work, native, vocabulary, node_cli] => {
+      assert_eq(
+        digest(native),
+        "67da22e745ca556a0e37bb9ea86d1813371d4951c7f504a431e016f3d07327b9",
+      )
+      assert_eq(
+        digest(vocabulary),
+        "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
+      )
+      for implementation in ["native", "node"] {
+        for round in 0..<=5 {
+          let log = work + "/raw-" + implementation
+          assert_eq(
+            prop(
+              @json.parse(
+                @fs.read_file(log + "/contract-" + round.to_string() + ".json").text(),
+              ),
+              "source_hashes_unchanged",
+            ),
+            Json(true),
+          )
+        }
+        @fs.read_file(work + "/raw-" + implementation + "/summary.json")
+        |> ignore
+      }
+      guard @fs.exists(work + "/probe/tools-list.json") else {
+        fail("Prior real schema probe required")
+      }
+      for implementation in ["native", "node"] {
+        session(work, native, vocabulary, node_cli, implementation, true)
+      }
+      put(work + "/complete.json", {
+        "server_processes": 4,
+        "read_only_probe_processes": 1,
+        "warmup_transactions": 4,
+        "measured_transactions": 20,
+        "source_unchanged": true,
+        "raw_node_shutdown": shutdown_receipt(work + "/raw-node"),
+        "read_only_probe": "Original tools/list schema retained in probe directory",
+      })
+    }
+    ["run", work, native, vocabulary, node_cli] => {
+      assert_eq(
+        digest(native),
+        "67da22e745ca556a0e37bb9ea86d1813371d4951c7f504a431e016f3d07327b9",
+      )
+      assert_eq(
+        digest(vocabulary),
+        "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
+      )
+      guard @fs.exists(work + "/probe/tools-list.json") else {
+        fail("Read-only original tools/list probe required first")
+      }
+      for compressed in [false, true] {
+        for implementation in ["native", "node"] {
+          session(
+            work, native, vocabulary, node_cli, implementation, compressed,
+          )
+        }
+      }
+      put(work + "/complete.json", {
+        "server_processes": 4,
+        "read_only_probe_processes": 1,
+        "warmup_transactions": 4,
+        "measured_transactions": 20,
+        "source_unchanged": true,
+      })
+    }
+    _ =>
+      fail(
+        "prepare NEW_WORKSPACE CLI_WORKSPACE | probe WORKSPACE NATIVE VOCAB NODE_CLI | run WORKSPACE NATIVE VOCAB NODE_CLI (macOS only)",
+      )
+  }
+}
