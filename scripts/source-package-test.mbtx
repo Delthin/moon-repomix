@@ -8,7 +8,7 @@ import {
 ///|
 async fn main {
   assert_eq(@process.run("moon", ["package"]), 0)
-  let archive = @fs.realpath("_build/publish/Delthin-moon_repomix-0.3.0.zip")
+  let archive = @fs.realpath("_build/publish/Delthin-moon_repomix-0.4.0.zip")
   let temp = @fs.tmpdir(prefix="moon-repomix-source-")
   defer @fs.rmdir(temp, recursive=true)
   assert_eq(@process.run("unzip", ["-q", archive, "-d", temp]), 0)
@@ -21,7 +21,12 @@ async fn main {
       "src/compression/vendor/moonbit/grammar.patch", "src/compression/vendor/moonbit/src/parser.c",
       "src/compression/vendor/moonbit/src/scanner.c", "src/compression/vendor/moonbit/src/tree_sitter/alloc.h",
       "src/compression/vendor/moonbit/src/tree_sitter/array.h", "src/compression/vendor/moonbit/src/tree_sitter/parser.h",
-      "LICENSES/tree-sitter-moonbit-Apache-2.0.txt",
+      "LICENSES/tree-sitter-moonbit-Apache-2.0.txt", "src/compression/vendor/go/src/parser.c",
+      "src/compression/vendor/rust/src/parser.c", "src/compression/vendor/rust/src/scanner.c",
+      "src/compression/vendor/java/src/parser.c", "LICENSES/tree-sitter-go-MIT.txt",
+      "LICENSES/tree-sitter-rust-MIT.txt", "LICENSES/tree-sitter-java-MIT.txt", "src/platform/directory.c",
+      "src/partition/reindex.mbt", "src/mcp/server.mbt", "src/mcp_rpc/dispatch.mbt",
+      "docs/mcp.md", "docs/reports.md",
     ] {
     assert_true(@fs.exists(temp + "/" + path))
   }
