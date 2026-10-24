@@ -29,11 +29,11 @@ moon check src/selection --target native
 | 行为 | 定点入口 |
 | --- | --- |
 | stdin 文件列表与 stdout | `scripts/input-list-test.mbtx` |
-| token 统计与机器报告 | `scripts/token-reports-test.mbtx` |
+| 文件排名与 token 目录统计 | `scripts/token-reports-test.mbtx` |
 | 四格式与元数据 | `scripts/output-formats-test.mbtx` |
 | 模板与全文例外 | `scripts/context-customization-test.mbtx` |
 | 章节、行号和路径显示 | `scripts/display-controls-test.mbtx` |
-| 分卷预算与目录发布 | `scripts/volume-cli-test.mbtx` |
+| 分卷预算、目录发布与机器 JSON 报告 | `scripts/volume-cli-test.mbtx` |
 | MCP 协议与缓存 | `scripts/mcp-test.mbtx` |
 
 脚本需要当前 CLI、词表及各自参数；运行前阅读对应脚本的用法或 CI 中的调用，日志写入新的临时目录。只有相关行为需要时才运行跨模块、安装、分发或性能检查；文档改动核对 diff、链接与真实字段即可。

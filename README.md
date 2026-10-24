@@ -1,6 +1,6 @@
 # moon-repomix
 
-把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。使用 MoonBit native 实现，提供 CLI 与 SDK；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
+把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。当前源码支持七类语言的 AST 骨架、全文/骨架混合、Git 差异与历史、精确预算分卷和固定本地根的只读 MCP。使用 MoonBit native 实现，提供 CLI 与 SDK；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
 
 ## 选择版本
 
@@ -10,6 +10,8 @@
 | **当前源码，尚未发行** | 新增混合全文/骨架、模板、展示控制、Go/Rust/Java 骨架、精确分卷、JSON stderr、输入总量限制、只读 MCP 和入选原因查询。需要从源码构建；见 [场景](docs/scenarios.md)、[0.3 → 0.4 接口迁移预览](docs/migration.md) 与 [Unreleased](CHANGELOG.md#unreleased)。 |
 
 本分支的使用文档描述当前源码接口。版本号尚未调整时，源码构建的 `--version` 也可能显示 `0.3.0`；排查问题请同时记录构建 commit。
+
+v0.3.0 在固定三仓库、六场景中已有 macOS 与 Linux 的 CLI 对照：macOS 耗时减少约 31%–76%，该轮 Linux 原版耗时约为本工具的 2.1–4.4 倍。测量版本、完整样本、内存和适用范围见 [性能测量](docs/performance.md)；新进程 CLI 与常驻 MCP 分别记录。
 
 ## 安装与第一次运行
 
