@@ -329,9 +329,14 @@ fn files(document : Json) -> Map[String, String] raise {
 }
 
 ///|
-fn canonical_display_root(root : String) -> String {
+fn normalized_display_root(root : String, windows : Bool) -> String {
   // POSIX backslashes are literal filename bytes, NOT separators.
-  if @env.get_env_var("OS") == Some("Windows_NT") { root.replace(old="\\", new="/") } else { root }
+  if windows { root.replace_all(old="\\", new="/") } else { root }
+}
+
+///|
+fn canonical_display_root(root : String) -> String {
+  normalized_display_root(root, @env.get_env_var("OS") == Some("Windows_NT"))
 }
 
 ///|
@@ -914,6 +919,11 @@ async fn run_mcp(r : Run, index : Json, volumes : Map[String, String], explanati
 
 ///|
 async fn main {
+  assert_eq(
+    normalized_display_root("D:\\a\\_temp\\context-workflow/fixture", true),
+    "D:/a/_temp/context-workflow/fixture",
+  )
+  assert_eq(normalized_display_root("/tmp/literal\\name", false), "/tmp/literal\\name")
   let args = @env.args()
   if (args.length() == 3 || args.length() == 5) && args[1] == "--prepare-only" {
     let manifest = if args.length() == 5 {
