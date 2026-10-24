@@ -15,13 +15,20 @@ v0.3.0 在固定三仓库、六场景的 macOS CLI 对照中耗时减少约 31%�
 
 ## 浏览器工作台（当前源码）
 
-![选择目录、生成混合上下文、查看代码对照与预算](assets/demo/webui.gif)
+工作台使用原生 HTML/CSS/JavaScript，通过本地 HTTP 接口调用 MoonBit native 引擎。目录浏览、源码读取、安全扫描、AST 压缩和最终 JSON 的精确 token 计数均由 Native 服务完成；浏览器负责配置、查看与下载。
+
+![编辑器工作台：选择目录、生成上下文、切换原文与结构输出、检查预算](assets/demo/webui.gif)
+
+在仓库根目录直接体验示例，需要 [固定版本 MoonBit 与 C 工具链](docs/toolchain.md)：
 
 ```sh
-moon-repomix ./project --webui
+moon update
+moon run src/cmd/moon-repomix --target native --release -- examples/demo --webui --tokenizer-path assets/tokenizer-o200k_base.tiktoken
 ```
 
-打开 `http://127.0.0.1:8765`，在授权工作区内选择目录，生成全文、骨架或混合上下文，比较代码和完整文档 token 数，再下载 JSON。动图来自实际 MoonBit Native 服务。页面资源随当前源码安装，不需要 Node.js；启动方式、输入限额和本地服务边界见 [工作台指南](docs/webui.md)。
+从当前源码安装后，可运行 `moon-repomix ./project --webui`。打开 `http://127.0.0.1:8765`，在右侧选择授权目录、全文/骨架/混合策略及文件规则，点击“生成上下文”；左侧浏览结果文件，中间切换原文、处理后正文或完整 JSON，底部复制 CLI 或下载原始 JSON。
+
+修改参数会将现有结果标为旧结果，下一次生成成功后才替换；预算超限仍保留完整输出。动图来自真实 Native 服务操作，三种模式的浏览器下载已与相同参数 CLI 输出逐字节核对。页面资源随当前源码安装提供，运行时不需要 Node.js；端口设置、输入限额与服务边界见 [工作台指南](docs/webui.md)。
 
 ## 安装与第一次运行
 
