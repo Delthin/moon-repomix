@@ -1,612 +1,162 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Moon-Repomix 仓库上下文工作台 - 连接本地 Native 引擎生成 AST 骨架与上下文打包">
-  <title>Moon-Repomix · 仓库上下文工作台</title>
-  <link rel="stylesheet" href="./app.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>moon-repomix · 上下文工作台</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
 </head>
-<body class="app-body">
-  <div id="app" class="app-shell">
-    <!-- 顶部导航栏 -->
-    <header class="app-header" role="banner">
-      <div class="header-brand">
-        <div class="brand-logo" aria-hidden="true">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M16 18l6-6-6-6M8 6l-6 6 6 6"></path>
-            <circle cx="12" cy="12" r="2"></circle>
-          </svg>
-        </div>
-        <div class="brand-text">
-          <h1 class="brand-title">Moon-Repomix <span class="brand-subtitle">上下文工作台</span></h1>
-          <div class="brand-meta">
-            <span id="sessionVersionBadge" class="meta-tag version-tag">v0.4.0</span>
-            <span id="workspaceBadge" class="meta-tag workspace-tag" title="当前连接的授权工作区">加载中...</span>
-          </div>
-        </div>
+<body>
+<a class="skip" href="#codepane">跳到代码区</a>
+<div id="app">
+  <header class="titlebar">
+    <span class="brand"><i class="brand-dot" aria-hidden="true"></i>moon-repomix</span>
+    <span class="crumb">上下文工作台</span>
+    <span class="workspace" id="workspace">工作区未连接</span>
+    <button type="button" class="connection" id="connectionBtn" aria-describedby="connectionDetail">正在连接 Native…</button>
+    <button type="button" class="btn" id="limitsBtn">资源限制</button>
+  </header>
+
+  <nav class="tree" aria-label="结果文件">
+    <div class="tree-head">文件 <span id="treeCount">尚未生成</span></div>
+    <button type="button" class="tree-output" id="treeOutput" disabled>
+      <span class="tree-output-name">context.json</span><span class="tag">整份</span>
+    </button>
+    <label class="search-label" for="fileSearch">筛选文件</label>
+    <input type="search" id="fileSearch" placeholder="搜索路径…" autocomplete="off" disabled>
+    <div class="treelist" id="tree" role="tree" aria-label="本次入选文件"></div>
+    <p class="tree-empty" id="treeEmpty">生成后在此浏览入选文件。</p>
+    <div class="tree-legend"><span class="dot dot-full" aria-hidden="true"></span>正文相同 <span class="dot dot-skel" aria-hidden="true"></span>正文变化</div>
+  </nav>
+
+  <main class="editor">
+    <div class="result-state" id="resultState" role="status">尚未生成 · 选择目录与策略后，生成上下文。</div>
+    <div class="tabbar" id="tabbar" role="tablist" aria-label="打开的文件"></div>
+    <div class="codehead">
+      <span class="ch-path" id="chPath">等待生成</span>
+      <span class="chip" id="chMode" hidden></span>
+      <span class="ch-info" id="chInfo"></span>
+      <div class="seg" id="viewSeg" role="radiogroup" aria-label="代码视图" hidden>
+        <label class="seg-opt"><input type="radio" name="viewmode" value="original"><span>原文</span></label>
+        <label class="seg-opt"><input type="radio" name="viewmode" value="processed" checked><span>处理后</span></label>
       </div>
-
-      <!-- 服务状态指示与会话详情 -->
-      <div class="header-actions">
-        <div id="serviceStatusPill" class="service-status-pill status-connecting" role="status" aria-live="polite">
-          <span class="status-indicator-dot" aria-hidden="true"></span>
-          <span id="serviceStatusText">正在连接 Native 服务...</span>
-        </div>
-
-        <button id="sessionLimitsBtn" class="btn btn-secondary btn-sm" type="button" aria-haspopup="dialog" aria-expanded="false" title="查看工作区安全与限制">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-          </svg>
-          <span>会话限制与安全</span>
-        </button>
+      <button type="button" class="btn code-copy" id="copyCodeBtn" disabled>复制正文</button>
+    </div>
+    <div class="codepane" id="codepane" role="region" aria-label="代码与完整 JSON" tabindex="0">
+      <div class="code" id="code" hidden></div>
+      <div class="empty" id="empty">
+        <span class="empty-mark" aria-hidden="true">{ }</span>
+        <h1 id="emptyTitle">把仓库整理成可读的上下文</h1>
+        <p id="emptyText">选择授权目录，设定策略，再点击「生成上下文」。代码与完整 JSON 将显示在这里。</p>
+        <button type="button" class="btn" id="openOutputBtn" hidden>打开完整 JSON</button>
       </div>
-    </header>
+    </div>
+  </main>
 
-    <!-- 主控配置中枢：目录选择、策略预设、预算与生成动作 -->
-    <section class="control-hub" aria-label="上下文生成配置">
-      <!-- 策略与工作区目录卡片 -->
-      <div class="control-card setup-card">
-        <div class="card-header">
-          <span class="section-label">打包策略与工作区目录</span>
-          <div class="directory-selector-wrap">
-            <span class="directory-label">目录：</span>
-            <button id="selectDirBtn" class="btn btn-ghost btn-xs dir-btn" type="button" aria-haspopup="dialog" aria-expanded="false" title="选择授权工作区内的目标目录">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-              </svg>
-              <code id="currentDirDisplay" class="dir-display">.</code>
-              <span class="dir-action-hint">切换...</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- 压缩策略 Tabs -->
-        <div class="profile-tabs" role="tablist" aria-label="压缩策略">
-          <button id="tab-raw" class="profile-tab" role="tab" aria-selected="false" data-profile="raw" type="button">
-            <div class="tab-title">
-              <span class="tab-name">Raw 全文</span>
-              <span class="tab-badge">基准</span>
-            </div>
-            <div class="tab-desc">不压缩，完整保留所有源代码</div>
-          </button>
-
-          <button id="tab-mixed" class="profile-tab active" role="tab" aria-selected="true" data-profile="mixed" type="button">
-            <div class="tab-title">
-              <span class="tab-name">Mixed 混合策略</span>
-              <span class="tab-badge badge-accent">推荐</span>
-            </div>
-            <div class="tab-desc">指定关键文件全文，其余 AST 骨架化</div>
-          </button>
-
-          <button id="tab-skeleton" class="profile-tab" role="tab" aria-selected="false" data-profile="skeleton" type="button">
-            <div class="tab-title">
-              <span class="tab-name">Skeleton 纯骨架</span>
-              <span class="tab-badge badge-success">最小化</span>
-            </div>
-            <div class="tab-desc">提取函数声明与类型，折叠实现细节</div>
-          </button>
-        </div>
-
-        <!-- 高级设置折叠开关 -->
-        <div class="advanced-toggle-bar">
-          <button id="toggleAdvancedBtn" class="advanced-toggle-btn" type="button" aria-expanded="false" aria-controls="advancedPanel">
-            <svg class="toggle-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-            <span>高级规则与包含设置 (Include / Keep-Full)</span>
-          </button>
-        </div>
-
-        <!-- 高级配置面板 (可折叠) -->
-        <div id="advancedPanel" class="advanced-panel" style="display: none;">
-          <div class="advanced-grid">
-            <div class="form-group">
-              <label for="includePatternsInput" class="form-label">
-                <span>包含路径匹配 (Include Patterns)</span>
-                <span class="label-hint">每行一条，两组合计最多 64 条，如 <code>src/**/*.{mbt,ts}</code></span>
-              </label>
-              <textarea id="includePatternsInput" class="form-textarea" rows="2" placeholder="默认包含目录全部代码文件 (可留空)"></textarea>
-            </div>
-            <div class="form-group" id="keepFullGroup">
-              <label for="keepFullInput" class="form-label">
-                <span>保留全文路径 (Keep-Full，仅在 Mixed 生效)</span>
-                <span class="label-hint">每行一条，如 <code>src/config/cli.mbt</code></span>
-              </label>
-              <textarea id="keepFullInput" class="form-textarea" rows="2" placeholder="输入需强制保留全文的文件路径"></textarea>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 成本预算与生成触发卡片 -->
-      <div class="control-card budget-card">
-        <div class="card-header">
-          <div class="header-left">
-            <span class="section-label">上下文成本与预算评估</span>
-            <span id="outputFreshnessBadge" class="freshness-badge badge-idle">待生成</span>
-          </div>
-          <div class="budget-selector">
-            <label for="budgetThreshold" class="budget-label">预算：</label>
-            <div class="budget-btn-group" role="group" aria-label="快捷预算选项">
-              <button class="budget-btn" data-budget="4000" type="button">4k</button>
-              <button class="budget-btn active" data-budget="8000" type="button">8k</button>
-              <button class="budget-btn" data-budget="16000" type="button">16k</button>
-              <button class="budget-btn" data-budget="32000" type="button">32k</button>
-            </div>
-            <input id="budgetThreshold" class="budget-input" type="number" min="1" max="2147483647" step="1" value="8000" aria-label="自定义预算数值">
-            <span class="budget-unit">tok</span>
-          </div>
-        </div>
-
-        <!-- 真实结果进度条与数据指标 -->
-        <div class="budget-meter-container">
-          <div class="meter-bar-track">
-            <div id="budgetProgress" class="meter-bar-fill" style="width: 0%;"></div>
-          </div>
-          <div class="meter-labels">
-            <span class="meter-current">
-              本次整包：<strong id="currentTokensVal">—</strong> tokens
-              (<span id="currentBytesVal">—</span>)
-            </span>
-            <span id="budgetRatioVal" class="meter-ratio">—</span>
-          </div>
-          <div id="comparisonStats" class="section-hint">生成后显示 Raw 整包基准与成本变化</div>
-        </div>
-
-        <!-- 预算告警/通过提示条 -->
-        <div id="budgetNotice" class="budget-alert status-idle" role="region" aria-live="polite">
-          <div class="alert-icon" aria-hidden="true">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="12"></line>
-              <line x1="12" y1="16" x2="12.01" y2="16"></line>
-            </svg>
-          </div>
-          <div id="budgetNoticeText" class="alert-text">
-            尚未生成上下文。点击下方「生成仓库上下文」开始由本地 Native 引擎分析。
-          </div>
-        </div>
-
-        <!-- 主操作触发按钮 -->
-        <div class="pack-action-bar">
-          <button id="packSubmitBtn" class="btn btn-primary pack-btn" type="button">
-            <svg id="packBtnIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polygon points="5 3 19 12 5 21 5 3"></polygon>
-            </svg>
-            <span id="packBtnText">生成仓库上下文</span>
-          </button>
-          <span id="packStateHint" class="pack-state-hint">支持快捷键 <code>Cmd/Ctrl + Enter</code></span>
-        </div>
-      </div>
-
-      <!-- 真实可运行 CLI 命令与导出卡片 -->
-      <div class="control-card cli-card">
-        <div class="card-header">
-          <div class="header-left">
-            <span class="section-label">真实原生命令 (CLI Executable)</span>
-            <span class="section-hint">在授权工作区运行，CLI 会读取本地配置</span>
-          </div>
-          <div class="cli-actions">
-            <button id="copyJsonBtn" class="btn btn-ghost btn-xs" type="button" disabled title="复制本次生成完整序列化 JSON">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-              <span>复制 JSON</span>
-            </button>
-            <button id="downloadJsonBtn" class="btn btn-ghost btn-xs" type="button" disabled title="原样下载生成的 serialized JSON 文件">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              <span>下载 JSON</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="cli-command-box">
-          <code id="cliCommandText" class="cli-code">moon-repomix . --style json --compress -o context.json</code>
-          <button id="copyCliBtn" class="btn btn-secondary btn-xs copy-btn" type="button" aria-label="复制 CLI 命令">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-            <span class="btn-label">复制命令</span>
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <!-- 工作台主体布局：左侧结果文件树与右侧代码工作区 -->
-    <main class="workbench-layout" role="main">
-      <!-- 移动端侧边栏切换按钮 -->
-      <div class="mobile-nav-toggle-wrap">
-        <button id="mobileNavToggle" class="btn btn-secondary btn-sm mobile-nav-btn" type="button" aria-expanded="false" aria-controls="fileSidebar">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <line x1="3" y1="12" x2="21" y2="12"></line>
-            <line x1="3" y1="6" x2="21" y2="6"></line>
-            <line x1="3" y1="18" x2="21" y2="18"></line>
-          </svg>
-          <span id="mobileNavBtnText">显示打包文件列表 (0)</span>
-        </button>
-      </div>
-
-      <!-- 左侧源文件导航栏 (结果集合) -->
-      <aside id="fileSidebar" class="file-sidebar" aria-label="打包结果文件导航">
-        <div class="sidebar-header">
-          <div class="search-box">
-            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
-            <input id="fileSearchInput" class="search-input" type="search" placeholder="过滤输出文件路径 (按 / 聚焦)..." aria-label="搜索输出文件">
-            <button id="clearSearchBtn" class="clear-search-btn" type="button" aria-label="清空搜索" style="display: none;">
-              &times;
-            </button>
-          </div>
-          <div class="file-stats-bar">
-            <span id="fileCountText" class="file-count">未生成上下文</span>
-            <span id="fileSkippedText" class="file-filtered-tag">—</span>
-          </div>
-        </div>
-
-        <!-- 文件项容器 -->
-        <nav id="fileListContainer" class="file-tree-container" aria-label="文件树列表">
-          <!-- 动态渲染生成结果中的文件 -->
-        </nav>
-
-        <!-- 搜索无结果或未生成状态 -->
-        <div id="fileEmptyState" class="empty-state" style="display: none;">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            <line x1="8" y1="11" x2="14" y2="11"></line>
-          </svg>
-          <p id="fileEmptyTitle" class="empty-title">未找到匹配文件</p>
-          <p id="fileEmptyDesc" class="empty-desc">当前过滤器无匹配项。</p>
-          <button id="resetSearchBtn" class="btn btn-secondary btn-xs" type="button">清除搜索过滤</button>
-        </div>
-
-        <div class="sidebar-footer">
-          <div class="footer-tip">
-            <span class="tip-badge">说明</span>
-            <span class="tip-content">文件列表为本次 Native 生成接受的真实输出集合。</span>
-          </div>
-        </div>
-      </aside>
-
-      <!-- 右侧主要工作区：代码查看与对照器 -->
-      <section class="viewport-panel" aria-label="代码与整包视窗">
-        <!-- 工具栏 -->
-        <div class="viewport-toolbar">
-          <div class="toolbar-left">
-            <div class="view-mode-tabs" role="tablist" aria-label="查看模式">
-              <button id="viewTab-diff" class="view-tab active" role="tab" aria-selected="true" data-view="diff" type="button">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                  <line x1="12" y1="3" x2="12" y2="21"></line>
-                </svg>
-                <span>源码 / 骨架对照</span>
-              </button>
-              <button id="viewTab-single" class="view-tab" role="tab" aria-selected="false" data-view="single" type="button">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                  <polyline points="14 2 14 8 20 8"></polyline>
-                </svg>
-                <span>输出源码正文</span>
-              </button>
-              <button id="viewTab-bundle" class="view-tab" role="tab" aria-selected="false" data-view="bundle" type="button">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <polyline points="16 18 22 12 16 6"></polyline>
-                  <polyline points="8 6 2 12 8 18"></polyline>
-                </svg>
-                <span>完整输出包结构</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="toolbar-right">
-            <div id="fileMetaPill" class="file-meta-pill" style="display: none;">
-              <span id="activeFilePath" class="active-path">—</span>
-              <span id="activeFileStrategyBadge" class="strategy-badge">—</span>
-            </div>
-            <button id="copyPathBtn" class="btn btn-ghost btn-xs" type="button" disabled title="复制相对文件路径">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-              <span>复制路径</span>
-            </button>
-            <button id="copyCodeBtn" class="btn btn-ghost btn-xs" type="button" disabled title="复制当前展示代码">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="20 6 9 17 4 12"></polyline>
-              </svg>
-              <span class="btn-label">复制代码</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- 初始空状态引导容器 (未生成时展示) -->
-        <div id="initialIdleContainer" class="idle-guide-container">
-          <div class="idle-guide-card">
-            <div class="guide-icon-wrap" aria-hidden="true">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <line x1="16" y1="13" x2="8" y2="13"></line>
-                <line x1="16" y1="17" x2="8" y2="17"></line>
-                <polyline points="10 9 9 9 8 9"></polyline>
-              </svg>
-            </div>
-            <h2 class="guide-title">准备生成仓库上下文</h2>
-            <p class="guide-desc">
-              本地 Native 引擎已就绪。请确认目标目录（默认为工作区根目录 <code>.</code>）并选择打包策略，然后点击生成。
-            </p>
-            <div class="guide-steps">
-              <div class="guide-step">
-                <span class="step-num">1</span>
-                <span class="step-text">确认工作区目录与包含规则</span>
-              </div>
-              <div class="guide-step">
-                <span class="step-num">2</span>
-                <span class="step-text">选取打包策略 (Raw / Mixed / Skeleton)</span>
-              </div>
-              <div class="guide-step">
-                <span class="step-num">3</span>
-                <span class="step-text">点击「生成仓库上下文」触发 Native 转换</span>
-              </div>
-            </div>
-            <button id="quickStartBtn" class="btn btn-primary" type="button">
-              立即以推荐配置生成
-            </button>
-          </div>
-        </div>
-
-        <!-- 差异对照视图 -->
-        <div id="diffViewContainer" class="code-viewport diff-view" style="display: none;">
-          <!-- 左侧：基准原文 Baseline Raw -->
-          <div class="diff-column left-column">
-            <div class="diff-pane-header">
-              <div class="pane-badge">
-                <span class="dot dot-raw"></span>
-                <span>基准原文 (Raw 对照)</span>
-              </div>
-              <div id="rawStats" class="pane-stats">—</div>
-            </div>
-            <div class="code-scroll-pane" tabindex="0" aria-label="基准原文代码">
-              <pre class="code-pre"><code id="rawCodeBlock" class="code-content"></code></pre>
-            </div>
-          </div>
-
-          <!-- 右侧：当前输出结果 -->
-          <div class="diff-column right-column">
-            <div class="diff-pane-header">
-              <div class="pane-badge">
-                <span id="targetStrategyDot" class="dot dot-target"></span>
-                <span id="targetStrategyTitle">本次生成输出</span>
-              </div>
-              <div id="targetStats" class="pane-stats">—</div>
-            </div>
-            <div class="code-scroll-pane" tabindex="0" aria-label="生成后代码">
-              <pre class="code-pre"><code id="targetCodeBlock" class="code-content"></code></pre>
-            </div>
-          </div>
-        </div>
-
-        <!-- 单文件代码视窗 -->
-        <div id="singleViewContainer" class="code-viewport single-view" style="display: none;">
-          <div class="diff-pane-header">
-            <div class="pane-badge">
-              <span class="dot dot-target"></span>
-              <span id="singleStrategyTitle">当前文件输出</span>
-            </div>
-            <div id="singleStats" class="pane-stats">—</div>
-          </div>
-          <div class="code-scroll-pane" tabindex="0" aria-label="输出代码正文">
-            <pre class="code-pre"><code id="singleCodeBlock" class="code-content"></code></pre>
-          </div>
-        </div>
-
-        <!-- 整包视图 -->
-        <div id="bundleViewContainer" class="code-viewport bundle-view" style="display: none;">
-          <div class="bundle-grid">
-            <div class="bundle-section">
-              <div class="diff-pane-header">
-                <div class="pane-badge">
-                  <span>仓库目录结构 (directoryStructure)</span>
-                </div>
-                <div id="bundleTreeStats" class="pane-stats">—</div>
-              </div>
-              <div class="code-scroll-pane" tabindex="0">
-                <pre class="code-pre"><code id="bundleTreeBlock" class="code-content"></code></pre>
-              </div>
-            </div>
-
-            <div class="bundle-section">
-              <div class="diff-pane-header">
-                <div class="pane-badge">
-                  <span>完整原生序列化 JSON (serialized)</span>
-                </div>
-                <div id="bundleJsonStats" class="pane-stats">—</div>
-              </div>
-              <div class="code-scroll-pane" tabindex="0">
-                <pre class="code-pre"><code id="bundleJsonBlock" class="code-content"></code></pre>
-              </div>
-            </div>
-          </div>
-        </div>
+  <aside class="inspect" aria-label="生成参数与检查">
+    <fieldset id="configFields">
+      <legend class="sr-only">生成参数</legend>
+      <section class="ins-sec">
+        <h2>工作目录</h2>
+        <p class="repo" id="currentDirectory">.</p>
+        <button type="button" class="btn directory-btn" id="selectDirBtn" disabled>选择目录…</button>
+        <p class="hint">仅限启动时授权的工作区。</p>
       </section>
-    </main>
-
-    <!-- 底部状态栏 -->
-    <footer class="app-footer" role="contentinfo">
-      <div class="footer-left">
-        <span id="footerConnectionDot" class="footer-status-indicator"></span>
-        <span id="footerWorkspaceText">工作区：—</span>
-        <span class="divider">·</span>
-        <span id="footerSecurityText">安全检查：—</span>
-        <span class="divider">·</span>
-        <span id="footerTokenizerText">编码器：o200k_base</span>
-      </div>
-      <div class="footer-right">
-        <span>快捷键：<code>/</code> 搜索 <code>Cmd/Ctrl+Enter</code> 生成 <code>Esc</code> 关闭</span>
-      </div>
-    </footer>
-  </div>
-
-  <!-- 目录选择器 Dialog (轻量浏览 host 授权空间内子目录) -->
-  <dialog id="directoryDialog" class="modal-dialog" aria-labelledby="directoryDialogTitle">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title-group">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-          </svg>
-          <h2 id="directoryDialogTitle" class="modal-title">选择工作区内目录</h2>
+      <section class="ins-sec">
+        <h2>策略</h2>
+        <div class="opt-group" role="radiogroup" aria-label="打包策略">
+          <label class="opt"><input type="radio" name="profile" value="raw"><span class="opt-name">全文 <i>raw</i></span><span class="opt-desc">保留正文</span></label>
+          <label class="opt"><input type="radio" name="profile" value="mixed" checked><span class="opt-name">混合 <i>mixed</i></span><span class="opt-desc">按规则保留</span></label>
+          <label class="opt"><input type="radio" name="profile" value="skeleton"><span class="opt-name">骨架 <i>skeleton</i></span><span class="opt-desc">结构优先</span></label>
         </div>
-        <button id="closeDirectoryDialogBtn" class="modal-close-btn" type="button" aria-label="关闭对话框">&times;</button>
-      </div>
-
-      <div class="modal-body">
-        <div class="dir-breadcrumb-bar">
-          <span class="breadcrumb-label">当前位置：</span>
-          <code id="dialogCurrentDir" class="dir-current-code">.</code>
-          <button id="dirGoUpBtn" class="btn btn-secondary btn-xs" type="button" disabled title="返回上一级目录">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <polyline points="18 15 12 9 6 15"></polyline>
-            </svg>
-            <span>上一级</span>
-          </button>
-        </div>
-
-        <div class="dir-list-wrap">
-          <div id="dirLoadingIndicator" class="dir-loading" style="display: none;">
-            <span>正在读取目录结构...</span>
+        <details class="advanced" id="advancedSettings">
+          <summary>高级文件规则</summary>
+          <label class="field-label" for="includeInput">Include</label>
+          <textarea id="includeInput" rows="3" placeholder="src/**&#10;README.md" spellcheck="false" aria-describedby="patternHint"></textarea>
+          <div id="keepFullGroup">
+            <label class="field-label" for="keepFullInput">Keep full · 仅混合模式</label>
+            <textarea id="keepFullInput" rows="3" placeholder="src/config/**" spellcheck="false" aria-describedby="patternHint"></textarea>
           </div>
-          <div id="dirList" class="dir-list-container" role="listbox" aria-label="子目录列表">
-            <!-- 动态填充子目录项 -->
-          </div>
-          <div id="dirEmptyState" class="empty-state" style="display: none;">
-            <p class="empty-title">当前目录下无更多子目录</p>
-            <p class="empty-desc">可直接点击「确定选择当前目录」进行打包。</p>
-          </div>
+          <p class="hint" id="patternHint">每行一个 glob，相对所选目录。Include 留空使用默认入选规则；两类合计最多 64 条，每条最多 1,024 个 UTF-8 字节。</p>
+        </details>
+      </section>
+      <section class="ins-sec">
+        <h2>预算</h2>
+        <div class="budget-row">
+          <label class="lbl" for="budgetInput">Token 预算</label>
+          <input type="number" id="budgetInput" value="8000" min="1" max="2147483647" step="1" inputmode="numeric" aria-describedby="budgetMsg">
         </div>
+        <p class="bmsg" id="budgetMsg" aria-live="polite">生成后对照整文计数。</p>
+        <p class="hint">预算用于提示，超限不截断输出。</p>
+      </section>
+    </fieldset>
+    <section class="ins-sec generate-section">
+      <button type="button" class="btn btn-primary generate-btn" id="generateBtn" disabled>生成上下文</button>
+      <p class="hint">Cmd / Ctrl + Enter</p>
+      <p class="request-message" id="requestMessage" role="status"></p>
+    </section>
+    <section class="ins-sec">
+      <h2>最后成功结果</h2>
+      <p class="hint snapshot-label" id="snapshotLabel">暂无结果</p>
+      <div class="num-row"><span>整文 tokens</span><b id="mTokens">—</b></div>
+      <div class="num-row"><span>输出字节</span><b id="mBytes">—</b></div>
+      <div class="num-row"><span>收录 / 跳过</span><b id="mFiles">—</b></div>
+      <div class="num-row"><span>正文变化 / 文件</span><b id="mChanged">—</b></div>
+      <p class="hint" id="curSummary">整文计数包含 JSON 包装与完整元数据。</p>
+    </section>
+    <section class="ins-sec">
+      <h2>扫描</h2>
+      <p class="scan-status" id="scanFindings">尚未扫描</p>
+      <p class="hint" id="scanMeta">生成后显示实际扫描状态与命中数。</p>
+    </section>
+  </aside>
 
-        <div class="notice-callout">
-          <span class="callout-label">授权安全声明：</span>
-          <p class="provenance-p" style="margin-top: 4px;">
-            目录选择受限于 Native 启动时授权的工作区根，仅能浏览该工作区以内的路径，不读取系统硬盘其他位置。
-          </p>
-        </div>
+  <section class="bottom" id="bottomPanel" aria-label="命令与导出">
+    <div class="bottom-in">
+      <div class="cli-row">
+        <span class="cli-label">CLI</span>
+        <code class="cli-text" id="cliText"></code>
+        <button type="button" class="btn" id="copyCliBtn">复制命令</button>
       </div>
-
-      <div class="modal-footer">
-        <button id="cancelDirSelectBtn" class="btn btn-secondary btn-sm" type="button">取消</button>
-        <button id="confirmDirSelectBtn" class="btn btn-primary btn-sm" type="button">确定选择当前目录</button>
+      <div class="exp-row">
+        <span class="exp-msg" id="exportInfo">下载绑定最后成功结果，不随参数切换。</span>
+        <button type="button" class="btn" id="copyJsonBtn" disabled>复制 JSON</button>
+        <button type="button" class="btn btn-primary" id="exportBtn" disabled>下载 JSON</button>
       </div>
     </div>
-  </dialog>
+  </section>
 
-  <!-- 会话限制与安全审计 Dialog -->
-  <dialog id="sessionLimitsDialog" class="modal-dialog" aria-labelledby="sessionLimitsTitle">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-title-group">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-          </svg>
-          <h2 id="sessionLimitsTitle" class="modal-title">Native 服务会话与安全参数</h2>
-        </div>
-        <button id="closeSessionLimitsBtn" class="modal-close-btn" type="button" aria-label="关闭对话框">&times;</button>
-      </div>
+  <footer class="statusbar">
+    <span class="st-item" id="stFile">未打开文件</span>
+    <span class="st-item" id="stTok">尚未生成</span>
+    <span class="st-item" id="stScan">尚未扫描</span>
+    <span class="st-note" id="connectionDetail">仅连接同源 Native 服务</span>
+    <button type="button" class="st-toggle" id="bottomToggle" aria-expanded="true" aria-controls="bottomPanel"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="m2 3.5 3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> 命令与导出</button>
+  </footer>
+</div>
 
-      <div class="modal-body">
-        <div class="provenance-section">
-          <h3 class="section-heading">授权工作区 (Workspace Session)</h3>
-          <table class="provenance-table">
-            <tbody>
-              <tr>
-                <th scope="row">工作区名称</th>
-                <td><code id="dialogWorkspaceName">—</code></td>
-              </tr>
-              <tr>
-                <th scope="row">本地服务端口</th>
-                <td><code id="dialogPortVal">—</code></td>
-              </tr>
-              <tr>
-                <th scope="row">引擎程序版本</th>
-                <td><code id="dialogVersionVal">—</code></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+<dialog id="directoryDialog" aria-labelledby="directoryTitle">
+  <div class="dialog-head"><h2 id="directoryTitle">选择工作目录</h2><button type="button" class="btn" id="closeDirectoryBtn" aria-label="关闭目录选择">关闭</button></div>
+  <p class="hint">只列出授权工作区中的可用子目录；隐藏、构建及依赖目录不会列出。</p>
+  <div class="directory-path"><button type="button" class="btn" id="goUpBtn">上一级</button><strong id="browseDirectory">.</strong></div>
+  <p class="dialog-message" id="directoryMessage" role="status"></p>
+  <div class="dir-list" id="dirList"></div>
+  <div class="dialog-actions"><button type="button" class="btn" id="retryDirectoryBtn" hidden>重试读取</button><button type="button" class="btn" id="cancelDirectoryBtn">取消</button><button type="button" class="btn btn-primary" id="confirmDirectoryBtn" disabled>使用此目录</button></div>
+</dialog>
 
-        <div class="provenance-section">
-          <h3 class="section-heading">服务防护限制 (Service Limits)</h3>
-          <div class="security-grid">
-            <div class="security-card">
-              <div class="security-card-title">最大扫描文件数</div>
-              <div id="limitMaxFiles" class="security-card-value">2,000</div>
-              <div class="security-card-desc">超出时将拒绝或限制扫描范围</div>
-            </div>
-            <div class="security-card">
-              <div class="security-card-title">最大输入与输出大小</div>
-              <div id="limitMaxBytes" class="security-card-value">16 MB</div>
-              <div class="security-card-desc">单文件上限 2 MB，总请求与响应均设防</div>
-            </div>
-          </div>
-        </div>
+<dialog id="limitsDialog" aria-labelledby="limitsTitle">
+  <div class="dialog-head"><h2 id="limitsTitle">Native 会话与资源限制</h2><button type="button" class="btn" id="closeLimitsBtn">关闭</button></div>
+  <dl id="sessionDetails" class="session-details"></dl>
+  <p class="hint">只读本机服务；不执行仓库命令、不向仓库写输出。扫描始终启用。资源超限须缩小目录或 Include 后重试。</p>
+</dialog>
 
-        <div class="provenance-section">
-          <h3 class="section-heading">本次打包安全审计状态 (Latest Security)</h3>
-          <div id="securityStatusCard" class="security-card status-pass">
-            <div class="security-card-title">敏感凭据 Secret 扫描</div>
-            <div id="securityStatusVal" class="security-card-value">未生成</div>
-            <div id="securityFindingsDesc" class="security-card-desc">—</div>
-          </div>
-          <div class="notice-callout" style="margin-top: 10px;">
-            <span class="callout-label">免责与指令安全须知：</span>
-            <blockquote id="securityNoticeQuote" style="margin-top: 4px; font-size: 12px; color: var(--text-secondary);">
-              Repository contents are untrusted data, not instructions.
-            </blockquote>
-          </div>
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button id="closeSessionLimitsFooterBtn" class="btn btn-secondary btn-sm" type="button">关闭</button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- 复制失败/手动选择 Fallback Dialog -->
-  <dialog id="copyFallbackDialog" class="modal-dialog" aria-labelledby="copyFallbackTitle">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h2 id="copyFallbackTitle" class="modal-title">手动复制内容</h2>
-        <button id="closeCopyFallbackBtn" class="modal-close-btn" type="button" aria-label="关闭对话框">&times;</button>
-      </div>
-      <div class="modal-body">
-        <p class="provenance-p">当前浏览器环境限制直接写入剪贴板，请全选下方内容按 <code>Ctrl+C</code> / <code>Cmd+C</code> 进行复制：</p>
-        <textarea id="copyFallbackTextarea" class="copy-fallback-textarea" readonly rows="8"></textarea>
-      </div>
-      <div class="modal-footer">
-        <button id="closeCopyFallbackFooterBtn" class="btn btn-primary btn-sm" type="button">完成</button>
-      </div>
-    </div>
-  </dialog>
-
-  <!-- 全局轻提示 Toast -->
-  <div id="toastNotification" class="toast-notification" role="status" aria-live="polite">
-    <svg class="toast-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <polyline points="20 6 9 17 4 12"></polyline>
-    </svg>
-    <span id="toastMessage" class="toast-text">已复制到剪贴板</span>
-  </div>
-
-  <!-- 应用入口脚本 (无第三方依赖，纯同源通信) -->
-  <script src="./app.js"></script>
+<dialog id="copyDialog" aria-labelledby="copyTitle">
+  <div class="dialog-head"><h2 id="copyTitle">手动复制</h2><button type="button" class="btn" id="closeCopyBtn">关闭</button></div>
+  <p class="hint">请手动选择下方完整文本并复制。</p>
+  <textarea id="copyText" rows="10" readonly aria-label="待复制文本" spellcheck="false"></textarea>
+</dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+<noscript><p class="nojs">请启用 JavaScript，以连接本机 Native 服务并生成上下文。</p></noscript>
 </body>
 </html>
