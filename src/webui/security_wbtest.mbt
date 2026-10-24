@@ -138,6 +138,19 @@ test "exact Host Origin and mandatory custom client header" {
 }
 
 ///|
+#cfg(platform="windows")
+async fn remove_fixture_directory_link(path : String) -> Unit {
+  // Remove the Windows directory-link entry without traversing its target.
+  @fs.rmdir(path)
+}
+
+///|
+#cfg(not(platform="windows"))
+async fn remove_fixture_directory_link(path : String) -> Unit {
+  @fs.remove(path)
+}
+
+///|
 async test "filesystem scope rejects linked components and roots" {
   let temp = @fs.tmpdir(prefix="moon-webui-test-")
   // Only synthetic temporary fixtures; never a user's repository.
@@ -165,8 +178,8 @@ async test "filesystem scope rejects linked components and roots" {
       _ => true
     },
   )
-  @fs.remove(temp + "/root/link")
-  @fs.remove(temp + "/linked-root")
+  remove_fixture_directory_link(temp + "/root/link")
+  remove_fixture_directory_link(temp + "/linked-root")
   @fs.rmdir(temp + "/root/child")
   @fs.rmdir(temp + "/root")
   @fs.rmdir(temp + "/outside")
