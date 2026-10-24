@@ -94,6 +94,11 @@ async fn run(binary : String, vocab : String) -> Unit {
   @fs.mkdir(root)
   @fs.mkdir(root + "/src")
   @fs.mkdir(root + "/node_modules")
+  // Such POSIX leaf names must not prevent browsing otherwise valid children.
+  if @env.get_env_var("OS") != Some("Windows_NT") {
+    @fs.write_file(root + "/ordinary:name.txt", "not a directory", create_mode=CreateNew)
+    @fs.write_file(root + "/literal\\name.txt", "not a directory", create_mode=CreateNew)
+  }
   @fs.mkdir(log + "/webui")
   @fs.write_file(
     log + "/webui/index.html",

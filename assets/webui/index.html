@@ -104,14 +104,14 @@
             <div class="form-group">
               <label for="includePatternsInput" class="form-label">
                 <span>包含路径匹配 (Include Patterns)</span>
-                <span class="label-hint">按逗号或换行分隔，如 <code>src/**, examples/**</code></span>
+                <span class="label-hint">每行一条，两组合计最多 64 条，如 <code>src/**/*.{mbt,ts}</code></span>
               </label>
               <textarea id="includePatternsInput" class="form-textarea" rows="2" placeholder="默认包含目录全部代码文件 (可留空)"></textarea>
             </div>
             <div class="form-group" id="keepFullGroup">
               <label for="keepFullInput" class="form-label">
                 <span>保留全文路径 (Keep-Full，仅在 Mixed 生效)</span>
-                <span class="label-hint">按逗号或换行分隔，如 <code>src/config/cli.mbt</code></span>
+                <span class="label-hint">每行一条，如 <code>src/config/cli.mbt</code></span>
               </label>
               <textarea id="keepFullInput" class="form-textarea" rows="2" placeholder="输入需强制保留全文的文件路径"></textarea>
             </div>
@@ -134,7 +134,7 @@
               <button class="budget-btn" data-budget="16000" type="button">16k</button>
               <button class="budget-btn" data-budget="32000" type="button">32k</button>
             </div>
-            <input id="budgetThreshold" class="budget-input" type="number" min="500" max="1000000" step="500" value="8000" aria-label="自定义预算数值">
+            <input id="budgetThreshold" class="budget-input" type="number" min="1" max="2147483647" step="1" value="8000" aria-label="自定义预算数值">
             <span class="budget-unit">tok</span>
           </div>
         </div>
@@ -151,6 +151,7 @@
             </span>
             <span id="budgetRatioVal" class="meter-ratio">—</span>
           </div>
+          <div id="comparisonStats" class="section-hint">生成后显示 Raw 整包基准与成本变化</div>
         </div>
 
         <!-- 预算告警/通过提示条 -->
@@ -184,7 +185,7 @@
         <div class="card-header">
           <div class="header-left">
             <span class="section-label">真实原生命令 (CLI Executable)</span>
-            <span class="section-hint">相对授权工作区可直接运行</span>
+            <span class="section-hint">在授权工作区运行，CLI 会读取本地配置</span>
           </div>
           <div class="cli-actions">
             <button id="copyJsonBtn" class="btn btn-ghost btn-xs" type="button" disabled title="复制本次生成完整序列化 JSON">

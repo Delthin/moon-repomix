@@ -5,18 +5,24 @@ fn contained(root : String, path : String) -> Bool {
 }
 
 ///|
-async fn canonical_root(path : String) -> String {
+fn workspace_path(path : String) -> String {
   let mut path = @platform.separators(path)
   // Trailing '/.' or '/' must not conceal a linked final component.
   while path.length() > 1 {
     if path.has_suffix("/.") {
-      path = path[:-2].to_owned()
+      path = path[:path.length() - 1].to_owned()
     } else if path.has_suffix("/") && !(path.length() == 3 && path[1] == ':') {
-      path = path[:-1].to_owned()
+      path = path[:path.length() - 1].to_owned()
     } else {
       break
     }
   }
+  path
+}
+
+///|
+async fn canonical_root(input : String) -> String {
+  let path = workspace_path(input)
   guard @fs.kind(path, follow_symlink=false) is Directory else {
     raise PublicError(
       403, "invalid_workspace", "Workspace must be a non-linked local directory.",
@@ -68,7 +74,9 @@ async fn directories(state : State, value : Json) -> Json {
     if hidden_directory(name) {
       continue
     }
-    validate_relative(name)
+    validate_relative(name) catch {
+      _ => continue
+    }
     let child = @platform.join(path, name)
     if @fs.kind(child, follow_symlink=false) is Directory {
       let real = @platform.separators(@fs.realpath(child))

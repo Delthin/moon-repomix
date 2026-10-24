@@ -16,6 +16,9 @@ test "scoped relative paths reject traversal and ambiguous components" {
     }
     assert_true(rejected, msg=path)
   }
+  assert_eq(workspace_path("/."), "/")
+  assert_eq(workspace_path("C:/."), "C:/")
+  assert_eq(workspace_path("C:/./."), "C:/")
   assert_true(contained("/workspace", "/workspace/child"))
   assert_false(contained("/workspace", "/workspace-other"))
 }
@@ -144,6 +147,7 @@ async test "filesystem scope rejects linked components and roots" {
   @fs.symlink(target=temp + "/outside", temp + "/root/link")
   @fs.symlink(target=temp + "/root", temp + "/linked-root")
   let root = canonical_root(temp + "/root")
+  assert_eq(canonical_root(temp + "/root/."), root)
   assert_eq(scoped_directory(root, "child"), root + "/child")
   assert_true(
     try {

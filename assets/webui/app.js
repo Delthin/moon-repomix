@@ -47,7 +47,8 @@
     dialogBrowseDir: '.',
     dialogDirectories: [],
     dialogIsLoading: false,
-    dialogError: null
+    dialogError: null,
+    directoryRequest: 0
   };
 
   /* ==========================================================================
@@ -84,6 +85,7 @@
     currentTokensVal: document.getElementById('currentTokensVal'),
     currentBytesVal: document.getElementById('currentBytesVal'),
     budgetRatioVal: document.getElementById('budgetRatioVal'),
+    comparisonStats: document.getElementById('comparisonStats'),
     budgetNotice: document.getElementById('budgetNotice'),
     budgetNoticeText: document.getElementById('budgetNoticeText'),
 
@@ -109,6 +111,8 @@
     fileSkippedText: document.getElementById('fileSkippedText'),
     fileListContainer: document.getElementById('fileListContainer'),
     fileEmptyState: document.getElementById('fileEmptyState'),
+    fileEmptyTitle: document.getElementById('fileEmptyTitle'),
+    fileEmptyDesc: document.getElementById('fileEmptyDesc'),
     resetSearchBtn: document.getElementById('resetSearchBtn'),
 
     // Viewport & Code
@@ -194,8 +198,6 @@
         headers: mergedHeaders,
         signal: controller.signal
       });
-      clearTimeout(timeoutTimer);
-
       if (!response.ok) {
         let errorData = null;
         try {
@@ -213,7 +215,9 @@
         throw err;
       }
 
-      return await response.json();
+      const data = await response.json();
+      clearTimeout(timeoutTimer);
+      return data;
     } catch (err) {
       clearTimeout(timeoutTimer);
       if (err.name === 'AbortError') {
@@ -260,12 +264,29 @@
   }
 
   function parsePatternList(text) {
-    if (!text) return [];
-    return text
-      .split(/[,\n]/)
-      .map(s => s.trim())
-      .filter(s => s.length > 0 && s.length <= 1024)
-      .slice(0, 64);
+    return (text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  }
+
+  function validBudget() {
+    const value = Number(el.budgetThreshold.value);
+    const valid = el.budgetThreshold.value.trim() !== '' &&
+      Number.isInteger(value) && value > 0 && value <= 2147483647;
+    el.budgetThreshold.setAttribute('aria-invalid', String(!valid));
+    return valid ? value : null;
+  }
+
+  function setPackingControls(busy) {
+    [el.packSubmitBtn, el.quickStartBtn, el.selectDirBtn, el.budgetThreshold,
+      el.includePatternsInput, el.keepFullInput, ...el.profileTabs, ...el.budgetBtns]
+      .forEach(control => { control.disabled = busy; });
+    el.packSubmitBtn.classList.toggle('busy', busy);
+  }
+
+  function fileStrategy(data, path) {
+    const baseline = data.baseline?.document?.files || {};
+    if (!Object.hasOwn(baseline, path)) return { changed: false, label: '无全文对照' };
+    const changed = data.result.document.files[path] !== baseline[path];
+    return { changed, label: changed ? '结构输出' : '正文相同' };
   }
 
   /* ==========================================================================
@@ -334,7 +355,9 @@
   }
 
   async function loadDirectoryContents(dir) {
+    const request = ++state.directoryRequest;
     state.dialogBrowseDir = dir;
+    el.confirmDirSelectBtn.disabled = true;
     el.dialogCurrentDir.textContent = dir;
     el.dirGoUpBtn.disabled = (dir === '.' || dir === '' || dir === '/');
 
@@ -348,6 +371,8 @@
         body: JSON.stringify({ directory: dir })
       });
 
+      if (request !== state.directoryRequest) return;
+      el.confirmDirSelectBtn.disabled = false;
       el.dirLoadingIndicator.style.display = 'none';
       const subdirs = data.directories || [];
       state.dialogDirectories = subdirs;
@@ -387,6 +412,7 @@
 
       el.dirList.appendChild(fragment);
     } catch (err) {
+      if (request !== state.directoryRequest) return;
       el.dirLoadingIndicator.style.display = 'none';
       showToast('读取目录失败: ' + err.message);
     }
@@ -421,10 +447,10 @@
     const parts = ['moon-repomix'];
 
     // 目录
-    parts.push(shellQuote(state.directory));
+    parts.push(shellQuote(state.directory === '.' ? '.' : './' + state.directory));
 
     // 风格
-    parts.push('--style', 'json');
+    parts.push('--style', 'json', '--full-metadata');
 
     // 压缩策略: skeleton 和 mixed 使用布尔 --compress 标志
     if (state.profile === 'skeleton' || state.profile === 'mixed') {
@@ -464,15 +490,22 @@
     // 同步输入框内容
     state.includePatterns = parsePatternList(el.includePatternsInput.value);
     state.keepFull = parsePatternList(el.keepFullInput.value);
-    const budgetVal = parseInt(el.budgetThreshold.value, 10);
-    state.tokenBudget = isNaN(budgetVal) || budgetVal <= 0 ? 8000 : budgetVal;
-
+    const budgetVal = validBudget();
+    if (budgetVal === null) {
+      showToast('预算须为 1 到 2,147,483,647 之间的整数');
+      return;
+    }
+    const allPatterns = [...state.includePatterns, ...state.keepFull];
+    if (allPatterns.length > 64 || allPatterns.some(p => new TextEncoder().encode(p).length > 1024)) {
+      showToast('包含和全文模式合计最多 64 条，每条最多 1,024 个 UTF-8 字节');
+      return;
+    }
+    state.tokenBudget = budgetVal;
     updateCliCommand();
 
-    // 界面置为忙态
+    // 请求期间固定表单，结果不会被重贴到另一份配置。
     state.isPacking = true;
-    el.packSubmitBtn.classList.add('busy');
-    el.packSubmitBtn.disabled = true;
+    setPackingControls(true);
     el.packBtnText.textContent = 'Native 引擎转换中...';
     el.packStateHint.textContent = '正在由 Native 引擎扫描并构建 AST 骨架...';
 
@@ -515,8 +548,7 @@
       }
     } finally {
       state.isPacking = false;
-      el.packSubmitBtn.classList.remove('busy');
-      el.packSubmitBtn.disabled = false;
+      setPackingControls(false);
       el.packBtnText.textContent = '生成仓库上下文';
       el.packStateHint.innerHTML = '支持快捷键 <code>Cmd/Ctrl + Enter</code>';
     }
@@ -527,7 +559,7 @@
     const documentData = data.result?.document;
 
     // 1. 新鲜度标记
-    el.outputFreshnessBadge.textContent = `实测 · ${getProfileName(data.profile)}`;
+    el.outputFreshnessBadge.textContent = `实测 · ${data.directory} · ${getProfileName(data.profile)}`;
     el.outputFreshnessBadge.className = 'freshness-badge badge-fresh';
 
     // 2. 导出与复制按钮启用
@@ -536,41 +568,22 @@
     el.copyPathBtn.disabled = false;
     el.copyCodeBtn.disabled = false;
 
-    // 3. Tokens 与预算比对
-    const tokens = parseInt(report?.tokens?.total || '0', 10);
-    const bytes = parseInt(report?.bytes?.total || '0', 10);
-    el.currentTokensVal.textContent = formatNumber(tokens);
-    el.currentBytesVal.textContent = formatBytes(bytes);
-
-    const budgetLimit = state.tokenBudget;
-    const ratio = budgetLimit > 0 ? (tokens / budgetLimit) : 0;
-    const percent = Math.min(Math.round(ratio * 100), 100);
-
-    el.budgetProgress.style.width = percent + '%';
-    el.budgetRatioVal.textContent = `${percent}% (上限 ${formatNumber(budgetLimit)} tok)`;
-
-    if (tokens > budgetLimit) {
-      el.budgetProgress.classList.add('exceeded');
-      el.budgetNotice.className = 'budget-alert status-warn';
-      el.budgetNoticeText.textContent = `超出预算 ${formatNumber(tokens - budgetLimit)} tokens。Native 引擎仍保留完整正文输出，请按需调整预算或提高骨架压缩比。`;
-    } else {
-      el.budgetProgress.classList.remove('exceeded');
-      el.budgetNotice.className = 'budget-alert status-ok';
-      el.budgetNoticeText.textContent = `在预算内，剩余空间 ${formatNumber(budgetLimit - tokens)} tokens。已完成 AST 骨架化。`;
-    }
+    // 3. 精确整文计量与独立的预算比较。
+    renderBudgetComparison(data);
 
     // 4. 安全状态展示
     if (report?.security) {
       const sec = report.security;
       const findings = sec.findings || 0;
-      const statusText = sec.status === 'passed' ? '安全通过 (0 泄漏)' : `排除 ${findings} 项敏感信息`;
+      const statusText = sec.status === 'passed' ? '未发现检测规则匹配项' : `排除后输出 · 命中 ${findings} 项`;
       el.footerSecurityText.textContent = `安全检查：${statusText}`;
 
       el.securityStatusVal.textContent = sec.status === 'passed' ? '检查通过' : '已排除风险';
       el.securityFindingsDesc.textContent = `本次扫描敏感凭据命中项：${findings}，状态：${sec.status}`;
     }
 
-    // 5. 渲染左侧结果文件列表
+    // 5. 即使本次零文件，也刷新完整包并清除旧代码。
+    renderBundleView(data);
     renderFileList(data);
 
     // 6. 切换右侧视窗显示
@@ -578,10 +591,32 @@
     switchViewTab(state.activeView);
   }
 
+  function renderBudgetComparison(data) {
+    const tokens = Number(data.result.report.tokens.total);
+    const bytes = Number(data.result.report.bytes.total);
+    const ratio = tokens / state.tokenBudget;
+    const baselineTokens = Number(data.baseline.report.tokens.total);
+    const delta = tokens - baselineTokens;
+    const change = delta === 0 ? '相同' : `${delta < 0 ? '减少' : '增加'} ${formatNumber(Math.abs(delta))} tok`;
+    const percent = baselineTokens > 0 ? ` (${(Math.abs(delta) / baselineTokens * 100).toFixed(1)}%)` : '';
+    el.comparisonStats.textContent = `Raw 整包基准 ${formatNumber(baselineTokens)} tok · 本次${change}${percent}`;
+    el.currentTokensVal.textContent = formatNumber(tokens);
+    el.currentBytesVal.textContent = formatBytes(bytes);
+    el.budgetProgress.style.width = Math.min(Math.round(ratio * 100), 100) + '%';
+    el.budgetRatioVal.textContent = `${Math.round(ratio * 100)}% (比较阈值 ${formatNumber(state.tokenBudget)} tok)`;
+    el.budgetProgress.classList.toggle('exceeded', tokens > state.tokenBudget);
+    el.budgetNotice.className = tokens > state.tokenBudget ? 'budget-alert status-warn' : 'budget-alert status-ok';
+    el.budgetNoticeText.textContent = tokens > state.tokenBudget
+      ? `超出当前阈值 ${formatNumber(tokens - state.tokenBudget)} tokens。完整输出保留。`
+      : `在当前阈值内，剩余 ${formatNumber(state.tokenBudget - tokens)} tokens。`;
+    if (state.isStale) markStaleState();
+  }
+
   function markStaleState() {
     if (!state.hasGenerated) return;
     state.isStale = true;
-    el.outputFreshnessBadge.textContent = '配置已修改 · 待生成';
+    const data = state.lastPackResult;
+    el.outputFreshnessBadge.textContent = `上次：${data.directory} · ${getProfileName(data.profile)} · 待生成`;
     el.outputFreshnessBadge.className = 'freshness-badge badge-stale';
     el.budgetNoticeText.textContent = '注意：配置已调整。上方数值为上次打包实测，请点击「生成仓库上下文」重新运行。';
     el.budgetNotice.className = 'budget-alert status-warn';
@@ -619,6 +654,17 @@
 
     if (visiblePaths.length === 0) {
       el.fileEmptyState.style.display = 'block';
+      el.fileEmptyTitle.textContent = filePaths.length ? '未找到匹配文件' : '本次没有入选文件';
+      el.fileEmptyDesc.textContent = filePaths.length ? '当前搜索无匹配项。' : '请调整目录或 Include 规则后重新生成。';
+      el.resetSearchBtn.style.display = filePaths.length ? '' : 'none';
+      if (filePaths.length === 0) {
+        state.selectedFile = null;
+        el.fileMetaPill.style.display = 'none';
+        [el.rawCodeBlock, el.targetCodeBlock, el.singleCodeBlock].forEach(block => { block.textContent = ''; });
+        [el.rawStats, el.targetStats, el.singleStats].forEach(label => { label.textContent = '本次无文件'; });
+        el.copyPathBtn.disabled = true;
+        el.copyCodeBtn.disabled = true;
+      }
       return;
     }
     el.fileEmptyState.style.display = 'none';
@@ -666,19 +712,10 @@
       const badgeGroup = document.createElement('div');
       badgeGroup.className = 'file-badge-group';
 
-      const rawContent = baselineMap[filePath];
-      const targetContent = filesMap[filePath];
-      const isCompressed = rawContent && targetContent && targetContent.includes('{/* … */}');
-
+      const strategy = fileStrategy(data, filePath);
       const tag = document.createElement('span');
-      tag.className = 'badge-tag';
-      if (isCompressed) {
-        tag.className += ' badge-skeleton';
-        tag.textContent = 'AST骨架';
-      } else {
-        tag.className += ' badge-full';
-        tag.textContent = '全文';
-      }
+      tag.className = 'badge-tag ' + (strategy.changed ? 'badge-skeleton' : 'badge-full');
+      tag.textContent = strategy.label;
       badgeGroup.appendChild(tag);
 
       itemBtn.appendChild(fileInfo);
@@ -697,7 +734,7 @@
     el.fileListContainer.appendChild(fragment);
 
     // 默认选中第一个
-    if (!state.selectedFile || !filesMap[state.selectedFile]) {
+    if (!state.selectedFile || !Object.hasOwn(filesMap, state.selectedFile)) {
       // 优先选 cli.mbt 或 encoder.mbt，否则选第一个
       const preferred = visiblePaths.find(p => p.includes('cli.mbt') || p.includes('encoder.mbt')) || visiblePaths[0];
       if (preferred) {
@@ -729,15 +766,16 @@
     if (!data) return;
 
     const targetCode = data.result?.document?.files?.[filePath] || '';
-    const baselineCode = data.baseline?.document?.files?.[filePath] || null;
-    const isSkeleton = targetCode.includes('{/* … */}');
+    const baselineCode = data.baseline?.document?.files?.[filePath] ?? null;
+    const strategy = fileStrategy(data, filePath);
+    const isSkeleton = strategy.changed;
 
     if (isSkeleton) {
       el.activeFileStrategyBadge.className = 'strategy-badge badge-ast';
-      el.activeFileStrategyBadge.textContent = 'AST 骨架化';
+      el.activeFileStrategyBadge.textContent = strategy.label;
     } else {
       el.activeFileStrategyBadge.className = 'strategy-badge badge-full';
-      el.activeFileStrategyBadge.textContent = '保留全文';
+      el.activeFileStrategyBadge.textContent = strategy.label;
     }
 
     // 渲染各个视窗
@@ -769,7 +807,7 @@
   function renderSingleView(filePath, targetCode, isSkeleton) {
     const targetLines = targetCode.split('\n').length;
     el.singleStats.textContent = `${targetLines} 行 · ${formatBytes(new Blob([targetCode]).size)}`;
-    el.singleStrategyTitle.textContent = isSkeleton ? '当前输出 (AST 骨架)' : '当前输出 (全文)';
+    el.singleStrategyTitle.textContent = isSkeleton ? '当前输出 (正文有变化)' : '当前输出';
     renderHighlightedCode(el.singleCodeBlock, targetCode);
   }
 
@@ -877,6 +915,7 @@
       const isActive = tab.getAttribute('data-view') === viewMode;
       tab.classList.toggle('active', isActive);
       tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      tab.tabIndex = isActive ? 0 : -1;
     });
 
     if (!state.hasGenerated) {
@@ -900,7 +939,15 @@
     if (!text) return;
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
+        let timer;
+        try {
+          await Promise.race([
+            navigator.clipboard.writeText(text),
+            new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('clipboard permission pending')), 1200); })
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
         showToast(successMsg);
       } else {
         fallbackCopyDialog(text);
@@ -973,6 +1020,7 @@
           const isActive = t.getAttribute('data-profile') === profile;
           t.classList.toggle('active', isActive);
           t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+          t.tabIndex = isActive ? 0 : -1;
         });
 
         // 仅在 mixed 下展示 keepFull
@@ -985,6 +1033,19 @@
       });
     });
 
+    for (const tabs of [el.profileTabs, el.viewTabs]) {
+      tabs.forEach((tab, index) => tab.addEventListener('keydown', event => {
+        let next;
+        if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+        else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = tabs.length - 1;
+        else return;
+        event.preventDefault();
+        if (!tabs[next].disabled) { tabs[next].focus(); tabs[next].click(); }
+      }));
+    }
+
     // 预算快捷按钮
     el.budgetBtns.forEach(btn => {
       btn.addEventListener('click', () => {
@@ -996,21 +1057,21 @@
         updateCliCommand();
 
         if (state.hasGenerated) {
-          renderPackSuccess(state.lastPackResult);
+          renderBudgetComparison(state.lastPackResult);
         }
       });
     });
 
     el.budgetThreshold.addEventListener('input', () => {
-      const bVal = parseInt(el.budgetThreshold.value, 10);
-      if (!isNaN(bVal) && bVal > 0) {
+      const bVal = validBudget();
+      if (bVal !== null) {
         state.tokenBudget = bVal;
         el.budgetBtns.forEach(b => {
           b.classList.toggle('active', parseInt(b.getAttribute('data-budget'), 10) === bVal);
         });
         updateCliCommand();
         if (state.hasGenerated) {
-          renderPackSuccess(state.lastPackResult);
+          renderBudgetComparison(state.lastPackResult);
         }
       }
     });
@@ -1054,6 +1115,7 @@
 
     // CLI 复制与 JSON 导出
     el.copyCliBtn.addEventListener('click', () => {
+      if (validBudget() === null) { showToast('请先输入有效的整数预算'); return; }
       copyToClipboard(el.cliCommandText.textContent, '真实原生命令已复制');
     });
 
@@ -1119,7 +1181,7 @@
     // 全局快捷键
     window.addEventListener('keydown', (e) => {
       // Cmd/Ctrl + Enter 触发生成
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !document.querySelector('dialog[open]')) {
         e.preventDefault();
         performPack();
         return;
