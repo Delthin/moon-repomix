@@ -398,9 +398,18 @@ async fn main {
     success(code, err)
     assert_eq(keys(out), [newline])
   }
-  let (code, help, err) = invoke(
+  let (code, brief, err) = invoke(
     binary,
     ["--help", "--stdin", "--tokenizer-path=missing"],
+    temp,
+    b"\xff",
+    file_input=true,
+  )
+  success(code, err)
+  assert_true(brief.contains("--help-all"))
+  let (code, help, err) = invoke(
+    binary,
+    ["--help-all", "--stdin", "--tokenizer-path=missing"],
     temp,
     b"\xff",
     file_input=true,
