@@ -87,11 +87,13 @@
   function cliCommand() {
     const config = currentConfig();
     if (config.tokenBudget === null) return null;
-    const parts = ['moon-repomix', shellQuote(config.directory === '.' ? '.' : './' + config.directory), '--style', 'json', '--full-metadata'];
+    const parts = ['moon-repomix'];
+    if (config.directory !== '.') parts.push(shellQuote('./' + config.directory));
+    parts.push('-f', 'json', '--full-metadata');
     if (config.profile !== 'raw') parts.push('--compress');
     config.keepFull.forEach(pattern => parts.push('--keep-full', shellQuote(pattern)));
     config.includePatterns.forEach(pattern => parts.push('--include', shellQuote(pattern)));
-    parts.push('--token-budget', String(config.tokenBudget), '-o', 'context.json');
+    parts.push('--budget', String(config.tokenBudget), '-o', 'context.json');
     return parts.join(' ');
   }
 

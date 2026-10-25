@@ -33,6 +33,7 @@ pub(all) enum Action {
   Pack
   Init
   Help
+  HelpAll
   Version
 } derive(Eq, @debug.Debug)
 pub fn Action::equal(Self, Self) -> Bool

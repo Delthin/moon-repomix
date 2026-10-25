@@ -10,7 +10,7 @@
 moon-repomix ./project --compress --keep-full 'src/core/**,README.md' \
   --header-text '请关注公开接口与错误处理。' \
   --instruction-file-path review-instructions.md \
-  --include-diffs --style markdown -o review.md
+  --include-diffs -f md -o review.md
 ```
 
 `review.md` 中关键文件保留全文，其他受支持语言提取骨架，并附经过路径筛选的 Git 差异。`--keep-full` 只作用于已选且通过扫描的文件。头部和指令各最多 1 MiB，进入文档前扫描，最终 token 数包含模板和包装；指令路径相对启动 cwd。
@@ -20,13 +20,13 @@ moon-repomix ./project --compress --keep-full 'src/core/**,README.md' \
 ## 2. 把仓库分成每卷不超过预算的材料
 
 ```sh
-moon-repomix ./project --compress --split-output 12000 \
-  --style markdown -o review-parts --report-json 2> review-report.json
+moon-repomix ./project --compress --split 12000 \
+  -f md -o review-parts --report-json 2> review-report.json
 ```
 
 `review-parts` 必须不存在，父目录已存在且由调用方控制。成功后读取 `index.json` 选择对应的 `part-0001.md` 等卷；每卷对最终字符串精确计数，文件和 Git 章节各自完整归属一卷，模板按卷重复。索引独立计数，不受 12,000 的每卷 cap 约束，总开销是所有卷与索引计数之和。
 
-单个文件、章节或基础模板放不下时，运行失败而不是截断；可减少输入、开启骨架或在实际允许范围内提高 cap。`--token-budget` 则是单文档告警：超限仍写全文、退出 1，不能和 CLI 分卷同时使用。发布与预算规则见 [分卷](partition.md)，报告字段见 [机器报告](reports.md)。
+单个文件、章节或基础模板放不下时，运行失败而不是截断；可减少输入、开启骨架或在实际允许范围内提高 cap。`--budget` 则是单文档告警：超限仍写全文、退出 1，不能和 CLI 分卷同时使用。发布与预算规则见 [分卷](partition.md)，报告字段见 [机器报告](reports.md)。
 
 ## 3. 接入 MCP 客户端或自动化任务
 
@@ -42,7 +42,7 @@ moon-repomix ./project --mcp --compress --include 'src/**,README.md' \
 不使用 MCP 的自动化可分别保存正文与运行报告：
 
 ```sh
-moon-repomix ./project --compress --style markdown --stdout --report-json \
+moon-repomix ./project --compress -f md -o - --report-json \
   > context.md 2> report.json
 ```
 

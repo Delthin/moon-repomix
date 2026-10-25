@@ -2,11 +2,13 @@
 
 本页对照已发行的 **v0.3.0** 与**当前源码**，作为 0.4 的迁移准备。当前源码尚未发行，平台安装包与 Mooncakes 正式版本仍为 0.3.0；新增接口请通过本地源码使用，不把依赖版本直接改成尚未发行的 0.4。
 
-对照依据是 v0.3.0 tag 与当前的 [CLI help](../src/cmd/moon-repomix/help.mbt)、[配置类型及默认值](../src/config/types.mbt)、[JSON 解析](../src/config/json.mbt) 和 [SDK 接口](../src/pkg.generated.mbti)。源码的清单及 `--version` 尚可能显示 0.3.0，记录 commit 才能区分接口。
+对照依据是 v0.3.0 tag 与当前的 [CLI help](../src/cmd/moon-repomix/help.mbt)、[配置类型及默认值](../src/config/types.mbt)、[JSON 解析](../src/config/json.mbt) 和 [SDK 接口](../src/pkg.generated.mbti)。当前源码的清单及 `--version` 显示 0.4.0；正式发布仍为 v0.3.0，问题报告请同时记录 commit。
 
 ## 保留现有用法，先检查新默认限制
 
 四种格式、默认 XML、显式 `--compress`、stdin 字面列表、include/ignore、安全扫描和普通单文档预算继续沿用。默认仍为全文，无模板、无显示行号、目标根相对路径，章节默认显示；单文件上限仍为 50 MiB。已有参数和 JSON 字段无须批量改名。
+
+当前源码的 CLI 推荐 `-f md`（兼容 `--style markdown`）、`--budget N`（兼容 `--token-budget`）、`--split N`（兼容 `--split-output`）；新旧拼法混写沿用后者覆盖。`md`、`txt` 是 CLI 简写，JSON 字段及 `markdown`、`plain` 值保持原样。`--help` 展示常用任务，完整参数使用 `--help-all`，见 [CLI 速查](cli.md)。
 
 当前源码新增：
 
@@ -54,7 +56,7 @@
 
 ## SDK 调整
 
-已有 `options` 命名参数与 `pack(options, runtime) -> PackResult` 保留。用 `options(...)` 或 `Patch::empty()` 构造值，可获得新默认；直接写完整 `Options`、`Cli` 或 `Patch` 结构字面量的调用者需补齐新增字段，字段清单以 [config `.mbti`](../src/config/pkg.generated.mbti) 为准。匹配 `PackError` 的代码需处理新增的 `ContextTextError(String)`、`ContextSecurityFinding(String)` 和 `InputLimitExceeded(kind~ : String, limit~ : Int64)`。
+已有 `options` 命名参数与 `pack(options, runtime) -> PackResult` 保留。用 `options(...)` 或 `Patch::empty()` 构造值，可获得新默认；直接写完整 `Options`、`Cli` 或 `Patch` 结构字面量的调用者需补齐新增字段，字段清单以 [config `.mbti`](../src/config/pkg.generated.mbti) 为准。`config.Action` 新增 `HelpAll`，直接匹配 CLI 动作的调用者需处理它。匹配 `PackError` 的代码需处理新增的 `ContextTextError(String)`、`ContextSecurityFinding(String)` 和 `InputLimitExceeded(kind~ : String, limit~ : Int64)`。
 
 直接构造 `Document` 的调用者还需补充 `header_text`、`instruction_text` 两个字符串字段；使用 `document.create(...)` 时，新命名参数可省略并默认为空。直接调用四个 `output` 渲染器的旧调用保留，新可选 `display : Display` 控制展示，默认值通过 `Display::default()` 构造。详见 [document `.mbti`](../src/document/pkg.generated.mbti) 与 [output `.mbti`](../src/output/pkg.generated.mbti)。
 

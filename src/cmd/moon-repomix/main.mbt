@@ -55,6 +55,10 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
       @stdio.stdout.write(help)
       return 0
     }
+    HelpAll => {
+      @stdio.stdout.write(full_help)
+      return 0
+    }
     Version => {
       @stdio.stdout.write("moon-repomix " + @repomix.version() + "\n")
       return 0

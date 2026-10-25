@@ -6,6 +6,7 @@
 
 ### Added
 
+- 常用 CLI 简写 `-f` / `--format`、`--budget`、`--split`，格式接受 `md` / `txt`；默认帮助按常见任务组织，`--help-all` 展示完整参数。既有参数及 JSON 字段继续使用原语义。
 - `--webui` 启动仅监听 loopback 的本地浏览器工作台，支持授权子目录选择、真实 Native 全文/骨架/混合生成、预算比较、代码对照与 JSON 下载；页面资源随安装包提供。
 - `--keep-full` / `output.keepFull` 在骨架模式中保留指定文件全文；SDK 对应 `keep_full_patterns`。
 - 扫描后的 header 与本地 instruction 模板，支持 CLI、JSON 配置和 SDK。

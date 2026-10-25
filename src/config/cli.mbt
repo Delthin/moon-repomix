@@ -92,7 +92,30 @@ fn csv_patterns(value : String) -> Array[String] raise ConfigError {
 }
 
 ///|
+fn canonical_option(key : String) -> String {
+  match key {
+    "-f" | "--format" => "--style"
+    "--budget" => "--token-budget"
+    "--split" => "--split-output"
+    _ => key
+  }
+}
+
+///|
+fn cli_style(value : String) -> Style raise ConfigError {
+  match value {
+    "md" => Markdown
+    "txt" => Plain
+    _ => parse_style(value)
+  }
+}
+
+///|
 fn set_action(current : Action, next : Action) -> Action raise ConfigError {
+  if (current == Help && next == HelpAll) ||
+    (current == HelpAll && next == Help) {
+    return HelpAll
+  }
   if current != Pack && current != next {
     raise Conflict("action")
   }
@@ -141,9 +164,11 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       Some((key, value)) => (key.to_owned(), Some(value.to_owned()))
       None => (arg, None)
     }
+    let original_key = key
+    let key = canonical_option(key)
     if ![
         "--webui", "--webui-port", "--tokenizer-path", "--max-files", "--max-total-size",
-        "--max-file-size",
+        "--max-file-size", "-h", "--help", "--help-all", "-v", "--version",
       ].contains(key) {
       webui_other_options.push(key)
     }
@@ -202,7 +227,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
               args[index].has_prefix("-") &&
               !((key == "-o" || key == "--output") && args[index] == "-")
             ) {
-            raise MissingValue(key)
+            raise MissingValue(original_key)
           }
           let value = args[index]
           index += 1
@@ -214,7 +239,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
           validate_path(value, "output.filePath")
           patch.output = Some(value)
         }
-        "--style" => patch.style = Some(parse_style(value))
+        "--style" => patch.style = Some(cli_style(value))
         "--output-file-path-style" =>
           patch.output_file_path_style = Some(parse_path_style(value))
         "--include" =>
@@ -366,6 +391,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
         "--parsable-style" => ()
         "--init" => action = set_action(action, Init)
         "-h" | "--help" => action = set_action(action, Help)
+        "--help-all" => action = set_action(action, HelpAll)
         "-v" | "--version" => action = set_action(action, Version)
         _ => raise UnknownOption(key)
       }

@@ -55,6 +55,7 @@ pub(all) enum Action {
   Pack
   Init
   Help
+  HelpAll
   Version
 } derive(Eq, Debug)
 

@@ -5,6 +5,7 @@ import {
   "moonbitlang/async@0.22.5/process",
   "moonbitlang/async@0.22.5/io",
   "moonbitlang/core/env",
+  "moonbitlang/core/json",
   "moonbitlang/core/string",
 }
 
@@ -36,6 +37,21 @@ async fn main {
   let windows = @env.get_env_var("OS") == Some("Windows_NT")
   let temp = @fs.tmpdir(prefix="moon-repomix-functional-")
   defer @fs.rmdir(temp, recursive=true)
+  let (help_code, brief, help_err) = run(binary, ["--help"], temp)
+  assert_eq(help_code, 0)
+  assert_eq(help_err, "")
+  assert_true(brief.contains("--help-all"))
+  assert_false(brief.contains("--remote-branch"))
+  let (full_code, complete, full_err) = run(
+    binary,
+    ["--webui", "--help-all", "--tokenizer-path", temp + "/missing"],
+    temp,
+  )
+  assert_eq(full_code, 0)
+  assert_eq(full_err, "")
+  assert_true(complete.contains("--remote-branch"))
+  assert_true(complete.contains("--split-output"))
+  assert_true(complete.length() > brief.length())
   let root = temp + "/项目 空间"
   @fs.mkdir(root + "/src", recursive=true)
   put(root + "/.gitignore", "ignored.txt\n")
@@ -94,7 +110,7 @@ async fn main {
   }
   let (equal, _, _) = run(
     binary,
-    common + ["--output", output, "--token-budget", tokens.to_string()],
+    common + ["--output", output, "--budget", tokens.to_string()],
     temp,
   )
   assert_eq(equal, 0)
@@ -136,6 +152,37 @@ async fn main {
   )
   assert_eq(md_code, 0)
   assert_true(md.contains("`````\nhello\n````\n# data\n`````"))
+  let (short_code, short_md, _) = run(
+    binary,
+    common + ["-o", "-", "-f", "md", "--quiet"],
+    temp,
+  )
+  assert_eq(short_code, 0)
+  assert_eq(short_md, md)
+  let cap = tokens - 1
+  let parts = temp + "/context-parts"
+  let (split_code, split_out, _) = run(
+    binary,
+    common + ["--split", cap.to_string(), "-o", parts, "--quiet"],
+    temp,
+  )
+  assert_eq(split_code, 0)
+  assert_eq(split_out, "")
+  guard @json.parse(@fs.read_file(parts + "/index.json").text())
+    is { "volumes": Array(volumes), .. } else {
+    fail("missing split index volumes")
+  }
+  assert_eq(volumes.length(), 2)
+  for volume in volumes {
+    guard volume
+      is { "tokens": Number(count, ..), "fileName": String(name), .. } else {
+      fail("invalid split index entry")
+    }
+    assert_true(count <= cap.to_double())
+    assert_true(
+      @fs.read_file(parts + "/" + name).text().has_prefix("<?xml version="),
+    )
+  }
   let (invalid, invalid_out, _) = run(binary, [root, "--unknown"], temp)
   assert_eq(invalid, 1)
   assert_eq(invalid_out, "")

@@ -23,10 +23,10 @@ for volume in result.partition.volumes {
 ## CLI 目录输出
 
 ```sh
-moon-repomix ./project --split-output 12000 --style markdown -o review-parts --report-json
+moon-repomix ./project --split 12000 -f md -o review-parts --report-json
 ```
 
-`--split-output` 是每卷的正整数 token 上限，JSON 配置为 `output.splitOutput`；值 `false` 或 `--no-split-output` 关闭。未指定输出路径时目录名为 `moon-repomix-output`。它与 `--stdout`、`-o -` 和普通 `--token-budget` 冲突。
+`--split` 是每卷的正整数 token 上限，兼容 `--split-output`，JSON 配置为 `output.splitOutput`；值 `false` 或 `--no-split-output` 关闭。未指定输出路径时目录名为 `moon-repomix-output`。它与 `--stdout`、`-o -` 和普通 `--budget`（兼容 `--token-budget`）冲突。
 
 输出目录必须不存在，父目录必须已存在且执行期间保持受调用方控制和稳定。CLI 在同父独占私有 staging 中逐文件写入、sync、关闭，再用原生 atomic no-replace 发布。目标在检查后被其他进程创建时也不会覆盖；失败和取消仅清理本次 staging。现有目标，包括文件、空目录和链接，始终拒绝。
 

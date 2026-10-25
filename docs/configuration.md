@@ -4,9 +4,11 @@
 
 配置按“默认值 → 选定的 JSON 文件 → 显式 CLI 参数”合并。普通字段由后者覆盖；include 和自定义 ignore 列表按 JSON、CLI 的顺序追加，按原字符串去重并保留首次出现的位置。未出现的布尔参数不参与覆盖，因此 JSON 中的 `false` 会保留。
 
-CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 `repomix.config.json`。远程与 MCP 模式仅加载显式指定的本地配置。显式配置路径、输出路径以启动时的工作目录为基准；include/ignore 以输入根目录为基准。默认配置文件不存在时使用默认值，显式指定的文件不存在则报错。
+CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 `repomix.config.json`。远程与 MCP 模式仅加载显式指定的本地配置。WebUI 使用启动参数和页面设置，跳过仓库配置，并与 `--config` 互斥。显式配置路径、输出路径以启动时的工作目录为基准；include/ignore 以输入根目录为基准。默认配置文件不存在时使用默认值，显式指定的文件不存在则报错。
 
 ## 命令行参数
+
+先按任务使用可查阅 [CLI 速查](cli.md)。`--help` 展示常用命令，`--help-all` 展示完整参数。以下新简写仅在当前源码中提供。
 
 | 参数 | 行为 |
 | --- | --- |
@@ -16,7 +18,7 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--stdin` | 显式读取 UTF-8 文件列表，每行一个路径，接受 CRLF |
 | `--explain-path PATH` | 重复查询至多 256 个本地字面路径；JSON stdout，不生成上下文，见 [入选原因](selection-explanation.md) |
 | `--stdin0` | 显式读取 NUL 分隔的 UTF-8 文件列表，适配 Git `-z` |
-| `--style xml\|markdown\|json\|plain` | 默认 XML；默认文件名为 `repomix-output` 加对应的 `.xml`、`.md`、`.json`、`.txt` 扩展名 |
+| `-f, --format FORMAT` | `xml`、`md`、`json`、`txt`；也接受 `markdown`、`plain`，兼容 `--style`。默认 XML，默认文件名为 `repomix-output` 加对应扩展名 |
 | `--compress`, `--no-compress` | 开启或关闭语法树结构压缩，默认关闭 |
 | `--keep-full GLOBS` | 压缩时保留匹配文件原文；与 include 使用相同的根相对 glob，可重复追加 |
 | `--header-text TEXT` | 添加头部文字，最多 1 MiB UTF-8；空字符串清除 JSON 中的头部 |
@@ -42,13 +44,16 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--no-default-patterns` | 关闭内置忽略规则 |
 | `--no-security-check` | 关闭扫描，记录关闭状态并显示警告 |
 | `--token-count-encoding o200k_base` | 指定当前支持的编码 |
-| `--token-budget N` | 正整数预算；等于预算通过，超限保留完整输出并返回 1 |
-| `--split-output N`, `--no-split-output` | 每卷精确 token 上限，`-o` 是新目录；与 stdout、`-o -` 及普通预算冲突 |
+| `--budget N` | 正整数预算；等于预算通过，超限保留完整输出并返回 1；兼容 `--token-budget` |
+| `--split N`, `--no-split-output` | 每卷精确 token 上限，`-o` 是新目录；与 stdout、`-o -` 及普通预算冲突；兼容 `--split-output` |
 | `--report-json`, `--no-report-json` | stderr 改为单份 JSON 运行报告，显式报告覆盖 quiet，stdout 仍是文档 |
 | `--mcp` | 固定本地根目录，启动 stdio 服务；工具、资源与兼容版本见 [MCP](mcp.md) |
 | `--mcp-max-tokens N` | 主机授权的每卷 cap，默认 16,000；请求不能提高 |
 | `--mcp-max-output-bytes N` | 派生缓存上限，默认 16 MiB，主机最大 256 MiB |
 | `--mcp-max-volumes N` | 卷数上限，默认 64，最大 256；另有一个索引 |
+| `--webui` | 当前目录或指定目录作为授权根，启动本地浏览器工作台；见 [工作台](webui.md) |
+| `--webui-port PORT` | 工作台端口，默认 8765，范围 `1..65535` |
+| `--max-file-size N` | 正整数，单文件字节上限，默认 52,428,800（50 MiB） |
 | `--max-files N` | 非负；过滤后、读取前的普通候选数上限，默认 20,000 |
 | `--max-total-size N` | 非负原始读取字节上限，默认 209,715,200（200 MiB）；最大 2^53−1 |
 | `--top-files-len N` | 按文件正文 token 数降序显示前 N 个文件，默认 5；0 关闭 |
@@ -58,10 +63,11 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 | `--init` | 创建配置文件；已有文件不覆盖 |
 | `--parsable-style` | 兼容参数，不改变输出；JSON 始终生成合法 JSON，XML 始终遵循 XML 1.0 字符和转义规则 |
 | `--quiet`, `--verbose` | 互斥的诊断模式 |
-| `-h, --help` | 显示帮助 |
+| `-h, --help` | 显示常用任务与参数 |
+| `--help-all` | 显示完整参数，包括高级控制和兼容写法 |
 | `-v, --version` | 显示版本；`-v` 不是 verbose |
 
-值参数支持 `--key=value` 和分开传值，`-o=PATH` 也可用。以 `-` 开头的值须使用等号形式，输出值单独的 `-` 也可直接传入。短选项不能合并，也不接受 `-oPATH`。`--` 结束参数解析，可用于输入名以 `-` 开头的目录。CSV 只在花括号和字符类之外按逗号分项；项首尾空白会去除，空项报错。重复的标量参数取最后一个值，列表参数继续追加。
+值参数支持 `--key=value` 和分开传值，`-o=PATH` 也可用。以 `-` 开头的值须使用等号形式，输出值单独的 `-` 也可直接传入。短选项不能合并，也不接受 `-oPATH`。`--` 结束参数解析，可用于输入名以 `-` 开头的目录。CSV 只在花括号和字符类之外按逗号分项；项首尾空白会去除，空项报错。同一标量的新旧参数混写时也取最后一个值，列表参数继续追加。`md`、`txt` 只用于 CLI；JSON 继续使用 `markdown`、`plain`，字段名称保持不变。
 
 `--token-count-tree` 会将紧随其后的非选项参数作为阈值。目录应放在该选项之前，或用 `--token-count-tree -- directory` 分隔；也可使用 `--token-count-tree=0 directory`。两项统计参数只影响 stderr，`--quiet` 会隐藏它们，打包正文与预算不受影响。详见 [Token 分布与排名](tokenization.md#token-分布与排名)。
 
@@ -70,7 +76,7 @@ CLI 优先读取 `--config` 指定的文件，否则寻找输入根目录下的 
 ### 文件列表输入
 
 ```sh
-git ls-files -z | moon-repomix . --stdin0 --style markdown -o -
+git ls-files -z | moon-repomix --stdin0 -f md -o -
 ```
 
 stdin 仅由这两个 CLI 参数显式开启，配置文件不会隐式读取终端。原始输入上限为 8 MiB，接受可选 UTF-8 BOM，非法 UTF-8 或超限时退出且保留旧输出。两种模式互斥，也不能和 `--init` 组合；help/version 仍优先返回。

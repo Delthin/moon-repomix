@@ -1,17 +1,72 @@
 # moon-repomix
 
-把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。当前源码支持七类语言的 AST 骨架、全文/骨架混合、Git 差异与历史、精确预算分卷和固定本地根的只读 MCP。使用 MoonBit native 实现，提供 CLI、SDK 和本地浏览器工作台；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
+把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。使用 MoonBit native 实现，提供 CLI、SDK 和本地浏览器工作台；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
 
 ## 选择版本
 
 | 版本 | 可用能力与获取方式 |
 | --- | --- |
 | 已发行 **v0.3.0** | 四格式、MoonBit/JavaScript/TypeScript/Python 骨架、Git 差异和历史、公开远程仓库、精确 `o200k_base` 计数、stdin 文件列表。使用 [Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.3.0) 或 [Mooncakes 0.3.0](https://mooncakes.io/docs/Delthin/moon_repomix@0.3.0)，查阅 [固定版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/README.md)。 |
-| **当前源码，尚未发行** | 新增本地浏览器工作台、混合全文/骨架、模板、展示控制、Go/Rust/Java 骨架、精确分卷、JSON stderr、输入总量限制、只读 MCP 和入选原因查询。需要从源码构建；见 [场景](docs/scenarios.md)、[0.3 → 0.4 接口迁移预览](docs/migration.md) 与 [Unreleased](CHANGELOG.md#unreleased)。 |
+| **当前源码，尚未发行** | 新增本地浏览器工作台、命令简写、混合全文/骨架、模板、展示控制、Go/Rust/Java 骨架、精确分卷、JSON stderr、输入总量限制、只读 MCP 和入选原因查询。需要从源码构建；见 [迁移预览](docs/migration.md) 与 [Unreleased](CHANGELOG.md#unreleased)。 |
 
-当前源码的版本标识为 `0.4.0`，表中的正式下载仍为 v0.3.0。以下新接口以当前源码为准，问题报告请附构建 commit。
+当前源码的版本标识为 `0.4.0`，正式下载仍为 v0.3.0。以下简写和新增接口以当前源码为准，问题报告请附构建 commit。
 
-v0.3.0 在固定三仓库、六场景的 macOS CLI 对照中耗时减少约 31%–76%。新增 35 MB TypeScript 大库中，Native CLI 耗时更高、RSS 更低；本次常驻 MCP 重复打包和完整读取更快。各场景的版本、选项、全部样本和平台范围见 [性能测量](docs/performance.md)。
+## 安装与第一次运行
+
+从 [v0.3.0 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.3.0) 下载平台归档，用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 的相对位置，在解压目录运行：
+
+```sh
+./bin/moon-repomix /path/to/project
+```
+
+Windows PowerShell：
+
+```powershell
+.\bin\moon-repomix.exe "C:\path\to\project"
+```
+
+结果写到启动目录的 `repomix-output.xml`，终端显示文件数和精确 token 数。也可将 `bin` 加入 `PATH`，在要处理的项目目录直接运行 `moon-repomix`。归档运行不需要 MoonBit；本地打包和骨架压缩不需要 Git，差异、历史和远程获取需要系统 Git。
+
+### 最快上手
+
+体验当前源码需要固定的 MoonBit **0.10.15+943464bfa** 和平台 C 工具链，见 [工具链](docs/toolchain.md)。在仓库根目录运行：
+
+```sh
+moon update
+moon run src/cmd/moon-repomix --release -- examples/demo -f md -o -
+```
+
+终端显示示例源码和目录结构；正文写 stdout，统计与诊断写 stderr。项目默认使用 native，标准源码构建自动查找 `assets/` 资源。要将当前源码与资源一起安装到本地前缀：
+
+```sh
+moon run --target native scripts/install.mbtx "$HOME/.local"
+```
+
+Windows PowerShell 使用 `moon run --target native scripts/install.mbtx "$env:LOCALAPPDATA\moon-repomix"`。安装只需执行一次，将前缀的 `bin` 加入 `PATH` 后，日常使用下面的 `moon-repomix` 命令。移动安装目录时一并保留 `bin`、`share` 和 `LICENSES`。
+
+## 常用命令（当前源码）
+
+```sh
+# 当前目录，默认输出 repomix-output.xml
+moon-repomix
+
+# 导出 Markdown；加 --compress 提取骨架
+moon-repomix ./project -f md -o context.md
+moon-repomix ./project --compress -f md -o structure.md
+
+# 只选源码和 README，导出 JSON
+moon-repomix ./project --include 'src/**,README.md' -f json -o context.json
+
+# 检查单文档预算，或按每卷硬上限分卷
+moon-repomix ./project --budget 12000
+moon-repomix ./project --compress --split 12000 -f md -o review-parts
+```
+
+输入目录默认是当前目录。格式用 `-f` 指定：`xml`、`md`、`json`、`txt`；未指定时使用配置值或 XML。`-o -` 将正文写 stdout。`--budget` 超限仍保留完整输出并退出 **1**；`--split` 限制每卷的最终 token 数，`-o` 此时是必须不存在的新目录，索引另外计数。
+
+用 `moon-repomix --help` 查看常用任务，`--help-all` 查看全部参数。已有 `--style`、`--token-budget`、`--split-output` 继续可用；JSON 字段名称保持不变。Git 差异、远程仓库、stdin、保存常用配置等用法见 [CLI 按任务速查](docs/cli.md)，关键文件保留全文和自动化组合见 [使用场景](docs/scenarios.md)。
+
+输出和显式配置路径相对启动目录，自动配置位于输入根。普通输出文件会原子替换已有同名文件；失败时保留旧输出。分卷目标必须不存在。详见 [配置](docs/configuration.md) 与 [文件选择](docs/file-selection.md)。
 
 ## 浏览器工作台（当前源码）
 
@@ -19,83 +74,26 @@ v0.3.0 在固定三仓库、六场景的 macOS CLI 对照中耗时减少约 31%�
 
 ![编辑器工作台：选择目录、生成上下文、切换原文与结构输出、检查预算](assets/demo/webui.gif)
 
-[从当前源码安装](#最快上手)后，在要处理的项目目录运行：
+安装当前源码后，在要处理的项目目录运行：
 
 ```sh
 moon-repomix --webui
 ```
 
-也可在本仓库根目录直接启动，需要 [固定版本 MoonBit 与 C 工具链](docs/toolchain.md)；首次运行先执行 `moon update`：
+也可在本仓库根目录直接运行 `moon run src/cmd/moon-repomix --release -- --webui`。两种方式均默认处理当前目录，自动定位词表和页面资源；指定其他项目时使用 `moon-repomix ./project --webui`。
 
-```sh
-moon run src/cmd/moon-repomix --release -- --webui
-```
+打开 `http://127.0.0.1:8765`，在右侧选择授权目录、全文/骨架/混合策略及文件规则，点击“生成上下文”；左侧浏览结果文件，中间切换原文、处理后正文或完整 JSON，底部复制 CLI 或下载原始 JSON。
 
-两种方式均默认处理当前目录，自动定位词表和页面资源；指定其他项目时使用 `moon-repomix ./project --webui`。打开 `http://127.0.0.1:8765`，在右侧选择授权目录、全文/骨架/混合策略及文件规则，点击“生成上下文”；左侧浏览结果文件，中间切换原文、处理后正文或完整 JSON，底部复制 CLI 或下载原始 JSON。
-
-修改参数会将现有结果标为旧结果，下一次生成成功后才替换；预算超限仍保留完整输出。动图来自真实 Native 服务操作，三种模式的浏览器下载已与相同参数 CLI 输出逐字节核对。页面资源随当前源码安装提供，运行时不需要 Node.js；端口设置、输入限额与服务边界见 [工作台指南](docs/webui.md)。
-
-## 安装与第一次运行
-
-从 [v0.3.0 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.3.0) 下载平台归档，用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 的相对位置，在解压目录运行：
-
-```sh
-./bin/moon-repomix /path/to/project --style markdown -o context.md
-```
-
-Windows PowerShell：
-
-```powershell
-.\bin\moon-repomix.exe "C:\path\to\project" --style markdown -o context.md
-```
-
-也可将 `bin` 加入 `PATH`。归档运行不需要 MoonBit；普通本地打包和骨架压缩不需要 Git，差异、历史和远程获取需要系统 Git。
-
-### 最快上手
-
-运行当前源码需要固定的 MoonBit **0.10.15+943464bfa** 和平台 C 工具链，见 [工具链](docs/toolchain.md)。在仓库根目录运行：
-
-```sh
-moon update
-moon run src/cmd/moon-repomix --release -- examples/demo --style markdown --stdout
-```
-
-终端显示示例源码和目录结构；正文写 stdout，统计与诊断写 stderr。项目默认使用 native，标准源码构建会自动查找 `assets/` 资源。要将当前源码与资源一起安装到本地前缀：
-
-```sh
-moon run --target native scripts/install.mbtx "$HOME/.local"
-```
-
-Windows PowerShell 使用 `moon run --target native scripts/install.mbtx "$env:LOCALAPPDATA\moon-repomix"`。安装只需执行一次，将前缀的 `bin` 加入 `PATH` 后，日常使用 `moon-repomix --webui` 或普通打包命令。程序从 `../share/moon-repomix/` 寻找词表与 Unicode 数据，移动时一并保留。
-
-## 常用操作
-
-以下命令可用于 v0.3.0 和当前源码：
-
-```sh
-moon-repomix ./project --compress --style markdown -o structure.md
-moon-repomix ./project --include-diffs --include-logs --include-logs-count 20 -o review.xml
-moon-repomix ./project --include 'src/**/*.{mbt,ts,py}' --ignore '**/*_test.mbt' -o context.json --style json
-git ls-files -z | moon-repomix . --stdin0 --style markdown -o -
-moon-repomix ./project --token-budget 100000
-moon-repomix ./project --token-count-tree 100 --top-files-len 10
-moon-repomix --remote https://github.com/octocat/Hello-World.git --remote-branch master --style markdown -o remote.md
-```
-
-默认格式是 XML；四格式默认文件名为 `repomix-output.xml`、`.md`、`.json`、`.txt`。`-o -` 和 `--stdout` 将正文写 stdout；重定向时选输入根以外的路径，或显式忽略目标。`-o` 普通文件会原子替换已有同名文件，打包失败时保留旧输出；`--init` 创建配置且拒绝覆盖。
-
-`--stdin` 每行一个相对路径，`--stdin0` 使用 NUL 分隔，适合 Git `-z`。列表是字面文件名，空输入选零文件，仍受 include、ignore 和安全检查约束。配置合并顺序为默认值 → JSON → 显式 CLI；配置和输出路径相对进程 cwd，自动配置位于输入根。详见 [配置](docs/configuration.md) 与 [文件选择](docs/file-selection.md)。
-
-当前源码的三个完整用法见 [使用场景](docs/scenarios.md)：关键文件保留全文并加入评审模板、按精确预算分卷、通过 MCP 或 JSON 报告接入自动化。
+修改参数会将现有结果标为旧结果，下一次生成成功后才替换；预算超限仍保留完整输出。动图来自真实 Native 服务操作，三种模式的浏览器下载已与相同参数 CLI 输出逐字节核对。端口设置、输入限额与服务边界见 [工作台指南](docs/webui.md)。
 
 ## 输出、计数与安全
 
 - 默认保留完整正文；`--compress` 提取语法骨架，保留声明、类型、注释与结构。当前源码支持 MoonBit（含 `.mbti`）、JavaScript/TypeScript（含 JSX/TSX）、Python、Go、Rust、Java；其他语言或无精确 token 收益时保留原文。范围见 [仓库上下文](docs/context.md)。
 - 读取有效 UTF-8 普通文件，去除 UTF-8 BOM 并保留换行。默认单文件上限 50 MiB；当前源码另有 20,000 个过滤后普通候选、200 MiB 原始读取的总量限制。链接、二进制、无效 UTF-8 等跳过原因见 [错误指南](docs/errors.md)。
 - 默认扫描压缩前原文，命中时排除整个文件、Git 补丁或提交；模板命中则停止整个打包。扫描是启发式检测，分享前仍应审阅结果，详见 [安全边界](SECURITY.md) 和 [检测规则](docs/security.md)。
-- 对完整渲染字符串精确计算 `o200k_base` tokens，包含格式包装、模板与显示装饰。普通 `--token-budget` 超限仍输出全文，退出 **1**；正常完成退出 **0**。文件排名和目录统计不能代替最终预算。分卷的每卷硬上限与独立索引开销见 [分卷](docs/partition.md)。
+- 对完整渲染字符串精确计算 `o200k_base` tokens，包含格式包装、模板与显示装饰。文件排名和目录统计不能代替最终预算；分卷的独立索引开销见 [分卷](docs/partition.md)。
 
-打包与计数在内存中完成，token 预算不是内存配额。固定输入的测量方法、结果及平台范围见 [性能测量](docs/performance.md)。
+打包与计数在内存中完成，token 预算不是内存配额。v0.3.0 在固定三仓库、六场景的 macOS CLI 对照中耗时减少约 31%–76%；新增 35 MB TypeScript 大库中 Native CLI 耗时更高、RSS 更低。常驻 MCP 和其他场景的版本、选项、样本及平台范围见 [性能测量](docs/performance.md)。
 
 ## SDK
 
@@ -121,7 +119,7 @@ let result = @repomix.pack(options, runtime)
 
 ## 文档与贡献
 
-[工作台](docs/webui.md) · [场景](docs/scenarios.md) · [配置](docs/configuration.md) · [输出格式](docs/output.md) · [分卷](docs/partition.md) · [机器报告](docs/reports.md) · [MCP](docs/mcp.md) · [入选原因](docs/selection-explanation.md) · [分词](docs/tokenization.md) · [错误处理](docs/errors.md)
+[CLI 速查](docs/cli.md) · [工作台](docs/webui.md) · [场景](docs/scenarios.md) · [配置](docs/configuration.md) · [输出格式](docs/output.md) · [分卷](docs/partition.md) · [机器报告](docs/reports.md) · [MCP](docs/mcp.md) · [入选原因](docs/selection-explanation.md) · [分词](docs/tokenization.md) · [错误处理](docs/errors.md)
 
 [贡献指南](CONTRIBUTING.md) 说明定点测试、格式与接口更新、资源许可；[工具链](docs/toolchain.md) 说明本地构建和归档。[演示指南](docs/demo.md) 提供可保留产物的三步演示。[三平台 CI](https://github.com/Delthin/moon-repomix/actions/workflows/ci.yml) 覆盖 macOS arm64、Linux x64 和 Windows x64。
 
