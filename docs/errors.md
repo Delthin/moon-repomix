@@ -1,6 +1,6 @@
 # 错误与恢复
 
-当前源码 CLI 正常完成退出 **0**；查询路径被排除也可正常退出 0。捕获的配置、读取、资源、分卷、输出和取消错误退出 **1**。普通 `--token-budget` 超限同样退出 1，但完整文档已经输出，这与打包失败不同。
+CLI 正常完成退出 **0**；查询路径被排除也可正常退出 0。捕获的配置、读取、资源、分卷、输出和取消错误退出 **1**。普通 `--token-budget` 超限同样退出 1，但完整文档已经输出，这与打包失败不同。
 
 自动化使用 `--report-json`，先检查退出码、`status` 和 `publication`。报告格式见 [机器报告](reports.md)。以下是固定 CLI 类别；SDK 错误名不总与 CLI 相同，例如 SDK 的 `ContextSecurityFinding`、`InputLimitExceeded` 对应 CLI 的 `ContextSecurityError`、`InputLimitError`。
 
@@ -8,7 +8,7 @@
 | --- | --- |
 | `ConfigurationError` | 核对参数拼写、JSON 字段和互斥项；配置拒绝未知字段。确认运行版本支持新增选项。 |
 | `InputError` | 检查 stdin 列表编码、长度和字面相对路径；使用 `git ls-files -z` 配合 `--stdin0` 处理特殊文件名。 |
-| `SelectionError` | 检查输入根、字面路径、glob 和 ignore 文件；当前源码可用 `--explain-path` 定点查询。 |
+| `SelectionError` | 检查输入根、字面路径、glob 和 ignore 文件；可用 `--explain-path` 定点查询。 |
 | `ScanError` | 检查输入目录与普通文件是否可读，确认执行期间文件未移走；缩小输入以定位失败文件。 |
 | `InputLimitError` | 根据 `error.field` 缩小候选或读取量；核准资源后显式调整 `--max-files` 或 `--max-total-size`。0 不是无限。 |
 | `ContextTextError` | 根据 `error.field` 检查 header/instruction：有效 UTF-8、无 NUL、每段最多 1 MiB；检查指令是可读普通文件及 XML 可表示性。 |
@@ -27,7 +27,7 @@
 
 单文件过大、二进制、无效 UTF-8、链接或密钥命中等可作为跳过记录，而不停止整个打包；命中安全规则的 Git 补丁或提交也整项排除。检查 `skipped`、扫描摘要和查询结果，不能仅凭退出 0 推断所有输入都已包含。候选数和累计原始读取超限则停止整个操作，不能返回看似完整的部分结果。
 
-不支持的压缩语言或没有精确 token 收益时保留全文，不属于运行错误。当前源码的排除原因与查询范围见 [入选原因](selection-explanation.md)。
+不支持的压缩语言或没有精确 token 收益时保留全文，不属于运行错误。排除原因与查询范围见 [入选原因](selection-explanation.md)。
 
 ## 输出是否已经存在
 

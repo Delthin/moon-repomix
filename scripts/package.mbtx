@@ -59,6 +59,7 @@ async fn main {
     }
   }
   copy("README.md", stage + "/README.md")
+  copy("CHANGELOG.md", stage + "/CHANGELOG.md")
   copy("LICENSE", stage + "/LICENSE")
   for name in @fs.readdir("LICENSES") {
     if @fs.kind("LICENSES/" + name, follow_symlink=false) is Regular {

@@ -1,6 +1,6 @@
 # 精确 Token 分卷
 
-当前源码提供分卷库接口和 CLI 目录输出。已发布 v0.3.0 不包含本页接口。库调用返回字符串，CLI 可将相同结果发布到一个新目录。
+v0.4.0 提供分卷库接口和 CLI 目录输出。库调用返回字符串，CLI 可将相同结果发布到一个新目录。
 
 ```moonbit
 let runtime = @repomix.Runtime::load("assets/tokenizer-o200k_base.tiktoken")

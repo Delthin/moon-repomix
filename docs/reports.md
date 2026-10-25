@@ -1,6 +1,6 @@
 # 机器可读运行报告
 
-当前源码的 `--report-json` 将诊断通道切换为一份紧凑 JSON 和末尾 LF，位置是 stderr。stdout 仍只承载文档；分卷写目录时 stdout 为空。该开关优先于 `--quiet`，不改变打包、扫描、退出码或正文格式。显式 `--no-report-json` 恢复人类诊断。帮助和版本查询保持各自的 stdout 格式。
+`--report-json` 将诊断通道切换为一份紧凑 JSON 和末尾 LF，位置是 stderr。stdout 仍只承载文档；分卷写目录时 stdout 为空。该开关优先于 `--quiet`，不改变打包、扫描、退出码或正文格式。显式 `--no-report-json` 恢复人类诊断。帮助和版本查询保持各自的 stdout 格式。
 
 每份报告带 `schemaVersion: 1`、`status`、`exitCode`。成功打包还包含 `operation`、`publication`、`style`、`security`、`counts`、`output`、`limits`、`tokens` 和 `bytes`。`counts.acceptedFiles` 是扫描后接受的文件数，`skippedEntries` 包括目录和非文件条目；它们不是输入资源限额的计数器。`limits.maxFiles` 与十进制字符串 `maxTotalSize` 表示配置上限，不冒充实际使用量。token 和字节计量使用十进制字符串，避免 JSON 消费者丢失 64 位精度。
 

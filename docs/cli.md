@@ -1,6 +1,6 @@
 # CLI 按任务速查
 
-以下简写需要[安装当前源码](../README.md#最快上手)；已发行 v0.3.0 的用法见[固定版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/README.md)。安装后日常使用 `moon-repomix`，不用重复指定 native 或词表路径。
+[安装 v0.4.0](../README.md#安装与第一次运行) 后，日常使用 `moon-repomix`，程序自动定位配套资源。需要从旧版本升级时，查看 [迁移指南](migration.md)。
 
 ## 打包与选择格式
 

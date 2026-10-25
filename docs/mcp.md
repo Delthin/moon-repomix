@@ -1,6 +1,6 @@
 # MCP stdio
 
-当前源码提供本地只读 MCP 入口，复用普通打包与精确分卷 SDK。客户端取得概览后按 URI 读取需要的卷；用户运行服务不需要 Node。已发行 v0.3.0 尚未包含此入口。
+v0.4.0 提供本地只读 MCP 入口，复用普通打包与精确分卷 SDK。客户端取得概览后按 URI 读取需要的卷；用户运行服务不需要 Node。
 
 ## 启动
 
@@ -8,7 +8,7 @@
 moon-repomix /path/to/repository --mcp --compress --mcp-max-tokens 12000
 ```
 
-源码构建的二进制如未安装配套资源，额外传入 `--tokenizer-path /path/to/moon-repomix/assets/tokenizer-o200k_base.tiktoken`。在支持 stdio MCP 的客户端中配置同一命令和参数，例如：
+安装包和标准 native 源码构建自动定位配套资源。自定义资源布局时，使用 `--tokenizer-path /path/to/moon-repomix/assets/tokenizer-o200k_base.tiktoken`。在支持 stdio MCP 的客户端中配置同一命令和参数，例如：
 
 ```json
 {

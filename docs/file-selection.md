@@ -1,6 +1,6 @@
 # 文件选择
 
-当前源码的 CLI、Root 库与 MCP 可进一步返回输入/扫描/表示阶段的解释，见 [入选原因查询](selection-explanation.md)。本页的 `selection.explain` 只提供结构资格。
+CLI、Root 库与 MCP 可进一步返回输入/扫描/表示阶段的解释，见 [入选原因查询](selection-explanation.md)。本页的 `selection.explain` 只提供结构资格。
 
 包：`Delthin/moon_repomix/selection`。仅发现候选与读取规则，不打开候选正文；读取快照、二进制判断、安全扫描与输出提交由后续阶段负责。
 

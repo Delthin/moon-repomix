@@ -2,7 +2,7 @@
 
 默认使用 `123123213weqw/moon_scrub@0.5.2` 的 `ScanConfig::secrets_only()` 扫描压缩前的原始文本快照。发现密钥时排除整个文件；Git 补丁（含删除行）和提交消息另行扫描，命中时排除对应整个补丁或提交。诊断只保留规则、路径和位置。
 
-当前源码的头部文字和显式本地指令也使用同一扫描器，在远程获取、压缩和渲染前检查。模板命中时停止整个打包，错误只标明 `output.headerText` 或 `output.instructionFilePath`；文件输出尚未提交，stdout 尚未开始。显式 `--no-security-check` 同时关闭文件、Git 与模板扫描，CLI 仍按关闭状态显示警告。
+头部文字和显式本地指令也使用同一扫描器，在远程获取、压缩和渲染前检查。模板命中时停止整个打包，错误只标明 `output.headerText` 或 `output.instructionFilePath`；文件输出尚未提交，stdout 尚未开始。显式 `--no-security-check` 同时关闭文件、Git 与模板扫描，CLI 仍按关闭状态显示警告。
 
 ## 检测范围
 

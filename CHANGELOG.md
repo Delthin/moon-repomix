@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-25
+
 ### Added
 
 - 常用 CLI 简写 `-f` / `--format`、`--budget`、`--split`，格式接受 `md` / `txt`；默认帮助按常见任务组织，`--help-all` 展示完整参数。既有参数及 JSON 字段继续使用原语义。
@@ -37,5 +39,6 @@
 - 对齐默认排除、ignore 开关、自定义 glob 与精确磁盘拼写行为，修正跨平台字面路径选择。
 - 优化精确 tokenizer 的初始化、分词计数、文件选择和安全命中定位，减少文件处理中的定时器分配。
 
-[Unreleased]: https://github.com/Delthin/moon-repomix/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Delthin/moon-repomix/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.3.0

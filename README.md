@@ -2,18 +2,11 @@
 
 把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。使用 MoonBit native 实现，提供 CLI、SDK 和本地浏览器工作台；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
 
-## 选择版本
-
-| 版本 | 可用能力与获取方式 |
-| --- | --- |
-| 已发行 **v0.3.0** | 四格式、MoonBit/JavaScript/TypeScript/Python 骨架、Git 差异和历史、公开远程仓库、精确 `o200k_base` 计数、stdin 文件列表。使用 [Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.3.0) 或 [Mooncakes 0.3.0](https://mooncakes.io/docs/Delthin/moon_repomix@0.3.0)，查阅 [固定版本文档](https://github.com/Delthin/moon-repomix/blob/v0.3.0/README.md)。 |
-| **当前源码，尚未发行** | 新增本地浏览器工作台、命令简写、混合全文/骨架、模板、展示控制、Go/Rust/Java 骨架、精确分卷、JSON stderr、输入总量限制、只读 MCP 和入选原因查询。需要从源码构建；见 [迁移预览](docs/migration.md) 与 [Unreleased](CHANGELOG.md#unreleased)。 |
-
-当前源码的版本标识为 `0.4.0`，正式下载仍为 v0.3.0。以下简写和新增接口以当前源码为准，问题报告请附构建 commit。
+当前版本 **v0.4.0**，提供 [三平台安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.4.0) 和 [Mooncakes SDK](https://mooncakes.io/docs/Delthin/moon_repomix@0.4.0)。新增工作台、CLI 简写、混合全文/骨架、Go/Rust/Java 骨架、精确分卷和只读 MCP；完整变化见 [Changelog](CHANGELOG.md)，从 v0.3.0 升级见 [迁移指南](docs/migration.md)。
 
 ## 安装与第一次运行
 
-从 [v0.3.0 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.3.0) 下载平台归档，用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 的相对位置，在解压目录运行：
+从 [v0.4.0 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.4.0) 下载平台归档，用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 的相对位置，在解压目录运行：
 
 ```sh
 ./bin/moon-repomix /path/to/project
@@ -27,9 +20,9 @@ Windows PowerShell：
 
 结果写到启动目录的 `repomix-output.xml`，终端显示文件数和精确 token 数。也可将 `bin` 加入 `PATH`，在要处理的项目目录直接运行 `moon-repomix`。归档运行不需要 MoonBit；本地打包和骨架压缩不需要 Git，差异、历史和远程获取需要系统 Git。
 
-### 最快上手
+### 从源码运行
 
-体验当前源码需要固定的 MoonBit **0.10.15+943464bfa** 和平台 C 工具链，见 [工具链](docs/toolchain.md)。在仓库根目录运行：
+从源码构建需要固定的 MoonBit **0.10.15+943464bfa** 和平台 C 工具链，见 [工具链](docs/toolchain.md)。在仓库根目录运行：
 
 ```sh
 moon update
@@ -44,7 +37,7 @@ moon run --target native scripts/install.mbtx "$HOME/.local"
 
 Windows PowerShell 使用 `moon run --target native scripts/install.mbtx "$env:LOCALAPPDATA\moon-repomix"`。安装只需执行一次，将前缀的 `bin` 加入 `PATH` 后，日常使用下面的 `moon-repomix` 命令。移动安装目录时一并保留 `bin`、`share` 和 `LICENSES`。
 
-## 常用命令（当前源码）
+## 常用命令
 
 ```sh
 # 当前目录，默认输出 repomix-output.xml
@@ -68,13 +61,13 @@ moon-repomix ./project --compress --split 12000 -f md -o review-parts
 
 输出和显式配置路径相对启动目录，自动配置位于输入根。普通输出文件会原子替换已有同名文件；失败时保留旧输出。分卷目标必须不存在。详见 [配置](docs/configuration.md) 与 [文件选择](docs/file-selection.md)。
 
-## 浏览器工作台（当前源码）
+## 浏览器工作台
 
 工作台使用原生 HTML/CSS/JavaScript，通过本地 HTTP 接口调用 MoonBit native 引擎。目录浏览、源码读取、安全扫描、AST 压缩和最终 JSON 的精确 token 计数均由 Native 服务完成；浏览器负责配置、查看与下载。
 
 ![编辑器工作台：选择目录、生成上下文、切换原文与结构输出、检查预算](assets/demo/webui.gif)
 
-安装当前源码后，在要处理的项目目录运行：
+安装 v0.4.0 后，在要处理的项目目录运行：
 
 ```sh
 moon-repomix --webui
@@ -88,8 +81,8 @@ moon-repomix --webui
 
 ## 输出、计数与安全
 
-- 默认保留完整正文；`--compress` 提取语法骨架，保留声明、类型、注释与结构。当前源码支持 MoonBit（含 `.mbti`）、JavaScript/TypeScript（含 JSX/TSX）、Python、Go、Rust、Java；其他语言或无精确 token 收益时保留原文。范围见 [仓库上下文](docs/context.md)。
-- 读取有效 UTF-8 普通文件，去除 UTF-8 BOM 并保留换行。默认单文件上限 50 MiB；当前源码另有 20,000 个过滤后普通候选、200 MiB 原始读取的总量限制。链接、二进制、无效 UTF-8 等跳过原因见 [错误指南](docs/errors.md)。
+- 默认保留完整正文；`--compress` 提取语法骨架，保留声明、类型、注释与结构。支持 MoonBit（含 `.mbti`）、JavaScript/TypeScript（含 JSX/TSX）、Python、Go、Rust、Java；其他语言或无精确 token 收益时保留原文。范围见 [仓库上下文](docs/context.md)。
+- 读取有效 UTF-8 普通文件，去除 UTF-8 BOM 并保留换行。默认单文件上限 50 MiB；另有 20,000 个过滤后普通候选、200 MiB 原始读取的总量限制。链接、二进制、无效 UTF-8 等跳过原因见 [错误指南](docs/errors.md)。
 - 默认扫描压缩前原文，命中时排除整个文件、Git 补丁或提交；模板命中则停止整个打包。扫描是启发式检测，分享前仍应审阅结果，详见 [安全边界](SECURITY.md) 和 [检测规则](docs/security.md)。
 - 对完整渲染字符串精确计算 `o200k_base` tokens，包含格式包装、模板与显示装饰。文件排名和目录统计不能代替最终预算；分卷的独立索引开销见 [分卷](docs/partition.md)。
 
@@ -97,7 +90,7 @@ moon-repomix --webui
 
 ## SDK
 
-已发行模块为 [`Delthin/moon_repomix@0.3.0`](https://mooncakes.io/docs/Delthin/moon_repomix@0.3.0)。在调用项目的 `moon.mod` 中声明依赖，在 `moon.pkg` 导入：
+SDK 模块为 [`Delthin/moon_repomix@0.4.0`](https://mooncakes.io/docs/Delthin/moon_repomix@0.4.0)。在调用项目的 `moon.mod` 中声明依赖，在 `moon.pkg` 导入：
 
 ```moonbit
 import {
@@ -105,7 +98,7 @@ import {
 }
 ```
 
-在 `async fn` 中加载资源并打包，以下接口两版均可用：
+在 `async fn` 中加载资源并打包：
 
 ```moonbit
 let runtime = @repomix.Runtime::load("/absolute/share/moon-repomix/o200k_base.tiktoken")
@@ -115,7 +108,7 @@ let result = @repomix.pack(options, runtime)
 // result.document 提供规范模型；files / skipped / findings / security / budget 提供处理结果。
 ```
 
-词表同目录须有 `tokenizer-unicode-16.0.0.txt`，加载时校验两份资源的 SHA-256。`Runtime` 可复用于多次顺序打包；SDK 返回结果，不写输出文件。当前源码的 `pack_volumes`、`explain_selection`、新增选项与结构字段见 [迁移](docs/migration.md) 和 [生成接口](src/pkg.generated.mbti)。
+词表同目录须有 `tokenizer-unicode-16.0.0.txt`，加载时校验两份资源的 SHA-256。`Runtime` 可复用于多次顺序打包；SDK 返回结果，不写输出文件。`pack_volumes`、`explain_selection`、选项与结构字段见 [迁移](docs/migration.md) 和 [生成接口](src/pkg.generated.mbti)。
 
 ## 文档与贡献
 

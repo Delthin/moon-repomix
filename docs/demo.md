@@ -2,7 +2,7 @@
 
 ## 浏览器工作台
 
-从当前源码安装后运行 `moon-repomix . --webui`，打开终端显示的 loopback 地址。选择授权目录、生成混合上下文，在同一页面对照源码与骨架、查看完整文档预算并下载 JSON。[README 动图](../README.md#浏览器工作台当前源码) 记录了真实 Native 请求；[工作台指南](webui.md) 说明启动和资源限制。
+安装 v0.4.0 后运行 `moon-repomix --webui`，打开终端显示的 loopback 地址。选择授权目录、生成混合上下文，在同一页面对照源码与骨架、查看完整文档预算并下载 JSON。[README 动图](../README.md#浏览器工作台) 记录了真实 Native 请求；[工作台指南](webui.md) 说明启动和资源限制。
 
 ## 三步 CLI 演示
 

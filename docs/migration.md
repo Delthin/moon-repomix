@@ -1,16 +1,16 @@
-# 从 v0.3.0 到 0.4 接口的迁移预览
+# 从 v0.3.0 升级到 v0.4.0
 
-本页对照已发行的 **v0.3.0** 与**当前源码**，作为 0.4 的迁移准备。当前源码尚未发行，平台安装包与 Mooncakes 正式版本仍为 0.3.0；新增接口请通过本地源码使用，不把依赖版本直接改成尚未发行的 0.4。
+升级 CLI 时下载 [v0.4.0 安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.4.0)，使用 SDK 时将 `moon.mod` 中的 `Delthin/moon_repomix` 依赖更新到 `0.4.0`，再运行 `moon update`。
 
-对照依据是 v0.3.0 tag 与当前的 [CLI help](../src/cmd/moon-repomix/help.mbt)、[配置类型及默认值](../src/config/types.mbt)、[JSON 解析](../src/config/json.mbt) 和 [SDK 接口](../src/pkg.generated.mbti)。当前源码的清单及 `--version` 显示 0.4.0；正式发布仍为 v0.3.0，问题报告请同时记录 commit。
+本页对照 v0.3.0 与 v0.4.0 的 [CLI help](../src/cmd/moon-repomix/help.mbt)、[配置类型及默认值](../src/config/types.mbt)、[JSON 解析](../src/config/json.mbt) 和 [SDK 接口](../src/pkg.generated.mbti)。问题报告请附 `--version` 输出；自行构建时另附 commit。
 
 ## 保留现有用法，先检查新默认限制
 
 四种格式、默认 XML、显式 `--compress`、stdin 字面列表、include/ignore、安全扫描和普通单文档预算继续沿用。默认仍为全文，无模板、无显示行号、目标根相对路径，章节默认显示；单文件上限仍为 50 MiB。已有参数和 JSON 字段无须批量改名。
 
-当前源码的 CLI 推荐 `-f md`（兼容 `--style markdown`）、`--budget N`（兼容 `--token-budget`）、`--split N`（兼容 `--split-output`）；新旧拼法混写沿用后者覆盖。`md`、`txt` 是 CLI 简写，JSON 字段及 `markdown`、`plain` 值保持原样。`--help` 展示常用任务，完整参数使用 `--help-all`，见 [CLI 速查](cli.md)。
+v0.4.0 的 CLI 推荐 `-f md`（兼容 `--style markdown`）、`--budget N`（兼容 `--token-budget`）、`--split N`（兼容 `--split-output`）；新旧拼法混写沿用后者覆盖。`md`、`txt` 是 CLI 简写，JSON 字段及 `markdown`、`plain` 值保持原样。`--help` 展示常用任务，完整参数使用 `--help-all`，见 [CLI 速查](cli.md)。
 
-当前源码新增：
+v0.4.0 新增：
 
 | 项目 | CLI | JSON | SDK `Options` / 默认 |
 | --- | --- | --- | --- |
