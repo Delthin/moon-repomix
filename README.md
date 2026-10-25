@@ -19,14 +19,19 @@ v0.3.0 在固定三仓库、六场景的 macOS CLI 对照中耗时减少约 31%�
 
 ![编辑器工作台：选择目录、生成上下文、切换原文与结构输出、检查预算](assets/demo/webui.gif)
 
-在仓库根目录直接体验示例，需要 [固定版本 MoonBit 与 C 工具链](docs/toolchain.md)：
+[从当前源码安装](#最快上手)后，在要处理的项目目录运行：
 
 ```sh
-moon update
-moon run src/cmd/moon-repomix --target native --release -- examples/demo --webui --tokenizer-path assets/tokenizer-o200k_base.tiktoken
+moon-repomix --webui
 ```
 
-从当前源码安装后，可运行 `moon-repomix ./project --webui`。打开 `http://127.0.0.1:8765`，在右侧选择授权目录、全文/骨架/混合策略及文件规则，点击“生成上下文”；左侧浏览结果文件，中间切换原文、处理后正文或完整 JSON，底部复制 CLI 或下载原始 JSON。
+也可在本仓库根目录直接启动，需要 [固定版本 MoonBit 与 C 工具链](docs/toolchain.md)；首次运行先执行 `moon update`：
+
+```sh
+moon run src/cmd/moon-repomix --release -- --webui
+```
+
+两种方式均默认处理当前目录，自动定位词表和页面资源；指定其他项目时使用 `moon-repomix ./project --webui`。打开 `http://127.0.0.1:8765`，在右侧选择授权目录、全文/骨架/混合策略及文件规则，点击“生成上下文”；左侧浏览结果文件，中间切换原文、处理后正文或完整 JSON，底部复制 CLI 或下载原始 JSON。
 
 修改参数会将现有结果标为旧结果，下一次生成成功后才替换；预算超限仍保留完整输出。动图来自真实 Native 服务操作，三种模式的浏览器下载已与相同参数 CLI 输出逐字节核对。页面资源随当前源码安装提供，运行时不需要 Node.js；端口设置、输入限额与服务边界见 [工作台指南](docs/webui.md)。
 
@@ -52,16 +57,16 @@ Windows PowerShell：
 
 ```sh
 moon update
-moon run src/cmd/moon-repomix --target native --release -- examples/demo --style markdown --stdout --tokenizer-path assets/tokenizer-o200k_base.tiktoken
+moon run src/cmd/moon-repomix --release -- examples/demo --style markdown --stdout
 ```
 
-终端显示示例源码和目录结构；正文写 stdout，统计与诊断写 stderr。通过 `moon run` 执行 CLI 时显式传入词表。要将当前源码与资源一起安装到本地前缀：
+终端显示示例源码和目录结构；正文写 stdout，统计与诊断写 stderr。项目默认使用 native，标准源码构建会自动查找 `assets/` 资源。要将当前源码与资源一起安装到本地前缀：
 
 ```sh
 moon run --target native scripts/install.mbtx "$HOME/.local"
 ```
 
-Windows PowerShell 使用 `moon run --target native scripts/install.mbtx "$env:LOCALAPPDATA\moon-repomix"`。将前缀的 `bin` 加入 `PATH`；程序从 `../share/moon-repomix/` 寻找词表与 Unicode 数据，移动时一并保留。
+Windows PowerShell 使用 `moon run --target native scripts/install.mbtx "$env:LOCALAPPDATA\moon-repomix"`。安装只需执行一次，将前缀的 `bin` 加入 `PATH` 后，日常使用 `moon-repomix --webui` 或普通打包命令。程序从 `../share/moon-repomix/` 寻找词表与 Unicode 数据，移动时一并保留。
 
 ## 常用操作
 

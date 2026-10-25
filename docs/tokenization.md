@@ -23,7 +23,7 @@ pub fn Encoder::count(self : Encoder, text : String) -> Int
 
 `load` 在解析前校验两份资源的 SHA-256。每份资源通过同一个打开的文件句柄按最多 1 MiB 的块读取，缓冲区上限为原资源字节数加一；短文件及超长文件仍由摘要校验拒绝，解析使用同一份字节快照。读取结束、失败或取消时关闭句柄。词表直接从 ASCII 字节解析 Base64 token 与十进制 rank，验证顺序、重复项、完整条目数和全部 256 个单字节 token。相对路径和校验失败抛出 `ResourceError(String)`；文件系统错误、解码错误和取消向调用者传播。加载后可重复使用同一编码器，`encode`/`count` 不执行 I/O，也不修改共享状态。
 
-库由调用者提供资源路径；CLI 根据可执行文件位置定位安装资源。`moon build` 只构建程序。完整安装使用 `scripts/install.mbtx`；只需复制分词资源和许可时，可运行：
+库由调用者提供资源路径；CLI 根据可执行文件位置定位资源。标准 `_build/native/{debug,release}/build/cmd/moon-repomix/` 构建使用源码根的 `assets/tokenizer-o200k_base.tiktoken`，安装布局使用 `../share/moon-repomix/o200k_base.tiktoken`。路径解析以实际可执行文件为准，与工作目录无关；自定义构建位置可用 `--tokenizer-path` 覆盖。`moon build` 只构建程序。完整安装使用 `scripts/install.mbtx`；只需复制分词资源和许可时，可运行：
 
 ```sh
 moon run scripts/tokenizer-install-assets.mbtx --target native /absolute/repo /absolute/package/share/moon-repomix

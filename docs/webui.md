@@ -4,23 +4,25 @@
 
 ## 启动
 
-当前源码安装后运行：
+当前源码安装后，在要处理的项目目录运行：
 
 ```sh
-moon-repomix ./project --webui
+moon-repomix --webui
 ```
 
-打开终端显示的 `http://127.0.0.1:8765`。更换端口：
+默认使用当前目录；指定其他项目时运行 `moon-repomix ./project --webui`。打开终端显示的 `http://127.0.0.1:8765`。更换端口：
 
 ```sh
-moon-repomix ./project --webui --webui-port 8795
+moon-repomix --webui --webui-port 8795
 ```
 
-也可以直接从源码运行，在仓库根目录执行：
+也可以直接从源码运行，在本仓库根目录执行；首次运行先执行 `moon update`：
 
 ```sh
-moon run src/cmd/moon-repomix --target native --release -- . --webui --tokenizer-path assets/tokenizer-o200k_base.tiktoken
+moon run src/cmd/moon-repomix --release -- --webui
 ```
+
+项目默认使用 native。标准 `_build/native/{debug,release}/build/cmd/moon-repomix/` 中的 CLI 自动定位本仓库的 `assets/`，从其他工作目录启动该可执行文件也使用同一份资源。安装后的 CLI 使用 `share/moon-repomix/`；自定义构建目录可用 `--tokenizer-path` 指定词表。
 
 词表旁须有 `webui/index.html`、`webui/app.css` 和 `webui/app.js`。源码已经提供 `assets/webui/`；安装和平台归档会将三个文件一起放进 `share/moon-repomix/webui/`。移动安装目录时保留 `bin/` 与 `share/` 的相对位置。服务运行不需要 Node.js；按 Ctrl+C 停止。
 
@@ -57,7 +59,7 @@ token 数针对最终渲染 JSON，包含目录、包装和元数据。预算超
 ## 常见问题
 
 - **端口占用**：更换 `--webui-port`，在浏览器打开新地址。
-- **启动后找不到页面资源**：确认使用完整安装目录，或在源码命令中传入 `assets/tokenizer-o200k_base.tiktoken`；静态文件与词表放在上述相对位置。
+- **启动后找不到页面资源**：确认安装目录保留完整 `bin/`、`share/` 布局；源码使用上述标准构建位置。自定义构建目录可传入 `--tokenizer-path /absolute/repo/assets/tokenizer-o200k_base.tiktoken`，静态文件与词表放在上述相对位置。
 - **生成失败**：按页面提示缩小 Include、选择更小子目录或减少文件；修正后重新生成。409 表示引擎忙碌，413 表示资源超限。浏览器请求在 65 秒超时，但不表示后端任务已经取消，须稍后再试。旧结果不代表失败请求已成功。
 - **复制不可用**：界面会打开包含完整文本的手动复制窗口，不会静默丢弃正文。
 - **某个文件没有出现**：它可能被 ignore、文件类型或扫描排除。普通 CLI/SDK 的详细解释入口见 [入选原因](selection-explanation.md)。

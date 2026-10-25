@@ -83,10 +83,22 @@ pub async fn executable_path() -> String {
 }
 
 ///|
-/// Default installation layout: bin/moon-repomix and share/moon-repomix.
-pub async fn tokenizer_path() -> String {
-  let executable = executable_path()
+fn tokenizer_path_for_executable(executable : String, windows : Bool) -> String {
+  let comparable = if windows { executable.to_lower() } else { executable }
+  for profile in ["debug", "release"] {
+    let suffix = "/_build/native/\{profile}/build/cmd/moon-repomix/moon-repomix.exe"
+    if comparable.has_suffix(suffix) {
+      let root = executable[:executable.length() - suffix.length()].to_owned()
+      return join(root, "assets/tokenizer-o200k_base.tiktoken")
+    }
+  }
   join(parent(parent(executable)), "share/moon-repomix/o200k_base.tiktoken")
+}
+
+///|
+/// Resolve resources beside the installation or in the standard native source build.
+pub async fn tokenizer_path() -> String {
+  tokenizer_path_for_executable(executable_path(), is_windows())
 }
 
 ///|

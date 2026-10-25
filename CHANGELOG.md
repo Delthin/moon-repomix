@@ -18,6 +18,7 @@
 
 ### Changed
 
+- 标准 native 源码构建自动定位仓库内的词表和页面资源，`moon run` 启动 CLI 或工作台时可省略 `--tokenizer-path`。
 - 默认限制过滤后的普通候选为 20,000 个、源码原始读取为 200 MiB，可通过 `--max-files` / `--max-total-size`、JSON 和 SDK 显式调整。超过任一限额停止打包；0 表示零配额。
 - SDK 增加模板和输入限额错误、新选项及分卷/查询结果类型。机器 JSON 的 token/字节度量使用十进制字符串，详见 [迁移说明](docs/migration.md)。
 
