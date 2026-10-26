@@ -74,33 +74,18 @@ fn Encoder::encode_text(
   text : String,
   output : Array[Int32]?,
 ) -> Int32 {
-  let chars = text.to_array()
   let bytes = @utf8.encode(text)
   let mut start = 0
-  let mut byte_start = 0
   let mut count = 0
   // A call-local memo never sums separately tokenized documents: keys are exact
   // pre-tokenized byte pieces, whose BPE merges cannot cross piece boundaries.
   // Keep Encoder immutable/reentrant, and bound retained keys to 2 MiB.
   let counts : Map[Bytes, Int32] = Map([])
-  while start < chars.length() {
-    let end = self.piece_end(chars, start)
-    let mut byte_end = byte_start
-    for i in start..<end {
-      let cp = chars[i].to_int()
-      byte_end += if cp < 0x80 {
-        1
-      } else if cp < 0x800 {
-        2
-      } else if cp < 0x10000 {
-        3
-      } else {
-        4
-      }
-    }
+  while start < bytes.length() {
+    let end = self.piece_end(bytes, start)
     // The immutable UTF-8 snapshot supplies borrowed slices for every rank
     // lookup; neither pre-tokenized pieces nor candidate merges copy bytes.
-    let piece = bytes[byte_start:byte_end]
+    let piece = bytes[start:end]
     if output is None {
       if piece.length() == 1 {
         // Loading validates that every possible single byte is a rank.
@@ -118,7 +103,6 @@ fn Encoder::encode_text(
       count += self.encode_piece(piece, output)
     }
     start = end
-    byte_start = byte_end
   }
   count
 }

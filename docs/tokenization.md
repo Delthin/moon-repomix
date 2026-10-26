@@ -53,7 +53,9 @@ CLI 默认在 stderr 显示正文 token 数最多的 5 个文件，包含相对�
 
 BPE 核心改编自 `howtomakeaname/tokenizers-moonbit@0.16.3`，保留链接符号、优先队列、过期合并失效及最左优先规则。原公开模型使用 HF pair-merges、字符串词表和字节映射；本项目的 `src/metrics/bpe.mbt` 改为原始 UTF-8 字节区间和 OpenAI `Map[Bytes, Int]` ranks，通过区间端点及链接判断堆记录是否失效。链接字段存放于连续整数数组，rank 查询借用同一 UTF-8 快照的区间，省去逐片段和候选合并的字节复制；词表加载按已知条目数预分配哈希表容量。较低 rank 优先，同 rank 时合并最左侧，返回原始 OpenAI rank ID。
 
-`src/metrics/pretokenize.mbt` 实现参考 o200k 正则的有序分支，包括贪婪与回溯、缩写、Unicode 空白、CR/LF 和每组三个数字的限制。使用完整 Unicode 数据中的 Lu/Ll/Lt/Lm/Lo/M/N 类别及补充平面；M 包含 Mn/Mc/Me，N 包含 Nd/Nl/No。不区分大小写的缩写包含长 s（`ſ`），空白采用 Unicode White_Space 属性。
+`src/metrics/pretokenize.mbt` 在整文的一份 UTF-8 快照上直接扫描并返回字节边界，BPE 借用原快照切片；不再建立整文 `Array[Char]`，也不再逐片重遍历标量计算字节终点。ASCII 直接读取单字节，非 ASCII 按需解码当前标量，数字块及空白回退仍按完整标量推进。扫描实现参考 o200k 正则的有序分支，包括贪婪与回溯、缩写、Unicode 空白、CR/LF 和每组三个数字的限制。使用完整 Unicode 数据中的 Lu/Ll/Lt/Lm/Lo/M/N 类别及补充平面；M 包含 Mn/Mc/Me，N 包含 Nd/Nl/No。不区分大小写的缩写包含长 s（`ſ`），空白采用 Unicode White_Space 属性。
+
+字节扫描器接收 `@utf8.encode` 生成的合法快照。`count` 的精确片段 memo 仅在一次调用内使用，最多保存 8,192 条、每条不超过 256 字节，键总量不超过 2 MiB；编码器本身保持不可变、可重入。
 
 选择 **Unicode 16.0.0** 是为了匹配参考版本：tiktoken 0.14.0 声明 `fancy-regex 0.19.0` 与 `regex 1.13.1`，后者的[类别表](https://github.com/rust-lang/regex/blob/1.13.1/regex-syntax/src/unicode_tables/general_category.rs)和 [White_Space 表](https://github.com/rust-lang/regex/blob/1.13.1/regex-syntax/src/unicode_tables/perl_space.rs)采用该版本。发布 wheel 的完整 ID 对比也验证了这一选择。
 
@@ -81,9 +83,9 @@ BPE 核心改编自 `howtomakeaname/tokenizers-moonbit@0.16.3`，保留链接符
 - 16,390 个类别区间内外边界探针，八组固定种子的 2,048 标量混合样例，以及 4,096 个空格、8,192 字节 BPE 片段和长换行序列。
 - 编码器复用、片段计数不可相加、相对路径拒绝、两份资源校验失败、缺失文件、资源迁移及初始化取消。
 
-另有一组白盒测试将完整 199,998 条词表逐条与原 UTF-8/split、core Base64 和 `parse_int` 参考路径核对，并检查字节解析器的格式拒绝及有界读取。
+白盒测试将完整 199,998 条词表逐条与原 UTF-8/split、core Base64 和 `parse_int` 参考路径核对，并检查字节解析器的格式拒绝及有界读取。UTF-8 预切分另以明确的正则分片边界检查可选前缀回退、类别交叠、多字节数字、`ſ` 缩写、Unicode 空白回退及标点后缀；显式 UTF-8 字节覆盖 1–4 字节宽度转换、BOM、非字符码点及最大标量，并检查合法与非法代理项构造。
 
-期望值由已发布的 tiktoken wheel 生成。`scripts/tokenizer-golden.mbtx` 通过 Python Fire CLI 调用 `tiktoken.get_encoding("o200k_base").encode_ordinary`，先核对参考版本。复现时准备独立的开发工具目录：
+黄金数据的期望值由已发布的 tiktoken wheel 生成。`scripts/tokenizer-golden.mbtx` 通过 Python Fire CLI 调用 `tiktoken.get_encoding("o200k_base").encode_ordinary`，先核对参考版本。复现时准备独立的开发工具目录：
 
 ```sh
 uv pip install --python 3.12 --target /absolute/reference tiktoken==0.14.0 fire==0.7.1

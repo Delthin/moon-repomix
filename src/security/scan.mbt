@@ -60,10 +60,7 @@ pub fn scan(
     }
     offset += width
   }
-  let hits = @moon_scrub.scan_with_config(
-    text,
-    @moon_scrub.ScanConfig::secrets_only(),
-  )
+  let hits = scan_credentials(text)
   if hits.is_empty() {
     return []
   }
@@ -112,6 +109,18 @@ pub fn scan(
     }
   }
   out
+}
+
+///|
+fn scan_credentials(text : String) -> Array[@moon_scrub.Finding] {
+  // All seven private-key headers in pinned moon_scrub 0.5.2 contain this
+  // exact, case-sensitive prefix. Its absence proves that this family cannot
+  // produce a finding; the full text still reaches every other detector.
+  let config = @moon_scrub.ScanConfig::secrets_only()
+  @moon_scrub.scan_with_config(text, {
+    ..config,
+    detect_private_key: text.contains("-----BEGIN "),
+  })
 }
 
 ///|

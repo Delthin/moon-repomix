@@ -37,14 +37,14 @@ fn read_categories(source : String) -> FixedArray[Byte] raise {
 }
 
 ///|
-fn Encoder::category(self : Encoder, c : Char) -> Int32 {
-  self.categories[c.to_int()].to_int()
+fn Encoder::category(self : Encoder, cp : Int32) -> Int32 {
+  self.categories[cp].to_int()
 }
 
 ///|
 // Unicode White_Space, not the host language's whitespace approximation.
-fn is_space(c : Char) -> Bool {
-  match c.to_int() {
+fn is_space(cp : Int32) -> Bool {
+  match cp {
     0x09..<=0x0D
     | 0x20
     | 0x85
