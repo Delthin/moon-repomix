@@ -54,7 +54,7 @@ async test "pipeline teardown releases native leases after input failure and can
       false,
     )
   }
-  assert_true(pipeline.active is Some(_))
+  assert_true(pipeline.has_active())
   let cancelled = @async.with_timeout_opt(1, async fn() {
     defer pipeline.close()
     @async.sleep(50)

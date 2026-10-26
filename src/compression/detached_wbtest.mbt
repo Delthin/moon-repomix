@@ -39,11 +39,13 @@ async fn check_detached_batches() -> Unit {
       let planned = ticket.collect()
       assert_false(planner.busy)
       assert_true(ticket.finished)
+      assert_true(ticket.is_ready())
       // Full four-job submission proves native leases and active state were
       // released, not merely made to look idle. Do not collect the next batch
       // until after materializing the old one.
       let next = planner.submit(batch)
       assert_true(planner.busy)
+      assert_true(ticket.is_ready()) // never reads the next batch's state
       batch[0] = { path: "replaced.txt", text: "not the original source", }
       try ticket.collect() catch {
         Finished => ()
@@ -112,6 +114,7 @@ async fn check_detached_fallbacks_and_errors() -> Unit {
   exposed[0].ranges.push({ start_line: 999, end_line: 999, })
   assert_eq(planned.materialize(), expected)
   let empty_ticket = planner.submit([])
+  assert_true(empty_ticket.is_ready())
   let empty = empty_ticket.collect()
   let fallback_ticket = planner.submit([
     oversize,
@@ -138,6 +141,7 @@ async fn check_detached_fallbacks_and_errors() -> Unit {
   ignore(guarded.collect())
   let closed_ticket = planner.submit([source])
   planner.close()
+  assert_true(closed_ticket.is_ready())
   try closed_ticket.collect() catch {
     Closed => ()
     err => raise err

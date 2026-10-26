@@ -185,6 +185,13 @@ pub fn Planner::submit(
 }
 
 ///|
+/// Nonblocking readiness or terminal-state hint. Collection still checks
+/// Finished/Closed/Busy; a consumed ticket never inspects a later batch.
+pub fn BatchTicket::is_ready(self : BatchTicket) -> Bool {
+  self.finished || self.planner.closed || pool_done(self.planner.handle)
+}
+
+///|
 /// Wait without blocking the event loop, copy all wire plans into owned Bytes,
 /// then release the native batch without materializing text/ranges.
 /// Cancellation closes this planner and joins all workers before propagating.

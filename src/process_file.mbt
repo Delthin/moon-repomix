@@ -1,18 +1,23 @@
 ///|
-// Keep token acceptance, metadata and file statistics identical for serial and
-// worker-produced outlines. Call in the original selection order.
-fn record_file_result(
+priv struct ProcessedFile {
+  file : @document.File
+  stats : FileStats
+  transform : Json?
+}
+
+///|
+// Token acceptance is independent of completion order. The pipeline publishes
+// these immutable results in the original selection order.
+fn process_file_result(
   path : String,
   snapshot : @input.Snapshot,
   original_tokens : Int32,
   outcome : @compression.Outcome?,
   counter : @metrics.CountSession,
-  accepted : Array[@document.File],
-  files : Array[FileStats],
-  transforms : Array[Json],
-) -> Unit {
+) -> ProcessedFile {
   let mut text = snapshot.text
   let mut tokens = original_tokens
+  let mut transform : Json? = None
   if outcome is Some(result) {
     let compressed_tokens = if result.applied {
       counter.count(result.text)
@@ -41,7 +46,7 @@ fn record_file_result(
       None => Json::null()
       Some(name) => Json(name)
     }
-    transforms.push({
+    transform = Some({
       "path": path,
       "language": language,
       "applied": applied,
@@ -51,6 +56,9 @@ fn record_file_result(
       "outputTokens": tokens,
     })
   }
-  accepted.push({ path, text, })
-  files.push({ path, disk_bytes: snapshot.disk_bytes, tokens, original_tokens, })
+  {
+    file: { path, text, },
+    stats: { path, disk_bytes: snapshot.disk_bytes, tokens, original_tokens, },
+    transform,
+  }
 }

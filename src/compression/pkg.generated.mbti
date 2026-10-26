@@ -23,6 +23,7 @@ pub fn PlannerError::to_repr(Self) -> @debug.Repr
 type BatchTicket
 pub async fn BatchTicket::collect(Self) -> PlannedBatch
 pub async fn BatchTicket::finish(Self) -> Array[Outcome]
+pub fn BatchTicket::is_ready(Self) -> Bool
 
 pub(all) struct LineRange {
   start_line : Int

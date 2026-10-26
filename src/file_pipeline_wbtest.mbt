@@ -40,8 +40,16 @@ async test "bounded source pipeline preserves serial bodies, metadata order and 
       { text, disk_bytes: @utf8.encode(text).length() + bom_bytes, bom_bytes, },
       kept_full,
     )
-    assert_true(pipeline.pending.length() < 4)
-    assert_true(pipeline.pending_bytes <= 16 * 1024 * 1024)
+    assert_true(pipeline.lanes.length() <= 3)
+    assert_true(pipeline.active_bytes <= 16 * 1024 * 1024)
+    let mut accounted = 0
+    for lane in pipeline.lanes {
+      if lane.active is Some(active) {
+        accounted += active.bytes
+      }
+    }
+    assert_eq(pipeline.active_bytes, accounted)
+    assert_true(accepted.is_empty())
   }
   pipeline.flush()
   assert_eq(accepted.length(), sources.length())
@@ -82,10 +90,11 @@ async test "bounded source pipeline preserves serial bodies, metadata order and 
       assert_true(ranges.is_empty())
     }
   }
-  assert_eq(pipeline.pending.length(), 0)
-  assert_eq(pipeline.pending_bytes, 0)
+  assert_true(!pipeline.has_active())
+  assert_eq(pipeline.active_bytes, 0)
+  assert_true(pipeline.completed.is_empty())
   pipeline.close()
-  assert_true(pipeline.planner is None)
+  assert_true(pipeline.lanes.is_empty())
 
   // Synthetic byte weights exercise queue boundaries without allocating large
   // fixtures. Public snapshot byte/UTF-8 accuracy is tested by input/scan tests.
@@ -108,15 +117,9 @@ async test "bounded source pipeline preserves serial bodies, metadata order and 
         { text, disk_bytes: weights[i] * 1024 * 1024, bom_bytes: 0, },
         false,
       )
-      assert_true(weighted.pending_bytes <= 16 * 1024 * 1024)
-      assert_true(weighted.pending.length() <= 4)
-      if i == 1 && weights[0] == 8 {
-        assert_true(weighted.pending.is_empty())
-      }
-    }
-    assert_eq(weighted.pending.length(), 1)
-    if weighted.planner is Some(_) {
-      assert_true(weighted.active is Some(_))
+      assert_true(weighted.active_bytes <= 16 * 1024 * 1024)
+      assert_true(weighted.lanes.length() <= 3)
+      assert_true(weighted_output.is_empty())
     }
     weighted.flush()
     weighted.close()
@@ -124,6 +127,42 @@ async test "bounded source pipeline preserves serial bodies, metadata order and 
     for i in 0..<weights.length() {
       assert_eq(weighted_output[i].path, "weighted-\{i}.ts")
     }
+  }
+
+  // Completion order is deliberately reversed independently of OS scheduling.
+  let reversed : Array[@document.File] = []
+  let reversed_files : Array[FileStats] = []
+  let reversed_records : Array[Json] = []
+  let reorder = FilePipeline::new(
+    runtime.encoder.session(),
+    true,
+    reversed,
+    reversed_files,
+    reversed_records,
+  )
+  defer reorder.close()
+  for ordinal in [2, 0, 1] {
+    let text = "value-\{ordinal}"
+    reorder.record_serial({
+      ordinal,
+      path: "entry-\{ordinal}.txt",
+      snapshot: { text, disk_bytes: @utf8.encode(text).length(), bom_bytes: 0, },
+      kept_full: true,
+    })
+  }
+  reorder.flush()
+  reorder.flush()
+  assert_eq(reversed.length(), 3)
+  assert_eq(reversed_files.length(), 3)
+  assert_eq(reversed_records.length(), 3)
+  for i in 0..<3 {
+    assert_eq(reversed[i].path, "entry-\{i}.txt")
+    assert_eq(reversed[i].text, "value-\{i}")
+    assert_eq(reversed_files[i].path, "entry-\{i}.txt")
+    guard reversed_records[i] is { "path": String(path), .. } else {
+      fail("missing reordered path")
+    }
+    assert_eq(path, "entry-\{i}.txt")
   }
 
   let raw : Array[@document.File] = []
@@ -143,11 +182,11 @@ async test "bounded source pipeline preserves serial bodies, metadata order and 
       { text, disk_bytes: @utf8.encode(text).length(), bom_bytes: 0, },
       false,
     )
-    assert_true(raw_pipeline.pending.is_empty())
+    assert_true(raw_pipeline.lanes.is_empty())
+    assert_eq(raw_pipeline.active_bytes, 0)
   }
   raw_pipeline.flush()
-  assert_true(!raw_pipeline.planner_attempted)
-  assert_true(raw_pipeline.planner is None)
+  assert_true(raw_pipeline.lanes.is_empty())
   assert_true(raw_records.is_empty())
   for i in 0..<sources.length() {
     let (path, text, _) = sources[i]
