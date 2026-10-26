@@ -5,6 +5,7 @@
 struct Encoder {
   ranks : Map[Bytes, Int32]
   categories : FixedArray[Byte]
+  native : NativeCounter?
 }
 
 ///|
@@ -41,9 +42,14 @@ pub async fn Encoder::load(path : String) -> Encoder {
     unicode_bytes, "7676ab755a41ef82108460238569e60ad65c191ddafe61b36c6765ec1353f293",
     "Unicode categories",
   )
+  // Preserve all original format validation before constructing from the same
+  // digest-checked raw snapshots. The C side copies, never retains these bytes.
+  let ranks = read_ranks(ranks_bytes)
+  let categories = read_categories(@utf8.decode(unicode_bytes))
   {
-    ranks: read_ranks(ranks_bytes),
-    categories: read_categories(@utf8.decode(unicode_bytes)),
+    ranks,
+    categories,
+    native: Some(native_counter_new(ranks_bytes, unicode_bytes)),
   }
 }
 
@@ -111,5 +117,13 @@ fn Encoder::encode_text(
 /// Count one complete text. Counts of separate fragments are not additive:
 /// callers must count the final rendered document for an exact total.
 pub fn Encoder::count(self : Encoder, text : String) -> Int32 {
+  if self.native is Some(counter) {
+    // Keep strict UTF-16 rejection (including unsafe surrogate constructions)
+    // in the existing encoder. No readonly MoonBit object is mutated by C.
+    let count = native_counter_count(counter, @utf8.encode(text))
+    if count >= 0 {
+      return count
+    }
+  }
   self.encode_text(text, None)
 }

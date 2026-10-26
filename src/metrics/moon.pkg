@@ -20,6 +20,11 @@ import {
   "moonbitlang/async",
   "moonbitlang/core/env",
   "moonbitlang/core/encoding/base64",
+  "moonbitlang/core/json",
 } for "wbtest"
 
 supported_targets = "native"
+
+options(
+  "native-stub": [ "native_counter.c", "native_counter_ffi.c" ],
+)

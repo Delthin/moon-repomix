@@ -31,7 +31,7 @@ moon run scripts/tokenizer-install-assets.mbtx --target native /absolute/repo /a
 
 该辅助脚本校验并复制两份运行资源及许可，重跑会覆盖对应文件，保留其他文件。`tokenizer-cases.json`、`tokenizer-golden.json` 是开发夹具。黄金 JSON 将 U+FFFE/U+FFFF 写为 `\ufffe`/`\uffff`，解析后的字符串及 token ID 不变，JSON 文件本身可作为 XML 正文。
 
-最终 token 总数须对完整渲染文档一次编码。BPE 和预切分可能跨拼接边界变化，因此各片段计数相加不能代替总数。`count` 与 `encode` 共用预切分、合并顺序和 rank 规则，只累计合并后的符号数，省去完整 ID 数组及最终 rank 回查。
+最终 token 总数须对完整渲染文档一次编码。BPE 和预切分可能跨拼接边界变化，因此各片段计数相加不能代替总数。`encode` 保留 MoonBit 完整 ID 路径；`count` 使用私有单线程 C 内核，以同样的预切分、合并顺序和 rank 规则只累计符号数，省去完整 ID 数组及最终 rank 回查。旧 MoonBit count 保留为精确参考与保守回退路径，公开接口不变。
 
 ## Token 分布与排名
 
@@ -55,7 +55,20 @@ BPE 核心改编自 `howtomakeaname/tokenizers-moonbit@0.16.3`，保留链接符
 
 `src/metrics/pretokenize.mbt` 在整文的一份 UTF-8 快照上直接扫描并返回字节边界，BPE 借用原快照切片；不再建立整文 `Array[Char]`，也不再逐片重遍历标量计算字节终点。ASCII 直接读取单字节，非 ASCII 按需解码当前标量，数字块及空白回退仍按完整标量推进。扫描实现参考 o200k 正则的有序分支，包括贪婪与回溯、缩写、Unicode 空白、CR/LF 和每组三个数字的限制。使用完整 Unicode 数据中的 Lu/Ll/Lt/Lm/Lo/M/N 类别及补充平面；M 包含 Mn/Mc/Me，N 包含 Nd/Nl/No。不区分大小写的缩写包含长 s（`ſ`），空白采用 Unicode White_Space 属性。
 
-字节扫描器接收 `@utf8.encode` 生成的合法快照。`count` 的精确片段 memo 仅在一次调用内使用，最多保存 8,192 条、每条不超过 256 字节，键总量不超过 2 MiB；编码器本身保持不可变、可重入。
+两条路径的字节扫描器均接收 `@utf8.encode` 生成的合法快照。不会把非法 UTF-16 代理项替换成近似文本：合法代理对正常编码，孤立或错位代理项保留原 panic 行为。
+
+### 私有 native count 内核
+
+`src/metrics/native_counter.c`、`src/metrics/native_pretokenize.h` 覆盖整个 count 热路径，而非只替换词表 lookup：
+
+- `load` 先完成原有摘要和 MoonBit 格式校验，再把**同一份原始字节快照**借用给 C。C 复制出 token arena、连续 rank 偏移表、524,288 槽开放寻址索引及每码点 4 bit 的 Unicode 16 类别表；不借用 MoonBit Map 的内部表示，不保留资源 bytes 指针。rank 0 和含 NUL 的键都按长度精确比较。
+- UTF-8 扫描保持有序分支、完整标量推进和原有回溯。BPE 使用连续链接节点和索引数组最小堆；每个存活左符号至多一个候选，更新相邻项而不积累过期记录。比较顺序为 rank、左字节位置；较低 rank、最左合并优先。
+- scratch 在一次 count 内按需增长并复用，每个容量槽 24 字节（五个 32-bit 节点字段加一个堆位置），容量向上取 2 的幂。单个片段上限 1 MiB，因此 scratch 上限 24 MiB。超过该界限的非直接命中片段请求完整 MoonBit count 回退，不返回部分结果。
+- 平坦精确 memo 按输入大小延迟分配，最多 8,192 键、16,384 索引槽、每键 256 字节、键 payload 总量不超过 2 MiB。hash 冲突后仍比较长度和全部字节；饱和或超长键跳过缓存，计数不变。memo 分配失败也只禁用缓存。
+- 所有 C-owned 分配检查失败与乘法溢出；资源构建或 scratch 失败、不可表示长度请求旧路径精确回退，不把失败当作 0 或近似值。C 每次返回（含失败）均释放 scratch 和 memo；handle 没有跨调用可变缓存。
+- `src/metrics/native_counter_ffi.c` 使用 external object finalizer 释放 C-owned 表，不释放运行时容器。FFI 参数全部显式 borrow；不保存调用参数，也不对 readonly MoonBit 对象隐藏写入。编码器共享的表保持不可变，复用不累积状态。
+
+MoonBit Map 与类别表仍供 `encode`、旧 count 和强差分使用；C count 热路径不经过通用 Map 或逐合并的 RC 对象操作。
 
 选择 **Unicode 16.0.0** 是为了匹配参考版本：tiktoken 0.14.0 声明 `fancy-regex 0.19.0` 与 `regex 1.13.1`，后者的[类别表](https://github.com/rust-lang/regex/blob/1.13.1/regex-syntax/src/unicode_tables/general_category.rs)和 [White_Space 表](https://github.com/rust-lang/regex/blob/1.13.1/regex-syntax/src/unicode_tables/perl_space.rs)采用该版本。发布 wheel 的完整 ID 对比也验证了这一选择。
 
@@ -84,6 +97,23 @@ BPE 核心改编自 `howtomakeaname/tokenizers-moonbit@0.16.3`，保留链接符
 - 编码器复用、片段计数不可相加、相对路径拒绝、两份资源校验失败、缺失文件、资源迁移及初始化取消。
 
 白盒测试将完整 199,998 条词表逐条与原 UTF-8/split、core Base64 和 `parse_int` 参考路径核对，并检查字节解析器的格式拒绝及有界读取。UTF-8 预切分另以明确的正则分片边界检查可选前缀回退、类别交叠、多字节数字、`ſ` 缩写、Unicode 空白回退及标点后缀；显式 UTF-8 字节覆盖 1–4 字节宽度转换、BOM、非字符码点及最大标量，并检查合法与非法代理项构造。
+
+新增五组 native 白盒测试直接检查 C 返回值，不能由公开 fallback 掩盖失败：全部 104 组独立 ID goldens 同时核对 C count、旧 encode/count 与逐片字节边界；覆盖固定种子混合文本、补充标量、NUL、正则优先级、长空白/标点/BPE、256 字节键边界、8,400 个不同片段及重复、handle 复用、超限与不可用 handle 的精确 fallback、原生路径非法代理项 panic。原有十组测试保持原断言。
+
+`src/metrics/native_counter_sanitize_test.c` 是独立 C 单元驱动，不链接进产品。它对真实内核和 FFI 执行 ASan/UBSan：穷举构建和调用内各个 C-owned 分配失败点；与独立的逐轮全候选重算算法比较 4,096 个固定样例；专门构造 rank 0/左侧 tie、强制 memo hash 冲突、8,192 个 256 字节键填满 2 MiB payload；检查 scratch 增长/边界、不可变表指纹，以及 16 次真实 external object 的资源提前释放、重复 borrow、最终 finalizer。分配跟踪最终必须为 0。可在源码根执行（`MOON_HOME` 指向匹配版本的工具链）：
+
+```sh
+mkdir -p _build/native-counter-evidence
+clang -std=c11 -O1 -g -fno-omit-frame-pointer \
+  -fsanitize=address,undefined -fno-sanitize-recover=all -Wall -Wextra -Werror \
+  -I"$MOON_HOME/include" src/metrics/native_counter_sanitize_test.c \
+  "$MOON_HOME/lib/runtime/runtime.c" -o _build/native-counter-evidence/sanitize-counter
+ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 \
+  UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+  _build/native-counter-evidence/sanitize-counter
+```
+
+驱动单独编译使用系统分配器的运行时，不改写工具链或共享 runtime object。macOS 此命令不启用 LeakSanitizer；C-owned 泄漏通过分配跟踪与实际 finalizer 验证，不把它报告为全进程 LSan 检查。本单元不包含性能测量。
 
 黄金数据的期望值由已发布的 tiktoken wheel 生成。`scripts/tokenizer-golden.mbtx` 通过 Python Fire CLI 调用 `tiktoken.get_encoding("o200k_base").encode_ordinary`，先核对参考版本。复现时准备独立的开发工具目录：
 

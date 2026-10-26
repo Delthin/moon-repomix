@@ -6,6 +6,7 @@ async test "UTF-8 piece boundaries preserve ordered regex alternatives and scala
   }
   let encoder : Encoder = {
     ranks: Map([]),
+    native: None,
     categories: read_categories(
       @utf8.decode(
         @fs.read_file(assets + "/tokenizer-unicode-16.0.0.txt").binary(),
@@ -88,7 +89,7 @@ fn single_byte_encoder_for_test() -> Encoder {
   for i in 0..<256 {
     ranks[Bytes::from_array([i.to_byte()])] = i
   }
-  { ranks, categories: FixedArray::make(0x110000, b'\x00'), }
+  { ranks, categories: FixedArray::make(0x110000, b'\x00'), native: None, }
 }
 
 ///|
