@@ -3,12 +3,17 @@ priv struct PendingFile {
   path : String
   snapshot : @input.Snapshot
   kept_full : Bool
-  original_tokens : Int32
 }
 
 ///|
 priv struct ActiveBatch {
   ticket : @compression.BatchTicket
+  files : Array[PendingFile]
+}
+
+///|
+priv struct CollectedBatch {
+  plan : @compression.PlannedBatch
   files : Array[PendingFile]
 }
 
@@ -75,7 +80,7 @@ fn FilePipeline::record_serial(self : FilePipeline, file : PendingFile) -> Unit 
   record_file_result(
     file.path,
     file.snapshot,
-    file.original_tokens,
+    self.counter.count(file.snapshot.text),
     outcome,
     self.counter,
     self.accepted,
@@ -85,10 +90,10 @@ fn FilePipeline::record_serial(self : FilePipeline, file : PendingFile) -> Unit 
 }
 
 ///|
-// Metered reads and complete screening remain ordered on the caller. One
-// bounded lookahead window can be filled while the preceding C batch runs.
-// Each retained window has at most four files / 16MiB of source UTF-8; C-owned
-// active copies retain their stricter process-global four-input / 16MiB limit.
+// Reads and full screening remain ordered. An active window and one lookahead
+// window each hold at most four snapshots / 16MiB source UTF-8. Completed wires
+// are detached before their materialization so the next native batch can run;
+// C-owned inputs retain the process-global four-input / 16MiB bound.
 async fn FilePipeline::push(
   self : FilePipeline,
   path : String,
@@ -96,31 +101,40 @@ async fn FilePipeline::push(
   kept_full : Bool,
 ) -> Unit {
   let bytes = snapshot.disk_bytes - snapshot.bom_bytes
-  if self.compress &&
-    (bytes > 8 * 1024 * 1024 || bytes > 16 * 1024 * 1024 - self.pending_bytes) {
-    self.flush()
+  if self.compress {
+    if bytes > 8 * 1024 * 1024 {
+      self.flush()
+    } else if bytes > 16 * 1024 * 1024 - self.pending_bytes {
+      self.start_pending()
+    }
   }
-  let file = {
-    path,
-    snapshot,
-    kept_full,
-    original_tokens: self.counter.count(snapshot.text),
-  }
+  let file = { path, snapshot, kept_full, }
   if !self.compress || bytes > 8 * 1024 * 1024 {
     self.record_serial(file)
     return
   }
   self.pending.push(file)
   self.pending_bytes += bytes
-  if self.pending.length() == 4 {
+  if self.pending.length() == 4 || self.pending_bytes == 16 * 1024 * 1024 {
     self.start_pending()
   }
 }
 
 ///|
-async fn FilePipeline::finish_active(self : FilePipeline) -> Unit {
-  guard self.active is Some(batch) else { return }
-  let results = batch.ticket.finish()
+async fn FilePipeline::collect_active(self : FilePipeline) -> CollectedBatch? {
+  guard self.active is Some(batch) else { return None }
+  self.active = None
+  // collect owns every returned wire before releasing the native batch slots.
+  let plan = batch.ticket.collect()
+  Some({ plan, files: batch.files, })
+}
+
+///|
+fn FilePipeline::record_collected(
+  self : FilePipeline,
+  batch : CollectedBatch,
+) -> Unit raise {
+  let results = batch.plan.materialize()
   let mut result_index = 0
   for file in batch.files {
     let outcome = if file.kept_full {
@@ -136,7 +150,7 @@ async fn FilePipeline::finish_active(self : FilePipeline) -> Unit {
     record_file_result(
       file.path,
       file.snapshot,
-      file.original_tokens,
+      self.counter.count(file.snapshot.text),
       Some(outcome),
       self.counter,
       self.accepted,
@@ -147,7 +161,45 @@ async fn FilePipeline::finish_active(self : FilePipeline) -> Unit {
   if result_index != results.length() {
     raise @compression.PlannerError::Unavailable
   }
-  self.active = None
+}
+
+///|
+// Returns serial fallbacks without publishing them: they must stay after the
+// previously collected batch even when no native job can be submitted.
+async fn FilePipeline::submit_pending(
+  self : FilePipeline,
+) -> Array[PendingFile] {
+  let files = self.pending
+  self.pending = []
+  self.pending_bytes = 0
+  let sources : Array[@compression.Source] = []
+  for file in files {
+    if !file.kept_full {
+      sources.push({ path: file.path, text: file.snapshot.text, })
+    }
+  }
+  if sources.is_empty() {
+    return files
+  }
+  if !self.planner_attempted {
+    self.planner_attempted = true
+    self.planner = Some(@compression.Planner::new(workers=3)) catch {
+      @compression.PlannerError::Unavailable => None
+      err => raise err
+    }
+  }
+  guard self.planner is Some(planner) else { return files }
+  let ticket = planner.submit(sources) catch {
+    // Submission stages all native sources before any worker starts a job.
+    @compression.PlannerError::Unavailable => {
+      self.planner = None
+      planner.close()
+      return files
+    }
+    err => raise err
+  }
+  self.active = Some({ ticket, files, })
+  []
 }
 
 ///|
@@ -155,45 +207,22 @@ async fn FilePipeline::start_pending(self : FilePipeline) -> Unit {
   if self.pending.is_empty() {
     return
   }
-  // A pool admits only one active C batch. Finish it in source order after
-  // the caller has already read, screened and counted the lookahead window.
-  self.finish_active()
-  let sources : Array[@compression.Source] = []
-  for file in self.pending {
-    if !file.kept_full {
-      sources.push({ path: file.path, text: file.snapshot.text, })
-    }
+  let previous = self.collect_active()
+  // Restart native work before materializing or counting previous results.
+  let serial = self.submit_pending()
+  if previous is Some(batch) {
+    self.record_collected(batch)
   }
-  if !sources.is_empty() && !self.planner_attempted {
-    self.planner_attempted = true
-    self.planner = Some(@compression.Planner::new(workers=3)) catch {
-      @compression.PlannerError::Unavailable => None
-      err => raise err
-    }
+  for file in serial {
+    self.record_serial(file)
   }
-  if sources.is_empty() || self.planner is None {
-    for file in self.pending {
-      self.record_serial(file)
-    }
-  } else if self.planner is Some(planner) {
-    let ticket = planner.submit(sources) catch {
-      // Submission stages every C-owned source before starting any worker.
-      @compression.PlannerError::Unavailable => {
-        self.planner = None
-        planner.close()
-        for file in self.pending {
-          self.record_serial(file)
-        }
-        self.pending.clear()
-        self.pending_bytes = 0
-        return
-      }
-      err => raise err
-    }
-    self.active = Some({ ticket, files: self.pending, })
+}
+
+///|
+async fn FilePipeline::finish_active(self : FilePipeline) -> Unit {
+  if self.collect_active() is Some(batch) {
+    self.record_collected(batch)
   }
-  self.pending = []
-  self.pending_bytes = 0
 }
 
 ///|
@@ -208,7 +237,6 @@ async fn FilePipeline::close(self : FilePipeline) -> Unit {
     self.planner = None
     planner.close()
   }
-  // A cancelled/error path releases the pool before dropping queued snapshots.
   self.active = None
   self.pending.clear()
   self.pending_bytes = 0

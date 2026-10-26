@@ -87,6 +87,45 @@ async test "bounded source pipeline preserves serial bodies, metadata order and 
   pipeline.close()
   assert_true(pipeline.planner is None)
 
+  // Synthetic byte weights exercise queue boundaries without allocating large
+  // fixtures. Public snapshot byte/UTF-8 accuracy is tested by input/scan tests.
+  for weights in [[8, 8, 1], [7, 7, 3]] {
+    let weighted_output : Array[@document.File] = []
+    let weighted_files : Array[FileStats] = []
+    let weighted_records : Array[Json] = []
+    let weighted = FilePipeline::new(
+      runtime.encoder.session(),
+      true,
+      weighted_output,
+      weighted_files,
+      weighted_records,
+    )
+    defer weighted.close()
+    let text = "export function sized(): number { return 3 }\n"
+    for i in 0..<weights.length() {
+      weighted.push(
+        "weighted-\{i}.ts",
+        { text, disk_bytes: weights[i] * 1024 * 1024, bom_bytes: 0, },
+        false,
+      )
+      assert_true(weighted.pending_bytes <= 16 * 1024 * 1024)
+      assert_true(weighted.pending.length() <= 4)
+      if i == 1 && weights[0] == 8 {
+        assert_true(weighted.pending.is_empty())
+      }
+    }
+    assert_eq(weighted.pending.length(), 1)
+    if weighted.planner is Some(_) {
+      assert_true(weighted.active is Some(_))
+    }
+    weighted.flush()
+    weighted.close()
+    assert_eq(weighted_output.length(), weights.length())
+    for i in 0..<weights.length() {
+      assert_eq(weighted_output[i].path, "weighted-\{i}.ts")
+    }
+  }
+
   let raw : Array[@document.File] = []
   let raw_files : Array[FileStats] = []
   let raw_records : Array[Json] = []

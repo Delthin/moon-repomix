@@ -4,7 +4,7 @@
 fn volume_names(
   partition : Partition,
   style : Style,
-  runtime : Runtime,
+  counter : @metrics.CountSession,
 ) -> (Partition, Map[String, String]) raise {
   let extension = match style {
     Xml => ".xml"
@@ -32,8 +32,6 @@ fn volume_names(
   let index_fields = fields.copy()
   index_fields["volumes"] = Json(named_rows)
   let index = Json(index_fields)
-  let named = partition.with_index(index, count=text => {
-    runtime.encoder.count(text)
-  })
+  let named = partition.with_index(index, count=text => counter.count(text))
   (named, names)
 }

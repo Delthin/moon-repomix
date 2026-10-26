@@ -28,7 +28,11 @@ pub async fn pack_volumes(
     count=text => prepared.counter.count(text),
     project_metadata=(files, sections) => metadata.project(files, sections),
   )
-  let (partition, file_names) = volume_names(partition, options.style, runtime)
+  let (partition, file_names) = volume_names(
+    partition,
+    options.style,
+    prepared.counter,
+  )
   // A timeout/cancellation delivered during CPU work must not return success.
   @async.sleep(0)
   {
