@@ -102,7 +102,17 @@ pub fn compress(path : String, text : String) -> Outcome {
   if source.length() > 8 * 1024 * 1024 {
     return fallback(text, Some(language), "resource-limit")
   }
-  let plan = structure_plan(id, source)
+  outcome_from_plan(text, id, language, source, structure_plan(id, source))
+}
+
+///|
+fn outcome_from_plan(
+  text : String,
+  id : Int32,
+  language : String,
+  source : Bytes,
+  plan : Bytes,
+) -> Outcome {
   let reason = match u32(plan, 0) {
     0 => None
     1 => Some("parse-error")

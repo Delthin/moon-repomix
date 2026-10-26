@@ -16,7 +16,14 @@ typedef struct {
   SCPlan plan;
   int python;
   const char *source;
+  const atomic_bool *cancel;
 } Selection;
+
+static int stopped(Selection *s) {
+  if (s->cancel && atomic_load_explicit(s->cancel, memory_order_relaxed))
+    s->plan.status = 5;
+  return s->plan.status != 0;
+}
 
 static int is(TSNode node, const char *type) {
   return !ts_node_is_null(node) && strcmp(ts_node_type(node), type) == 0;
@@ -28,7 +35,7 @@ static TSNode field(TSNode node, const char *name) {
 }
 
 static void select_node(Selection *s, TSNode node, int keep) {
-  if (ts_node_is_null(node)) return;
+  if (stopped(s) || ts_node_is_null(node)) return;
   uint32_t start = ts_node_start_byte(node), end = ts_node_end_byte(node);
   if (start <= end && end <= s->plan.length)
     memset(s->plan.keep + start, keep, end - start);
@@ -37,6 +44,7 @@ static void select_node(Selection *s, TSNode node, int keep) {
 /* Remove entire physical lines only when the statement occupies them alone.
  * Inline bodies still use exact AST byte bounds. */
 static void remove_statement(Selection *s, TSNode node) {
+  if (stopped(s)) return;
   uint32_t start = ts_node_start_byte(node), end = ts_node_end_byte(node);
   uint32_t a = start, b = end;
   while (a > 0 && (s->source[a - 1] == ' ' || s->source[a - 1] == '\t')) --a;
@@ -109,7 +117,7 @@ static int member_assignment(Selection *s, TSNode node) {
   TSNode left = field(node, "left"), right = field(node, "right");
   if (!(is(left, "member_expression") || is(left, "subscript_expression"))) return 0;
   TSNode base = left;
-  while (is(base, "member_expression") || is(base, "subscript_expression")) {
+  while (!stopped(s) && (is(base, "member_expression") || is(base, "subscript_expression"))) {
     TSNode object = field(base, "object");
     TSNode property = field(base, is(base, "member_expression") ? "property" : "index");
     if (text_is(s, object, "module") &&
@@ -126,7 +134,7 @@ static int member_assignment(Selection *s, TSNode node) {
 /* Keep enclosing conditions only when they contain an outline declaration.
  * Comments are restored separately, including their physical line breaks. */
 static int contains_outline(Selection *s, TSNode node, unsigned depth) {
-  if (s->plan.status || ts_node_is_null(node)) return 0;
+  if (stopped(s) || ts_node_is_null(node)) return 0;
   if (depth > 512) { s->plan.status = 3; return 0; }
   if (classlike(node) || type_declaration(node) || importlike(node) ||
       is(node, "function_declaration") || is(node, "generator_function_declaration") ||
@@ -137,7 +145,7 @@ static int contains_outline(Selection *s, TSNode node, unsigned depth) {
   if (s->python && is(node, "expression_statement") &&
       is(ts_node_named_child(node, 0), "string")) return 1;
   uint32_t n = ts_node_named_child_count(node);
-  for (uint32_t i = 0; i < n; ++i)
+  for (uint32_t i = 0; i < n && !stopped(s); ++i)
     if (contains_outline(s, ts_node_named_child(node, i), depth + 1)) return 1;
   return 0;
 }
@@ -162,6 +170,7 @@ static int same_name(Selection *s, TSNode a, TSNode b) {
 
 /* Search one lexical environment without entering initializers or types. */
 static TSNode scope_binding(Selection *s, TSNode node, TSNode name, unsigned depth) {
+  if (stopped(s)) return (TSNode){0};
   if (depth > 512) { s->plan.status = 3; return (TSNode){0}; }
   if (ts_node_is_null(node)) return (TSNode){0};
   if (is(node, "assignment_pattern"))
@@ -180,7 +189,7 @@ static TSNode scope_binding(Selection *s, TSNode node, TSNode name, unsigned dep
         is(node, "import_clause") || is(node, "named_imports") ||
         is(node, "import_specifier") || is(node, "namespace_import") ||
         is(node, "variable_declarator"))) return (TSNode){0};
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i) {
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i) {
     TSNode child = ts_node_named_child(node, i);
     if (ts_node_eq(child, field(node, "value")) || ts_node_eq(child, field(node, "type"))) continue;
     TSNode found = scope_binding(s, child, name, depth + 1);
@@ -192,11 +201,12 @@ static TSNode scope_binding(Selection *s, TSNode node, TSNode name, unsigned dep
 /* var declarations and block functions can shadow an outer table even when
  * nested in a branch (including Annex B function declarations). */
 static TSNode hoisted_binding(Selection *s, TSNode node, TSNode name, unsigned depth) {
+  if (stopped(s)) return (TSNode){0};
   if (depth > 512) { s->plan.status = 3; return (TSNode){0}; }
   if (ts_node_is_null(node)) return (TSNode){0};
   if (is(node, "variable_declaration") || callable(node) || classlike(node))
     return scope_binding(s, node, name, depth + 1);
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i) {
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i) {
     TSNode found = hoisted_binding(s, ts_node_named_child(node, i), name, depth + 1);
     if (!ts_node_is_null(found)) return found;
   }
@@ -205,7 +215,7 @@ static TSNode hoisted_binding(Selection *s, TSNode node, TSNode name, unsigned d
 
 static TSNode binding(Selection *s, TSNode from, TSNode name) {
   if (ts_node_is_null(from) || ts_node_is_null(name)) return (TSNode){0};
-  for (TSNode scope = ts_node_parent(from); !ts_node_is_null(scope); scope = ts_node_parent(scope)) {
+  for (TSNode scope = ts_node_parent(from); !ts_node_is_null(scope) && !stopped(s); scope = ts_node_parent(scope)) {
     if (callable(scope)) {
       TSNode found = scope_binding(s, field(scope, "parameters"), name, 0);
       if (!ts_node_is_null(found)) return found;
@@ -223,7 +233,7 @@ static TSNode binding(Selection *s, TSNode from, TSNode name) {
       TSNode found = scope_binding(s, pattern, name, 0);
       if (!ts_node_is_null(found)) return found;
     } else if (is(scope, "statement_block") || is(scope, "program")) {
-      for (uint32_t i = 0; i < ts_node_named_child_count(scope); ++i) {
+      for (uint32_t i = 0; i < ts_node_named_child_count(scope) && !stopped(s); ++i) {
         TSNode found = scope_binding(s, ts_node_named_child(scope, i), name, 0);
         if (!ts_node_is_null(found)) return found;
       }
@@ -241,25 +251,25 @@ static int scalar_type(Selection *s, TSNode node) {
   return 0;
 }
 
-static int scalar_value(TSNode node, unsigned depth) {
-  if (depth > 32) return 0;
+static int scalar_value(Selection *s, TSNode node, unsigned depth) {
+  if (stopped(s) || depth > 32) return 0;
   if (is(node, "string") || is(node, "number") || is(node, "true") || is(node, "false")) return 1;
   if (!is(node, "array")) return 0;
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i) {
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i) {
     TSNode child = ts_node_named_child(node, i);
-    if (!is(child, "comment") && !scalar_value(child, depth + 1)) return 0;
+    if (!is(child, "comment") && !scalar_value(s, child, depth + 1)) return 0;
   }
   return 1;
 }
 
-static int opaque_value(TSNode node, unsigned depth) {
-  if (depth > 32) return 0;
+static int opaque_value(Selection *s, TSNode node, unsigned depth) {
+  if (stopped(s) || depth > 32) return 0;
   if (callable(node) || classlike(node) || is(node, "as_expression") ||
       is(node, "satisfies_expression") || is(node, "spread_element") ||
       is(node, "computed_property_name") || is(node, "object") ||
       is(node, "call_expression")) return 0;
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
-    if (!opaque_value(ts_node_named_child(node, i), depth + 1)) return 0;
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i)
+    if (!opaque_value(s, ts_node_named_child(node, i), depth + 1)) return 0;
   return 1;
 }
 
@@ -285,14 +295,14 @@ static int scalar_table(Selection *s, TSNode node) {
   if (!is(value, "object")) return 0;
   unsigned pairs = 0;
   int scalars = 1, constructors = is(value_type, "type_identifier") || is(value_type, "generic_type");
-  for (uint32_t i = 0; i < ts_node_named_child_count(value); ++i) {
+  for (uint32_t i = 0; i < ts_node_named_child_count(value) && !stopped(s); ++i) {
     TSNode pair = ts_node_named_child(value, i);
     if (is(pair, "comment")) continue;
     TSNode k = field(pair, "key"), v = field(pair, "value");
     if (!is(pair, "pair") ||
         !(is(k, "property_identifier") || is(k, "string") || is(k, "number"))) return 0;
-    scalars = scalars && scalar_value(v, 0);
-    constructors = constructors && is(v, "new_expression") && opaque_value(v, 0);
+    scalars = scalars && scalar_value(s, v, 0);
+    constructors = constructors && is(v, "new_expression") && opaque_value(s, v, 0);
     ++pairs;
   }
   if (widened && scalars && pairs >= 2) return 1;
@@ -304,6 +314,7 @@ static int scalar_table(Selection *s, TSNode node) {
 /* Only indexed reads are private implementation. Bare/aliased/serialized uses
  * and type queries expose keys; same-spelled shadowed locals do not count. */
 static int index_only(Selection *s, TSNode node, TSNode declaration, unsigned depth) {
+  if (stopped(s)) return 0;
   if (depth > 512) { s->plan.status = 3; return 0; }
   TSNode name = field(declaration, "name");
   if ((is(node, "identifier") || is(node, "shorthand_property_identifier")) &&
@@ -330,10 +341,10 @@ static int index_only(Selection *s, TSNode node, TSNode declaration, unsigned de
       if (!shadow) return 0;
     } else {
       TSNode parent = ts_node_parent(node);
-      for (TSNode ancestor = parent; !ts_node_is_null(ancestor); ancestor = ts_node_parent(ancestor))
+      for (TSNode ancestor = parent; !ts_node_is_null(ancestor) && !stopped(s); ancestor = ts_node_parent(ancestor))
         if (is(ancestor, "type_query")) return 0;
       if (!is(parent, "subscript_expression") || !ts_node_eq(field(parent, "object"), node)) return 0;
-      for (TSNode use = ts_node_parent(parent); !ts_node_is_null(use); use = ts_node_parent(use)) {
+      for (TSNode use = ts_node_parent(parent); !ts_node_is_null(use) && !stopped(s); use = ts_node_parent(use)) {
         TSNode left = field(use, "left");
         if (((js_assignment(use) || is(use, "augmented_assignment_expression")) &&
              !ts_node_is_null(left) && ts_node_start_byte(left) <= ts_node_start_byte(parent) &&
@@ -342,7 +353,7 @@ static int index_only(Selection *s, TSNode node, TSNode declaration, unsigned de
       }
     }
   }
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i)
     if (!index_only(s, ts_node_named_child(node, i), declaration, depth + 1)) return 0;
   return 1;
 }
@@ -350,7 +361,7 @@ static int index_only(Selection *s, TSNode node, TSNode declaration, unsigned de
 static int private_scalar_table(Selection *s, TSNode node, unsigned depth) {
   if (!scalar_table(s, node)) return 0;
   TSNode root = node;
-  while (!ts_node_is_null(ts_node_parent(root))) {
+  while (!ts_node_is_null(ts_node_parent(root)) && !stopped(s)) {
     root = ts_node_parent(root);
     if (is(root, "export_statement")) return 0;
   }
@@ -358,18 +369,18 @@ static int private_scalar_table(Selection *s, TSNode node, unsigned depth) {
 }
 
 static void literal_outline(Selection *s, TSNode node, unsigned depth) {
-  if (s->plan.status) return;
+  if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   if (callable(node) || classlike(node)) {
     walk(s, node, depth + 1, 0);
     return;
   }
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i)
     literal_outline(s, ts_node_named_child(node, i), depth + 1);
 }
 
 static void initializer(Selection *s, TSNode node, unsigned depth) {
-  if (s->plan.status || ts_node_is_null(node)) return;
+  if (stopped(s) || ts_node_is_null(node)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   if (callable(node) || classlike(node) || is(node, "object")) {
     walk(s, node, depth + 1, 0);
@@ -401,7 +412,7 @@ static void initializer(Selection *s, TSNode node, unsigned depth) {
 }
 
 static void walk(Selection *s, TSNode node, unsigned depth, int local) {
-  if (s->plan.status || ts_node_is_null(node)) return;
+  if (stopped(s) || ts_node_is_null(node)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   if (callable(node)) {
     TSNode body = field(node, "body");
@@ -450,14 +461,14 @@ static void walk(Selection *s, TSNode node, unsigned depth, int local) {
     return;
   }
   uint32_t n = ts_node_named_child_count(node);
-  for (uint32_t i = 0; i < n; ++i)
+  for (uint32_t i = 0; i < n && !stopped(s); ++i)
     walk(s, ts_node_named_child(node, i), depth + 1, local);
 }
 
 /* Local data statements are implementation, but locally named functions and
  * classes still belong to the outline (including arrow/lambda bindings). */
 static int signature_binding(Selection *s, TSNode node, unsigned depth) {
-  if (depth > 512 || ts_node_is_null(node)) return 0;
+  if (stopped(s) || depth > 512 || ts_node_is_null(node)) return 0;
   if (callable(node) || classlike(node)) return 1;
   if (is(node, "variable_declarator") || is(node, "pair"))
     return signature_binding(s, field(node, "value"), depth + 1);
@@ -468,17 +479,17 @@ static int signature_binding(Selection *s, TSNode node, unsigned depth) {
         is(node, "expression_statement") || is(node, "parenthesized_expression") ||
         is(node, "object"))) return 0;
   uint32_t n = ts_node_named_child_count(node);
-  for (uint32_t i = 0; i < n; ++i)
+  for (uint32_t i = 0; i < n && !stopped(s); ++i)
     if (signature_binding(s, ts_node_named_child(node, i), depth + 1)) return 1;
   return 0;
 }
 
 static void statements(Selection *s, TSNode node, unsigned depth, int local) {
-  if (s->plan.status || ts_node_is_null(node)) return;
+  if (stopped(s) || ts_node_is_null(node)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   uint32_t n = ts_node_named_child_count(node);
   int first = 1;
-  for (uint32_t i = 0; i < n; ++i) {
+  for (uint32_t i = 0; i < n && !stopped(s); ++i) {
     TSNode child = ts_node_named_child(node, i);
     if (is(child, "comment")) continue;
     int docstring = s->python && first && is(child, "expression_statement") &&
@@ -509,7 +520,7 @@ static void statements(Selection *s, TSNode node, unsigned depth, int local) {
 /* Preserve comments even inside discarded expressions, conservatively treating
  * every AST comment as significant. Never try to recognize comments lexically. */
 static void comments(Selection *s, TSNode node, unsigned depth) {
-  if (s->plan.status) return;
+  if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   /* A folded table owns its implementation-category comments. Its binding
    * remains selected; ordinary discarded statements still restore comments. */
@@ -526,7 +537,7 @@ static void comments(Selection *s, TSNode node, unsigned depth) {
     return;
   }
   uint32_t n = ts_node_named_child_count(node);
-  for (uint32_t i = 0; i < n; ++i)
+  for (uint32_t i = 0; i < n && !stopped(s); ++i)
     comments(s, ts_node_named_child(node, i), depth + 1);
 }
 
@@ -537,13 +548,13 @@ static int whitespace(char c) {
 /* Compact only whitespace between AST children of statement/type containers.
  * Never inspect literal/comment contents or Python indentation as source lines. */
 static void presentation(Selection *s, TSNode node, unsigned depth) {
-  if (s->plan.status) return;
+  if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   int container = is(node, "program") || is(node, "module") ||
     is(node, "statement_block") || is(node, "block") || is(node, "class_body") ||
     is(node, "interface_body") || is(node, "enum_body") || is(node, "object");
   uint32_t n = ts_node_child_count(node), previous = ts_node_start_byte(node);
-  for (uint32_t i = 0; i < n; ++i) {
+  for (uint32_t i = 0; i < n && !stopped(s); ++i) {
     TSNode child = ts_node_child(node, i);
     uint32_t start = ts_node_start_byte(child), first = start, last = start;
     int only_space = 1;
@@ -568,10 +579,12 @@ static void presentation(Selection *s, TSNode node, unsigned depth) {
 
 static void merge_omissions(Selection *s) {
   for (uint32_t i = 0; i < s->plan.length;) {
+    if ((i & 4095) == 0 && stopped(s)) return;
     if (!s->plan.keep[i]) { ++i; continue; }
     uint32_t start = i;
     int only_space = 1;
     while (i < s->plan.length && s->plan.keep[i]) {
+      if ((i & 4095) == 0 && stopped(s)) return;
       if (!whitespace(s->source[i])) only_space = 0;
       ++i;
     }
@@ -601,7 +614,7 @@ static void moonbit_walk(Selection *, TSNode, unsigned);
 /* Recover locally named functions/types even below discarded control flow.
  * Their surrounding implementation is not necessary executable context. */
 static void moonbit_nested(Selection *s, TSNode node, unsigned depth) {
-  if (s->plan.status) return;
+  if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   if (moonbit_type(node) || is(node, "named_lambda_expression") ||
       is(node, "named_matrix_expression")) {
@@ -611,7 +624,7 @@ static void moonbit_nested(Selection *s, TSNode node, unsigned depth) {
   }
   /* Literal interiors are indivisible original fragments, not declarations. */
   if (is(node, "literal") || is(node, "string_interpolation")) return;
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i)
     moonbit_nested(s, ts_node_named_child(node, i), depth + 1);
 }
 
@@ -619,7 +632,7 @@ static void moonbit_body(Selection *s, TSNode body, unsigned depth) {
   /* Keep only the actual opening/closing AST tokens, including inline braces. */
   uint32_t n = ts_node_child_count(body);
   TSNode open = {0}, close = {0};
-  for (uint32_t i = 0; i < n; ++i) {
+  for (uint32_t i = 0; i < n && !stopped(s); ++i) {
     TSNode child = ts_node_child(body, i);
     if (is(child, "{") && ts_node_is_null(open)) open = child;
     if (is(child, "}")) close = child;
@@ -627,27 +640,27 @@ static void moonbit_body(Selection *s, TSNode body, unsigned depth) {
   if (!ts_node_is_null(open) && !ts_node_is_null(close)) {
     uint32_t start = ts_node_end_byte(open), end = ts_node_start_byte(close);
     if (start <= end) memset(s->plan.keep + start, 0, end - start);
-    for (uint32_t i = 0; i < ts_node_named_child_count(body); ++i)
+    for (uint32_t i = 0; i < ts_node_named_child_count(body) && !stopped(s); ++i)
       moonbit_nested(s, ts_node_named_child(body, i), depth + 1);
   }
 }
 
 static void moonbit_walk(Selection *s, TSNode node, unsigned depth) {
-  if (s->plan.status) return;
+  if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   if (is(node, "named_matrix_expression") || is(node, "anonymous_matrix_lambda_expression")) {
     moonbit_body(s, node, depth + 1);
     return;
   }
   int callable_node = moonbit_callable(node);
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i) {
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i) {
     TSNode child = ts_node_named_child(node, i);
     if (callable_node && is(child, "block_expression"))
       moonbit_body(s, child, depth + 1);
     else if (callable_node && is(child, "external_source")) {
       /* Foreign symbol/module strings are declaration linkage, not bodies.
        * Only an inline multiline implementation is safe to replace here. */
-      for (uint32_t j = 0; j < ts_node_named_child_count(child); ++j) {
+      for (uint32_t j = 0; j < ts_node_named_child_count(child) && !stopped(s); ++j) {
         TSNode source = ts_node_named_child(child, j);
         if (is(source, "multiline_string_literal")) select_node(s, source, 0);
       }
@@ -676,10 +689,10 @@ static int go_callable(TSNode node) {
 }
 
 static int go_has_callable(Selection *s, TSNode node, unsigned depth) {
-  if (s->plan.status) return 0;
+  if (stopped(s)) return 0;
   if (depth > 512) { s->plan.status = 3; return 0; }
   if (go_callable(node)) return 1;
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i)
     if (go_has_callable(s, ts_node_named_child(node, i), depth + 1)) return 1;
   return 0;
 }
@@ -688,7 +701,7 @@ static int go_has_callable(Selection *s, TSNode node, unsigned depth) {
  * can generate public items: retain both calls and definitions without looking
  * inside opaque tokens. Attributes are siblings, not part of their item node. */
 static void systems_nested(Selection *s, TSNode node, unsigned depth, int rust) {
-  if (s->plan.status) return;
+  if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   int binding = !rust && (is(node, "var_declaration") ||
     is(node, "short_var_declaration") || is(node, "assignment_statement")) &&
@@ -699,13 +712,13 @@ static void systems_nested(Selection *s, TSNode node, unsigned depth, int rust) 
     systems_walk(s, node, depth + 1, rust);
     return;
   }
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i)
     systems_nested(s, ts_node_named_child(node, i), depth + 1, rust);
 }
 
 static void systems_body(Selection *s, TSNode body, unsigned depth, int rust) {
   TSNode open = {0}, close = {0};
-  for (uint32_t i = 0; i < ts_node_child_count(body); ++i) {
+  for (uint32_t i = 0; i < ts_node_child_count(body) && !stopped(s); ++i) {
     TSNode token = ts_node_child(body, i);
     if (is(token, "{") && ts_node_is_null(open)) open = token;
     if (is(token, "}")) close = token;
@@ -714,12 +727,12 @@ static void systems_body(Selection *s, TSNode body, unsigned depth, int rust) {
   uint32_t start = ts_node_end_byte(open), end = ts_node_start_byte(close);
   if (start > end) return;
   memset(s->plan.keep + start, 0, end - start);
-  for (uint32_t i = 0; i < ts_node_named_child_count(body); ++i)
+  for (uint32_t i = 0; i < ts_node_named_child_count(body) && !stopped(s); ++i)
     systems_nested(s, ts_node_named_child(body, i), depth + 1, rust);
 }
 
 static void systems_walk(Selection *s, TSNode node, unsigned depth, int rust) {
-  if (s->plan.status) return;
+  if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   if ((!rust && go_callable(node)) || (rust && is(node, "function_item"))) {
     TSNode body = field(node, "body");
@@ -737,7 +750,7 @@ static void systems_walk(Selection *s, TSNode node, unsigned depth, int rust) {
     if (!(is(node, "source_file") || is(node, "declaration_list"))) return;
   } else if (is(node, "type_declaration") || is(node, "import_declaration") ||
              is(node, "package_clause") || is(node, "comment")) return;
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i)
     systems_walk(s, ts_node_named_child(node, i), depth + 1, rust);
 }
 
@@ -747,7 +760,7 @@ static void systems_walk(Selection *s, TSNode node, unsigned depth, int rust) {
 static void java_walk(Selection *, TSNode, unsigned);
 
 static void java_nested(Selection *s, TSNode node, unsigned depth) {
-  if (s->plan.status || ts_node_is_null(node)) return;
+  if (stopped(s) || ts_node_is_null(node)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   int type = is(node, "class_declaration") || is(node, "interface_declaration") ||
     is(node, "enum_declaration") || is(node, "record_declaration") ||
@@ -756,25 +769,25 @@ static void java_nested(Selection *s, TSNode node, unsigned depth) {
    * useful even in a returned/local instance. Retain its creation header too. */
   int anonymous = 0;
   if (is(node, "object_creation_expression"))
-    for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+    for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i)
       if (is(ts_node_named_child(node, i), "class_body")) anonymous = 1;
   if (type || anonymous) {
     select_node(s, node, 1);
     java_walk(s, node, depth + 1);
     return;
   }
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i)
     java_nested(s, ts_node_named_child(node, i), depth + 1);
 }
 
 static void java_walk(Selection *s, TSNode node, unsigned depth) {
-  if (s->plan.status || ts_node_is_null(node)) return;
+  if (stopped(s) || ts_node_is_null(node)) return;
   if (depth > 512) { s->plan.status = 3; return; }
   if (is(node, "method_declaration") || is(node, "constructor_declaration") ||
       is(node, "compact_constructor_declaration") || is(node, "lambda_expression")) {
     TSNode body = field(node, "body");
     if (is(body, "block") || is(body, "constructor_body")) {
-      for (uint32_t i = 0; i < ts_node_named_child_count(body); ++i)
+      for (uint32_t i = 0; i < ts_node_named_child_count(body) && !stopped(s); ++i)
         remove_statement(s, ts_node_named_child(body, i));
     } else {
       select_node(s, body, 0);
@@ -789,13 +802,31 @@ static void java_walk(Selection *s, TSNode node, unsigned depth) {
     java_nested(s, node, depth + 1);
     return;
   }
-  for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i)
+  for (uint32_t i = 0; i < ts_node_named_child_count(node) && !stopped(s); ++i)
     java_walk(s, ts_node_named_child(node, i), depth + 1);
+}
+
+static const char *read_source(void *payload, uint32_t offset, TSPoint point,
+                               uint32_t *length) {
+  (void)point;
+  Selection *s = payload;
+  *length = offset < s->plan.length ? s->plan.length - offset : 0;
+  return s->source + (offset < s->plan.length ? offset : s->plan.length);
+}
+
+static bool progress(TSParseState *state) {
+  return stopped(state->payload) != 0;
 }
 
 SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
                uint64_t timeout_micros) {
-  Selection s = {{NULL, length, 0}, language == 3, source};
+  return sc_plan_cancelable(language, source, length, timeout_micros, NULL);
+}
+
+SCPlan sc_plan_cancelable(int32_t language, const char *source, uint32_t length,
+                          uint64_t timeout_micros, const atomic_bool *cancel) {
+  Selection s = {{NULL, length, 0}, language == 3, source, cancel};
+  if (stopped(&s)) return s.plan;
   if (length > 8 * 1024 * 1024) { s.plan.status = 3; return s.plan; }
   const TSLanguage *grammar = NULL;
   switch (language) {
@@ -817,8 +848,13 @@ SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
   }
   /* This API is available in the pinned 0.25.3 runtime, including Windows. */
   ts_parser_set_timeout_micros(parser, timeout_micros);
-  TSTree *tree = ts_parser_parse_string(parser, NULL, source, length);
-  if (!tree) {
+  TSInput input = {&s, read_source, TSInputEncodingUTF8, NULL};
+  TSParseOptions options = {&s, progress};
+  TSTree *tree = cancel ? ts_parser_parse_with_options(parser, NULL, input, options)
+                        : ts_parser_parse_string(parser, NULL, source, length);
+  if (stopped(&s)) {
+    /* Cancellation is internal, never a successful fallback or a timeout. */
+  } else if (!tree) {
     s.plan.status = 2;
   } else if (ts_node_has_error(ts_tree_root_node(tree))) {
     s.plan.status = 1;
@@ -840,6 +876,6 @@ SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
   }
   if (tree) ts_tree_delete(tree);
   ts_parser_delete(parser);
-  if (s.plan.status) { free(s.plan.keep); s.plan.keep = NULL; }
+  if (stopped(&s)) { free(s.plan.keep); s.plan.keep = NULL; }
   return s.plan;
 }

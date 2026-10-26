@@ -9,8 +9,20 @@ import {
 pub fn compress(String, String) -> Outcome
 
 // Errors
+pub(all) suberror PlannerError {
+  InvalidWorkers
+  BatchLimit
+  Busy
+  Closed
+  Finished
+  Unavailable
+} derive(@debug.Debug)
+pub fn PlannerError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
+type BatchTicket
+pub async fn BatchTicket::finish(Self) -> Array[Outcome]
+
 pub(all) struct LineRange {
   start_line : Int
   end_line : Int
@@ -29,6 +41,20 @@ pub(all) struct Outcome {
 pub fn Outcome::equal(Self, Self) -> Bool
 pub fn Outcome::not_equal(Self, Self) -> Bool
 pub fn Outcome::to_repr(Self) -> @debug.Repr
+
+type Planner
+pub async fn Planner::close(Self) -> Unit
+pub async fn Planner::compress(Self, Array[Source]) -> Array[Outcome]
+pub fn Planner::new(workers? : Int) -> Self raise PlannerError
+pub fn Planner::submit(Self, Array[Source]) -> BatchTicket raise PlannerError
+
+pub(all) struct Source {
+  path : String
+  text : String
+} derive(Eq, @debug.Debug)
+pub fn Source::equal(Self, Self) -> Bool
+pub fn Source::not_equal(Self, Self) -> Bool
+pub fn Source::to_repr(Self) -> @debug.Repr
 
 // Type aliases
 

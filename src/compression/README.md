@@ -33,6 +33,7 @@ extensions, case-insensitively:
 | `.mbt`, `.mbti` | `moonbit` |
 | `.go` | `go` |
 | `.rs` | `rust` |
+| `.java` | `java` |
 
 The function parses the complete UTF-8 input with its actual grammar. AST node
 kinds and fields select original source fragments; no regular-expression body
@@ -133,6 +134,65 @@ scanning is the caller's responsibility **before** compression. There is no
 shared parser/cache or retained source pointer: each call owns its parser, tree
 and byte mask, and frees them before returning a MoonBit-managed byte plan.
 
+## Reusable asynchronous planner
+
+```moonbit
+pub(all) struct Source {
+  path : String
+  text : String
+}
+pub fn Planner::new(workers? : Int) -> Planner raise PlannerError
+pub fn Planner::submit(Self, Array[Source]) -> BatchTicket raise PlannerError
+pub async fn BatchTicket::finish(Self) -> Array[Outcome]
+pub async fn Planner::compress(Self, Array[Source]) -> Array[Outcome]
+pub async fn Planner::close(Self) -> Unit
+```
+
+`submit` synchronously copies eligible UTF-8 into C-owned storage and starts the
+batch before returning. The caller may then count original tokens on the main
+thread before awaiting `ticket.finish()`. `compress` is `submit(...).finish()`.
+Use `defer planner.close()` immediately after construction, including around work
+between submit and finish. Close after the final batch; reuse the pool between
+batches. A ticket retains its planner and its own snapshot of the source array.
+Results, ranges and fallback semantics match the single-source `compress`.
+Neither API performs security scanning.
+
+Planner and ticket state is opaque outside the package. Workers default to 2
+and must be 1..4 (otherwise `InvalidWorkers`); a batch contains at most four
+sources and at most 16 MiB of eligible original UTF-8 (`BatchLimit`). Unsupported
+and over-8-MiB sources return the existing exact fallback without copying into C.
+Only one unfinished ticket per pool is allowed (`Busy`), even for empty batches;
+a second finish raises `Finished`. Closing invalidates pending tickets and future
+submissions (`Closed`). Thread creation, staging allocation or result allocation
+failure raises `Unavailable`, not a retry or a synthetic timeout. Process-wide
+atomic reservations additionally cap all open planners together at four workers,
+four C-owned task inputs and 16 MiB raw UTF-8; exhausting another pool's budget
+also raises `Unavailable`. Reservations are released on staging failure, batch
+release and close (including partial thread-creation failure). Callers may
+explicitly choose the original serial API if construction or staging is
+unavailable; a failed submit has not started any tasks. Do not retry a failed
+finish or discard its timeout/cancellation.
+
+Each OS worker performs the entire parse, AST walk, keep-mask and wire-plan
+construction with its own input/parser/tree/scanner/selection/result. Workers
+never access managed values or call MoonBit allocation. The main thread converts
+wire plans to MoonBit bytes/text/ranges, preserving input order. Parser budgets
+remain 200 ms, traversal depth 512, fragments 65,536 and source size 8 MiB.
+Waiting polls with async sleep; it does not join on the event-loop thread while
+workers are running. Cancellation of finish stops queued work, atomically notifies
+parsing (Tree-sitter 0.25.3 progress callback) and postprocessing, drains under
+`async@0.19.2` cancellation protection, joins and frees the pool, then propagates
+cancellation. Close is idempotent and also cancellation-protected. The external
+object finalizer is an emergency stop/join, not a substitute for explicit close.
+
+The eight generated grammars do not mutate shared tables (some generated
+character-range arrays are not const-qualified but are only read). JS/TS/TSX
+scanners are stateless; Python and Rust state is per scanner; MoonBit's scanner has no shared
+mutation; Go and Java have no external scanner. Runtime parser/tree state is
+per task. Runtime allocator function pointers and locale are process-global:
+embedding callers must not change Tree-sitter allocators or the locale while
+planning. No grammar/runtime dependency has been upgraded.
+
 ## Build and verification
 
 Package-local C translation units include vendored resources using relative
@@ -143,12 +203,14 @@ v0.3.0. The subsequent four Go/Rust groups also passed current-source native
 CI on all three platforms. The two Java groups have been verified on macOS
 native with `moonc v0.10.15+943464bfa`; Java Windows/Linux execution has not
 been verified yet.
-All adapters use portable C and need no platform-specific flags.
+The pool uses pthreads on POSIX and Win32 threads on Windows. macOS links
+pthreads via the system library; POSIX toolchains that require it must link with
+`-pthread`. Windows/Linux worker execution has not yet been verified.
 
 With the project toolchain selected:
 
 ```
-moon check src/compression --target native --frozen
+moon check src/compression --target native --frozen --deny-warn
 moon test src/compression --target native --frozen
 moon fmt src/compression
 moon info src/compression --target native --frozen
@@ -172,3 +234,37 @@ Two Java groups cover complete generic/constructor/native/throws signatures,
 annotations, records/enums/interfaces, conservative fields, nested and anonymous
 class APIs, original reference anchors, exact CRLF/Unicode ranges and unchanged
 fallbacks. Java uses the fixed native parser described in `THIRD_PARTY.md`.
+
+The worker lifecycle group checks 1/2/4-worker ordered serial equivalence across
+all eight grammars, multi-batch reuse, source-array ownership, fallbacks, limits,
+empty input, busy/finished/closed states and protected cancellation with zero live
+workers afterward. Its scenarios run sequentially because the async test driver
+can otherwise run them concurrently against the process-wide hard budget.
+
+`tests/worker_pool_test.c` is a standalone POSIX harness. It also checks copied
+input ownership after the caller mutates/frees its input, independent original
+line-range accounting, deterministic parser timeout/depth limits, allocation and
+partial thread-creation failures, cross-pool quotas, and stop/drain/join. It does
+not rely on sub-millisecond timing assertions. For example, with Clang:
+
+```sh
+mkdir -p _build/compression-sanitizers
+clang -std=c11 -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -pthread \
+  -include src/compression/tests/worker_pool_faults.h \
+  -Dmalloc=sc_test_malloc -Dcalloc=sc_test_calloc -Dpthread_create=sc_test_pthread_create \
+  -c src/compression/worker_pool.c -o _build/compression-sanitizers/pool.o
+clang -std=c11 -D_POSIX_C_SOURCE=200809L -g -O1 -fsanitize=address,undefined \
+  -fno-omit-frame-pointer -pthread src/compression/tests/worker_pool_test.c \
+  src/compression/compression_core.c src/compression/runtime.c \
+  src/compression/*_parser.c src/compression/*_scanner.c \
+  _build/compression-sanitizers/pool.o -o _build/compression-sanitizers/pool-test
+_build/compression-sanitizers/pool-test
+```
+
+On macOS, ASan does not support LeakSanitizer: run with
+`ASAN_OPTIONS=detect_leaks=0:halt_on_error=1` and check an unsanitized build with
+`leaks --atExit -- <binary>` separately. Replace `address,undefined` by `thread`
+for a separate TSan run. These focused C runs do not instrument MoonBit's managed
+runtime/bridge and do not establish exhaustive thread safety. The new pool,
+bridge and harness C sources are original project code under the project MIT
+license; vendored grammar/runtime licenses remain unchanged.

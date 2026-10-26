@@ -1,5 +1,6 @@
 import {
   "moonbitlang/core/encoding/utf8",
+  "moonbitlang/async",
 }
 
 supported_targets = "native"
@@ -23,5 +24,7 @@ options(
     "java_parser.c",
     "compression_core.c",
     "ffi.c",
+    "worker_pool.c",
+    "worker_ffi.c",
   ],
 )
