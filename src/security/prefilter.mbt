@@ -7,8 +7,8 @@ extern "C" fn credential_candidates(text : String) -> Int32 = "moon_repomix_cred
 #cfg(not(target="native"))
 fn credential_candidates(text : String) -> Int32 {
   if text.contains("-----BEGIN ") {
-    31
+    63
   } else {
-    23
+    55
   }
 }

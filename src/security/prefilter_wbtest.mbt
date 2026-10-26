@@ -1,4 +1,17 @@
 ///|
+#cfg(target="native")
+fn assert_assignment_candidate_pruned(body : String) -> Unit raise {
+  assert_eq(credential_candidates(body) & 32, 0)
+}
+
+///|
+#cfg(not(target="native"))
+fn assert_assignment_candidate_pruned(body : String) -> Unit raise {
+  // The portable path deliberately keeps this detector family enabled.
+  assert_eq(credential_candidates(body) & 32, 32)
+}
+
+///|
 test "necessary literal families preserve the complete pinned detector result" {
   let policy = @moon_scrub.ScanConfig::secrets_only()
   assert_true(policy.extra_prefixes.is_empty())
@@ -51,7 +64,36 @@ test "necessary literal families preserve the complete pinned detector result" {
   }
   bodies.push(jwt)
   bodies.push(url)
-  bodies.push("password = '" + suffix + "'\r\n")
+  let keys = [
+    "password", "passwd", "pwd", "secret", "token", "api_key", "apikey", "private_key",
+    "authorization", "client_secret", "account_key", "shared_access_key", "sharedaccesskey",
+    "secret_key", "private_token", "passphrase", "credential", "auth_token", "refresh_token",
+    "session_key", "aws_secret_access_key", "PaSsWoRd", "API_KEY", "ToKeN",
+  ]
+  for key in keys {
+    for lead in ["", "1", "-", "中文 😀\n"] {
+      for separator in ["=", ":", "\" \t=", "'\t:"] {
+        let body = lead + key + separator + " '" + suffix + "'\r\n"
+        assert_true((credential_candidates(body) & 32) != 0)
+        assert_true(!@moon_scrub.scan_with_config(body, policy).is_empty())
+        bodies.push(body)
+      }
+    }
+  }
+  for key in ["nextToken", "_token", "token_suffix", "passwordHint"] {
+    let body = key + " = '" + suffix + "'"
+    assert_assignment_candidate_pruned(body)
+    bodies.push(body)
+  }
+  bodies.push("password\r\n= '" + suffix + "'")
+  for
+    basic in [
+      "Authorization: Basic ", "AUTHORIZATION BASIC ", "myauthorization basic ",
+    ] {
+    let body = basic + suffix
+    assert_true((credential_candidates(body) & 32) != 0)
+    bodies.push(body)
+  }
   bodies.push("Authorization: Basic " + "dXNlcjpwYXNz")
   bodies.push(
     "中文 😀\n" + url + " " + jwt + " bearer " + prefixes[0] + suffix,

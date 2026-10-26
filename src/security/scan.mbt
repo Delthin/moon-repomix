@@ -177,6 +177,7 @@ fn scan_credentials(text : String) -> Array[@moon_scrub.Finding] {
     detect_jwt: (candidates & 4) != 0,
     detect_private_key: (candidates & 8) != 0,
     detect_url_credential: (candidates & 16) != 0,
+    detect_assignment: (candidates & 32) != 0,
   })
 }
 
