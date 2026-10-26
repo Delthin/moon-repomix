@@ -32,7 +32,11 @@ fn require_native(encoder : Encoder) -> NativeCounter raise {
 }
 
 ///|
-fn assert_native_differential(encoder : Encoder, text : String) -> Unit raise {
+fn assert_native_differential(
+  encoder : Encoder,
+  text : String,
+  session : CountSession,
+) -> Unit raise {
   let counter = match encoder.native {
     Some(counter) => counter
     None => abort("native handle missing")
@@ -49,6 +53,18 @@ fn assert_native_differential(encoder : Encoder, text : String) -> Unit raise {
   // Do not let the public fallback hide a native failure in these assertions.
   assert_eq(native_counter_count(counter, bytes), expected)
   assert_eq(encoder.count(text), expected)
+  let storage = match session.native {
+    Some(storage) => storage
+    None => abort("native session missing")
+  }
+  assert_eq(native_session_count(storage, counter, bytes), expected)
+  assert_eq(session.count(text), expected)
+}
+
+///|
+async fn session_outside_owner_scope(assets : String) -> CountSession {
+  let owner = Encoder::load(assets + "/tokenizer-o200k_base.tiktoken")
+  owner.session()
 }
 
 ///|
@@ -56,6 +72,7 @@ async test "native count and byte boundaries match all 104 independent ID golden
   let assets = native_test_assets()
   let encoder = Encoder::load(assets + "/tokenizer-o200k_base.tiktoken")
   let counter = require_native(encoder)
+  let session = encoder.session()
   let cases : Array[NativeGolden] = @json.from_json(
     @json.parse(@fs.read_file(assets + "/tokenizer-golden.json").text()),
   )
@@ -67,7 +84,14 @@ async test "native count and byte boundaries match all 104 independent ID golden
       case.ids.length(),
       msg=case.name,
     )
-    assert_native_differential(encoder, case.text)
+    assert_native_differential(encoder, case.text, session)
+  }
+  let independent = encoder.session()
+  // Reordered complete documents reuse one memo without sharing it with the
+  // second session; neither count assumes additive or monotonic documents.
+  for i = cases.length() - 1; i >= 0; i = i - 1 {
+    assert_eq(session.count(cases[i].text), cases[i].ids.length())
+    assert_eq(independent.count(cases[i].text), cases[i].ids.length())
   }
 }
 
@@ -77,6 +101,7 @@ async test "native ordered alternatives Unicode widths NUL and deterministic mix
     native_test_assets() + "/tokenizer-o200k_base.tiktoken",
   )
   ignore(require_native(encoder))
+  let session = encoder.session()
   for
     text in [
       "",
@@ -116,7 +141,7 @@ async test "native ordered alternatives Unicode widths NUL and deterministic mix
       "😀".unsafe_substring(start=0, end=1) +
       "😀".unsafe_substring(start=1, end=2),
     ] {
-    assert_native_differential(encoder, text)
+    assert_native_differential(encoder, text, session)
   }
   let alphabet = [
     "a", "B", "猫", "𐐨", "𐐀", "\u{0301}", "\u{0903}", "ſ", "'", "r", "E",
@@ -133,7 +158,7 @@ async test "native ordered alternatives Unicode widths NUL and deterministic mix
         alphabet[(state % alphabet.length().reinterpret_as_uint()).reinterpret_as_int()],
       )
     }
-    assert_native_differential(encoder, text.to_string())
+    assert_native_differential(encoder, text.to_string(), session)
   }
   // Sweep the scalar range with surrounding overlapping letter/number classes.
   for cp = 0; cp <= 0x10ffff; cp = cp + 3979 {
@@ -142,6 +167,7 @@ async test "native ordered alternatives Unicode widths NUL and deterministic mix
       assert_native_differential(
         encoder,
         " A" + scalar + "a'ſ /" + scalar + "1234",
+        session,
       )
     }
   }
@@ -152,6 +178,7 @@ async test "native long pieces memo saturation repetition handle reuse and exact
   let assets = native_test_assets()
   let encoder = Encoder::load(assets + "/tokenizer-o200k_base.tiktoken")
   let counter = require_native(encoder)
+  let session = encoder.session()
   for
     text in [
       " ".repeat(4096),
@@ -164,7 +191,7 @@ async test "native long pieces memo saturation repetition handle reuse and exact
       "a".repeat(257),
       "antidisestablishmentarianism 中文 😀\u{0}\n".repeat(512),
     ] {
-    assert_native_differential(encoder, text)
+    assert_native_differential(encoder, text, session)
     assert_eq(
       native_counter_count(counter, @utf8.encode(text)),
       encoder.count(text),
@@ -183,13 +210,32 @@ async test "native long pieces memo saturation repetition handle reuse and exact
       text.write_string(" memokey" + word)
     }
   }
-  assert_native_differential(encoder, text.to_string())
-  assert_native_differential(encoder, "hello \u{0}! a'LL 😀")
+  assert_native_differential(encoder, text.to_string(), session)
+  assert_native_differential(encoder, "hello \u{0}! a'LL 😀", session)
+  // A fresh document after saturation must still be completely scanned/BPE'd.
+  for _ in 0..<3 {
+    for document in [" memokeyaaa", " memokeymkb", " newlateword", "", "hello!"] {
+      assert_native_differential(encoder, document, session)
+    }
+  }
+  assert_eq(session.count("a") + session.count("b"), 2)
+  assert_eq(session.count("ab"), 1)
+  assert_eq(session.count(""), 0)
   // Unsupported scratch size must not be confused with zero or approximation.
   let oversized = "\u{1}".repeat(1048577)
   assert_eq(native_counter_count(counter, @utf8.encode(oversized)), -1)
   assert_eq(encoder.encode_text(oversized, None), 1048577)
   assert_eq(encoder.count(oversized), 1048577)
+  let storage = match session.native {
+    Some(storage) => storage
+    None => abort("native session missing")
+  }
+  assert_eq(native_session_count(storage, counter, @utf8.encode(oversized)), -1)
+  assert_eq(session.count(oversized), 1048577)
+  assert_native_differential(
+    encoder, "hello 😀 after failed document", session,
+  )
+  assert_eq(session.count(""), 0)
   // Simulate an unavailable native allocation with an empty private resource.
   // The public loader still performs every strict validation before this FFI.
   let fallback : Encoder = {
@@ -197,14 +243,32 @@ async test "native long pieces memo saturation repetition handle reuse and exact
     categories: encoder.categories,
     native: Some(native_counter_new(b"", b"")),
   }
-  for text in ["", "!", "\u{0}", "hello 世界 😀", "a'ſ\r\n"] {
-    assert_eq(fallback.count(text), encoder.encode(text).length())
+  let legacy : Encoder = {
+    ranks: encoder.ranks,
+    categories: encoder.categories,
+    native: None,
+  }
+  let unavailable : CountSession = { owner: encoder, native: None, }
+  let fallback_session = fallback.session()
+  let legacy_session = legacy.session()
+  let scoped = session_outside_owner_scope(assets)
+  for _ in 0..<3 {
+    for text in ["", "!", "\u{0}", "hello 世界 😀", "a'ſ\r\n"] {
+      let expected = encoder.encode(text).length()
+      assert_eq(fallback.count(text), expected)
+      assert_eq(fallback_session.count(text), expected)
+      assert_eq(legacy_session.count(text), expected)
+      assert_eq(unavailable.count(text), expected)
+      assert_eq(scoped.count(text), expected)
+    }
   }
   for _ in 0..<4 {
     let another = Encoder::load(assets + "/tokenizer-o200k_base.tiktoken")
     ignore(require_native(another))
     assert_native_differential(
-      another, "\u{0} hello HELLO a'ſ 𝟛١Ⅷ² !?!",
+      another,
+      "\u{0} hello HELLO a'ſ 𝟛١Ⅷ² !?!",
+      another.session(),
     )
   }
 }
@@ -225,4 +289,12 @@ async test "panic native count rejects interior trailing surrogate" {
   )
   ignore(require_native(encoder))
   ignore(encoder.count("a" + "😀".unsafe_substring(start=1, end=2) + "b"))
+}
+
+///|
+async test "panic count session rejects malformed UTF-16 after memo reuse" {
+  let session = session_outside_owner_scope(native_test_assets())
+  assert_eq(session.count("hello"), 1)
+  assert_eq(session.count("hello"), 1)
+  ignore(session.count("a" + "😀".unsafe_substring(start=1, end=2) + "b"))
 }

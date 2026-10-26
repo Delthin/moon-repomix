@@ -8,27 +8,49 @@
 #include <stdlib.h>
 #include <string.h>
 #include <moonbit.h>
-static size_t allocation_no, fail_at, live;
+static size_t allocation_no, fail_at, live, live_bytes, peak_bytes;
+static struct { void *pointer; size_t size; } tracked[64];
 static int should_fail(void) { return ++allocation_no == fail_at; }
+static size_t tracked_index(void *p) {
+  for (size_t i = 0; i < 64; ++i) if (tracked[i].pointer == p) return i;
+  abort();
+}
+static void track_new(void *p, size_t n) {
+  if (!p) return;
+  size_t i = tracked_index(NULL);
+  tracked[i].pointer = p; tracked[i].size = n;
+  ++live; live_bytes += n;
+  if (live_bytes > peak_bytes) peak_bytes = live_bytes;
+}
 static void *test_malloc(size_t n) {
   if (should_fail()) return NULL;
-  void *p = malloc(n);
-  if (p) ++live;
-  return p;
+  void *p = malloc(n); track_new(p, n); return p;
 }
 static void *test_calloc(size_t n, size_t size) {
   if (should_fail()) return NULL;
-  void *p = calloc(n, size);
-  if (p) ++live;
-  return p;
+  assert(!n || size <= SIZE_MAX / n);
+  void *p = calloc(n, size); track_new(p, n * size); return p;
 }
 static void *test_realloc(void *p, size_t n) {
   if (should_fail()) return NULL;
+  assert(n);
+  if (!p) { void *out = realloc(NULL, n); track_new(out, n); return out; }
+  size_t i = tracked_index(p);
   void *out = realloc(p, n);
-  if (out && !p) ++live;
+  if (out) {
+    live_bytes -= tracked[i].size; live_bytes += n;
+    tracked[i].pointer = out; tracked[i].size = n;
+    if (live_bytes > peak_bytes) peak_bytes = live_bytes;
+  }
   return out;
 }
-static void test_free(void *p) { if (p) { assert(live); --live; free(p); } }
+static void test_free(void *p) {
+  if (!p) return;
+  size_t i = tracked_index(p); assert(live);
+  --live; live_bytes -= tracked[i].size;
+  tracked[i].pointer = NULL; tracked[i].size = 0;
+  free(p);
+}
 #define malloc test_malloc
 #define calloc test_calloc
 #define realloc test_realloc
@@ -40,7 +62,9 @@ static void test_free(void *p) { if (p) { assert(live); --live; free(p); } }
 #undef free
 #include "native_counter_ffi.c"
 _Noreturn void moonbit_panic(void) { abort(); }
-static void reset(size_t fail) { allocation_no = 0; fail_at = fail; }
+static void reset(size_t fail) {
+  allocation_no = 0; fail_at = fail; peak_bytes = live_bytes;
+}
 static uint8_t *read_bytes(const char *path, size_t *n) {
   FILE *f = fopen(path, "rb"); assert(f);
   assert(fseek(f, 0, SEEK_END) == 0);
@@ -124,6 +148,100 @@ static void synthetic_tie(void) {
   assert(live == 0);
   puts("BPE: independent left-tie/rank-zero regression passed");
 }
+static void session_tests(const NtCounter *c) {
+  size_t baseline = live, baseline_bytes = live_bytes;
+  reset(1); assert(!nt_session_new());
+  assert(nt_session_count(NULL, c, NULL, 0) == -1);
+  nt_session_free(NULL); assert(live == baseline);
+  uint8_t text[7305];
+  memcpy(text, "hi ", 3);
+  memset(text + 3, 'a', 300); text[303] = ' ';
+  memset(text + 304, 'b', 1000); text[1304] = ' ';
+  memset(text + 1305, '!', 6000);
+  reset(0); int32_t expected = nt_counter_count(c, text, sizeof(text));
+  assert(expected > 0 && live == baseline);
+  // All five lazy per-session allocations: two optional memo blocks and three
+  // scratch growth steps. A later call must work after every failure point.
+  for (size_t failure = 1; failure <= 5; ++failure) {
+    reset(0); NtSession *s = nt_session_new(); assert(s);
+    reset(failure);
+    int32_t got = nt_session_count(s, c, text, sizeof(text));
+    assert(got == (failure <= 2 ? expected : -1));
+    assert(s->scratch.size == 0);
+    if (failure <= 2) assert(s->memo.attempted && !s->memo.entries);
+    reset(0);
+    assert(nt_session_count(s, c, text, sizeof(text)) == expected);
+    if (failure <= 2) assert(allocation_no == 0); // no memo allocation retry
+    assert(nt_session_count(s, c, NULL, 0) == 0);
+    assert(nt_session_count(s, c, (uint8_t *)"hello", 5) == 1);
+    assert(nt_session_count(s, c, text, sizeof(text)) == expected);
+    assert(nt_session_count(s, NULL, text, sizeof(text)) == -1);
+    assert(nt_session_count(s, c, text, (size_t)INT32_MAX + 1) == -1);
+    assert(s->scratch.size == 0);
+    assert(nt_session_count(s, c, text, sizeof(text)) == expected);
+    nt_session_free(s); assert(live == baseline && live_bytes == baseline_bytes);
+  }
+  reset(0); NtSession *s = nt_session_new(); assert(s);
+  assert(nt_session_count(s, c, NULL, 0) == 0);
+  assert(nt_session_count(s, c, (uint8_t *)"!", 1) == 1);
+  assert(allocation_no == 1 && !s->memo.attempted && !s->scratch.nodes);
+  uint8_t *borrowed = malloc(5); assert(borrowed); memcpy(borrowed, "hello", 5);
+  assert(nt_session_count(s, c, borrowed, 5) == 1);
+  free(borrowed); // cached full key must survive release of the input snapshot
+  assert(s->memo.payload_capacity == NT_MEMO_PAYLOAD && s->memo.key_limit == NT_MEMO_KEYS);
+  reset(0);
+  assert(nt_session_count(s, c, (uint8_t *)"hello", 5) == 1);
+  assert(allocation_no == 0);
+  NtSession *other = nt_session_new(); assert(other && !other->memo.attempted);
+  size_t old_keys = s->memo.keys;
+  assert(nt_session_count(other, c, text, sizeof(text)) == expected);
+  assert(s->memo.keys == old_keys && !s->scratch.nodes && other->scratch.nodes);
+  assert(nt_session_count(s, c, text, sizeof(text)) == expected);
+  assert(s->scratch.nodes != other->scratch.nodes && s->memo.payload != other->memo.payload);
+  nt_session_free(other);
+  // Exercise the true 24 MiB live scratch bound, including replacement growth.
+  uint8_t *large = malloc(NT_MAX_PIECE + 1); assert(large);
+  memset(large, 1, NT_MAX_PIECE + 1);
+  reset(0);
+  assert(nt_session_count(s, c, large, NT_MAX_PIECE / 2) == (int32_t)(NT_MAX_PIECE / 2));
+  assert(nt_session_count(s, c, large, NT_MAX_PIECE) == (int32_t)NT_MAX_PIECE);
+  size_t bound = baseline_bytes + sizeof(NtSession) + NT_MEMO_PAYLOAD +
+                 NT_MEMO_SLOTS * sizeof(NtMemoEntry) + NT_MAX_PIECE * 24;
+  assert(live_bytes <= bound && peak_bytes <= bound);
+  assert(s->scratch.capacity == NT_MAX_PIECE);
+  assert(nt_session_count(s, c, large, NT_MAX_PIECE + 1) == -1);
+  assert(s->scratch.size == 0);
+  assert(nt_session_count(s, c, (uint8_t *)"hello", 5) == 1);
+  assert(nt_session_count(s, c, NULL, 0) == 0);
+  free(large); nt_session_free(s);
+  assert(live == baseline && live_bytes == baseline_bytes);
+  // 8192 distinct complete 256-byte letter pieces across separate documents,
+  // then reverse-order lookups after saturation and a noncached late document.
+  reset(0); s = nt_session_new(); assert(s);
+  int32_t counts[NT_MEMO_KEYS]; uint8_t key[256];
+  key[0] = ' '; memset(key + 1, 'a', 252);
+  for (size_t i = 0; i < NT_MEMO_KEYS; ++i) {
+    key[253] = (uint8_t)('a' + i / 676);
+    key[254] = (uint8_t)('a' + i / 26 % 26);
+    key[255] = (uint8_t)('a' + i % 26);
+    counts[i] = nt_session_count(s, c, key, sizeof(key)); assert(counts[i] > 0);
+  }
+  assert(s->memo.keys == NT_MEMO_KEYS && s->memo.used == NT_MEMO_PAYLOAD);
+  reset(0);
+  for (size_t i = NT_MEMO_KEYS; i-- > 0;) {
+    key[253] = (uint8_t)('a' + i / 676);
+    key[254] = (uint8_t)('a' + i / 26 % 26);
+    key[255] = (uint8_t)('a' + i % 26);
+    assert(nt_session_count(s, c, key, sizeof(key)) == counts[i]);
+    assert(nt_memo_get(&s->memo, key, sizeof(key), nt_hash(key, sizeof(key))) == counts[i]);
+  }
+  assert(nt_session_count(s, c, text, sizeof(text)) == expected);
+  assert(nt_session_count(s, c, (uint8_t *)"hello", 5) == 1);
+  assert(nt_session_count(s, c, NULL, 0) == 0);
+  assert(s->memo.keys == NT_MEMO_KEYS && s->memo.used == NT_MEMO_PAYLOAD);
+  nt_session_free(s); assert(live == baseline && live_bytes == baseline_bytes);
+  puts("session: lazy bounded memo/scratch, owned cross-document keys, independent sessions, saturation, every OOM recovery, heap reset and 24MiB transient bound passed");
+}
 int main(void) {
   size_t rn, un;
   uint8_t *r = read_bytes("assets/tokenizer-o200k_base.tiktoken", &rn);
@@ -201,7 +319,11 @@ int main(void) {
   assert(before == (nt_hash(c->arena, c->offsets[NT_RANKS]) ^
                     nt_hash(c->categories, NT_CATEGORY_BYTES) ^
                     nt_hash((uint8_t *)c->slots, NT_SLOTS * sizeof(uint32_t))));
-  nt_counter_free(c); assert(live == 0);
+  session_tests(c);
+  assert(before == (nt_hash(c->arena, c->offsets[NT_RANKS]) ^
+                    nt_hash(c->categories, NT_CATEGORY_BYTES) ^
+                    nt_hash((uint8_t *)c->slots, NT_SLOTS * sizeof(uint32_t))));
+  nt_counter_free(c); assert(live == 0 && live_bytes == 0);
   puts("count: all 5 call allocation failures, scratch cap/growth/reuse, immutable table fingerprints passed");
   for (size_t i = 0; i < 16; ++i) {
     moonbit_bytes_t rb = moonbit_make_bytes_raw((int32_t)rn), ub = moonbit_make_bytes_raw((int32_t)un);
@@ -215,6 +337,35 @@ int main(void) {
     moonbit_decref(handle); assert(live > 0);
     moonbit_decref(input); moonbit_decref(handle); assert(live == 0);
   }
+  for (size_t i = 0; i < 16; ++i) {
+    moonbit_bytes_t rb = moonbit_make_bytes_raw((int32_t)rn), ub = moonbit_make_bytes_raw((int32_t)un);
+    memcpy(rb, r, rn); memcpy(ub, u, un);
+    NtHandle *owner = moon_repomix_counter_new(rb, ub); assert(owner->counter);
+    moonbit_decref(rb); moonbit_decref(ub);
+    reset(1);
+    NtSessionHandle *failed = moon_repomix_count_session_new(); assert(!failed->session);
+    moonbit_bytes_t input = moonbit_make_bytes_raw(5); memcpy(input, "hello", 5);
+    assert(moon_repomix_count_session_count(failed, owner, input) == -1);
+    moonbit_decref(failed);
+    reset(0);
+    NtSessionHandle *session = moon_repomix_count_session_new(); assert(session->session);
+    moonbit_incref(session);
+    for (size_t call = 0; call < 8; ++call) {
+      assert(moon_repomix_count_session_count(session, owner, input) == 1);
+      moonbit_decref(input);
+      input = moonbit_make_bytes_raw(5); memcpy(input, "hello", 5);
+    }
+    moonbit_decref(input); moonbit_decref(session);
+    if (i % 2) {
+      moonbit_decref(owner); // finalizer must not access the already freed owner
+      moonbit_decref(session);
+    } else {
+      moonbit_decref(session);
+      moonbit_decref(owner);
+    }
+    assert(live == 0 && live_bytes == 0);
+  }
+  puts("session FFI: 16 real lifecycles, fresh/released input per call, constructor OOM, refcounts and both finalizer orders passed");
   moonbit_bytes_t empty = moonbit_make_bytes_raw(0);
   NtHandle *unavailable = moon_repomix_counter_new(empty, empty);
   assert(moon_repomix_counter_count(unavailable, empty) == -1);

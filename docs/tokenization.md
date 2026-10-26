@@ -8,6 +8,8 @@
 pub async fn Encoder::load(path : String) -> Encoder
 pub fn Encoder::encode(self : Encoder, text : String) -> Array[Int]
 pub fn Encoder::count(self : Encoder, text : String) -> Int
+pub fn Encoder::session(self : Encoder) -> CountSession
+pub fn CountSession::count(self : CountSession, text : String) -> Int
 ```
 
 向 `load` 传入词表的绝对文件路径，词表同目录须有 `tokenizer-unicode-16.0.0.txt`。源码中的词表名为 `assets/tokenizer-o200k_base.tiktoken`；完整安装后的布局为：
@@ -31,7 +33,11 @@ moon run scripts/tokenizer-install-assets.mbtx --target native /absolute/repo /a
 
 该辅助脚本校验并复制两份运行资源及许可，重跑会覆盖对应文件，保留其他文件。`tokenizer-cases.json`、`tokenizer-golden.json` 是开发夹具。黄金 JSON 将 U+FFFE/U+FFFF 写为 `\ufffe`/`\uffff`，解析后的字符串及 token ID 不变，JSON 文件本身可作为 XML 正文。
 
-最终 token 总数须对完整渲染文档一次编码。BPE 和预切分可能跨拼接边界变化，因此各片段计数相加不能代替总数。`encode` 保留 MoonBit 完整 ID 路径；`count` 使用私有单线程 C 内核，以同样的预切分、合并顺序和 rank 规则只累计符号数，省去完整 ID 数组及最终 rank 回查。旧 MoonBit count 保留为精确参考与保守回退路径，公开接口不变。
+最终 token 总数须对完整渲染文档一次编码。BPE 和预切分可能跨拼接边界变化，因此各片段计数相加不能代替总数。`encode` 保留 MoonBit 完整 ID 路径；`count` 使用私有单线程 C 内核，以同样的预切分、合并顺序和 rank 规则只累计符号数，省去完整 ID 数组及最终 rank 回查。旧 MoonBit count 保留为精确参考与保守回退路径，原有 `Encoder.load`/`encode`/`count` 行为不变。
+
+`CountSession` 是 opaque、同步、单线程的请求级计数会话，可在一次 pack 内复用 piece memo 和 BPE scratch。每次 `encoder.session()` 都创建独立存储；会话强持有原 Encoder，即使调用者的局部 Encoder 已离开作用域，词表仍存活。Encoder 本身仍不可变、可重入，不保存会话缓存，也不承担额外的旧 `count` 调用分配成本。会话不应放入跨请求共享的不可变 runtime，也不应并发使用同一会话。
+
+可用同一会话依次计数原始正文、处理后正文、最终完整文档以及各个完整 partition 候选。**每次调用仍从头完整预切分并精确 BPE**；跨调用只复用拥有完整字节键的片段结果，不缓存文件总数，不假设候选单调，也不能用逐文件之和替代最终 whole count。会话释放时由 external-object finalizer 释放其缓存和工作区，无需另加关闭 API。
 
 ## Token 分布与排名
 
@@ -63,10 +69,11 @@ BPE 核心改编自 `howtomakeaname/tokenizers-moonbit@0.16.3`，保留链接符
 
 - `load` 先完成原有摘要和 MoonBit 格式校验，再把**同一份原始字节快照**借用给 C。C 复制出 token arena、连续 rank 偏移表、524,288 槽开放寻址索引及每码点 4 bit 的 Unicode 16 类别表；不借用 MoonBit Map 的内部表示，不保留资源 bytes 指针。rank 0 和含 NUL 的键都按长度精确比较。
 - UTF-8 扫描保持有序分支、完整标量推进和原有回溯。BPE 使用连续链接节点和索引数组最小堆；每个存活左符号至多一个候选，更新相邻项而不积累过期记录。比较顺序为 rank、左字节位置；较低 rank、最左合并优先。
-- scratch 在一次 count 内按需增长并复用，每个容量槽 24 字节（五个 32-bit 节点字段加一个堆位置），容量向上取 2 的幂。单个片段上限 1 MiB，因此 scratch 上限 24 MiB。超过该界限的非直接命中片段请求完整 MoonBit count 回退，不返回部分结果。
-- 平坦精确 memo 按输入大小延迟分配，最多 8,192 键、16,384 索引槽、每键 256 字节、键 payload 总量不超过 2 MiB。hash 冲突后仍比较长度和全部字节；饱和或超长键跳过缓存，计数不变。memo 分配失败也只禁用缓存。
-- 所有 C-owned 分配检查失败与乘法溢出；资源构建或 scratch 失败、不可表示长度请求旧路径精确回退，不把失败当作 0 或近似值。C 每次返回（含失败）均释放 scratch 和 memo；handle 没有跨调用可变缓存。
-- `src/metrics/native_counter_ffi.c` 使用 external object finalizer 释放 C-owned 表，不释放运行时容器。FFI 参数全部显式 borrow；不保存调用参数，也不对 readonly MoonBit 对象隐藏写入。编码器共享的表保持不可变，复用不累积状态。
+- scratch 按需增长，每个容量槽 24 字节（五个 32-bit 节点字段加一个堆位置），容量向上取 2 的幂。单个片段上限 1 MiB，因此 scratch 上限 24 MiB，包括先释放旧 buffer 再增长时的瞬时 C-owned 存储。超过该界限的非直接命中片段请求完整 MoonBit count 回退，不返回部分结果。
+- 平坦精确 memo 最多 8,192 键、16,384 索引槽、每键 256 字节、键 payload 总量不超过 2 MiB。hash 冲突后仍比较长度和全部字节；饱和或超长键停止插入，未命中片段仍精确 BPE。`Encoder::count` 延迟按本次输入大小分配，返回（含失败）时释放全部 memo/scratch，原有资源成本不变。
+- `src/metrics/count_session.mbt` 的会话把 memo/scratch 保留到会话释放。第一次可缓存片段延迟分配上述有界完整 memo，不会因首个文档短而缩小后续容量；empty/仅单字节片段不分配 memo。键完整复制到 C-owned payload，绝不借用前次输入；scratch 没有指向前次输入的字段。所有 limits 按每个会话独立约束，不跨请求累积。
+- 每次会话 count 的堆长度、局部总数和错误状态重新开始并在返回时清理；此前正确的 memo entries 可保留，包括某个后续片段失败的调用。C-owned session 构建失败使该会话一直使用完整 MoonBit fallback；memo 分配失败使该会话禁用缓存且不重试，计数仍精确；scratch 分配失败或片段超限只让当前文档回退，后续 count 仍可使用会话（必要时重新分配 scratch）。所有 C-owned 分配检查失败与乘法溢出，不把失败当作部分计数、0 或近似结果。
+- `src/metrics/native_counter_ffi.c` 分别以 external-object finalizer 释放 C-owned 词表和会话存储，不释放运行时容器。`NativeCountSession` 不保留词表 owner 或 Moon 托管 pointer，finalizer 不访问 owner。MoonBit CountSession 强持有 Encoder，每次 FFI 显式 borrow 会话、owner 和本次 bytes；只改变独立 C 会话状态，不对 readonly MoonBit 对象隐藏写入。编码器共享表保持不可变、无跨调用可变缓存。
 
 MoonBit Map 与类别表仍供 `encode`、旧 count 和强差分使用；C count 热路径不经过通用 Map 或逐合并的 RC 对象操作。
 
@@ -98,9 +105,9 @@ MoonBit Map 与类别表仍供 `encode`、旧 count 和强差分使用；C count
 
 白盒测试将完整 199,998 条词表逐条与原 UTF-8/split、core Base64 和 `parse_int` 参考路径核对，并检查字节解析器的格式拒绝及有界读取。UTF-8 预切分另以明确的正则分片边界检查可选前缀回退、类别交叠、多字节数字、`ſ` 缩写、Unicode 空白回退及标点后缀；显式 UTF-8 字节覆盖 1–4 字节宽度转换、BOM、非字符码点及最大标量，并检查合法与非法代理项构造。
 
-新增五组 native 白盒测试直接检查 C 返回值，不能由公开 fallback 掩盖失败：全部 104 组独立 ID goldens 同时核对 C count、旧 encode/count 与逐片字节边界；覆盖固定种子混合文本、补充标量、NUL、正则优先级、长空白/标点/BPE、256 字节键边界、8,400 个不同片段及重复、handle 复用、超限与不可用 handle 的精确 fallback、原生路径非法代理项 panic。原有十组测试保持原断言。
+新增五组 native 白盒测试直接检查 C 返回值，不能由公开 fallback 掩盖失败：全部 104 组独立 ID goldens 同时核对 C count、旧 encode/count 与逐片字节边界；覆盖固定种子混合文本、补充标量、NUL、正则优先级、长空白/标点/BPE、256 字节键边界、8,400 个不同片段及重复、handle 复用、超限与不可用 handle 的精确 fallback、原生路径非法代理项 panic。原有十组测试保持原断言。这些 native 组同时使用持久 CountSession 多轮、逆序计数 goldens，与独立会话交错调用；核对完整拼接非可加性、8,400-key 饱和后的新文档、超限 fallback 后再次计数、无 native 的精确 fallback、owner 离开局部作用域后的会话使用。另以一组 panic 检查复用会话后非法代理项仍被拒绝，共 16 组 metrics 测试。
 
-`src/metrics/native_counter_sanitize_test.c` 是独立 C 单元驱动，不链接进产品。它对真实内核和 FFI 执行 ASan/UBSan：穷举构建和调用内各个 C-owned 分配失败点；与独立的逐轮全候选重算算法比较 4,096 个固定样例；专门构造 rank 0/左侧 tie、强制 memo hash 冲突、8,192 个 256 字节键填满 2 MiB payload；检查 scratch 增长/边界、不可变表指纹，以及 16 次真实 external object 的资源提前释放、重复 borrow、最终 finalizer。分配跟踪最终必须为 0。可在源码根执行（`MOON_HOME` 指向匹配版本的工具链）：
+`src/metrics/native_counter_sanitize_test.c` 是独立 C 单元驱动，不链接进产品。它对真实内核和 FFI 执行 ASan/UBSan：穷举构建和调用内各个 C-owned 分配失败点；与独立的逐轮全候选重算算法比较 4,096 个固定样例；专门构造 rank 0/左侧 tie、强制 memo hash 冲突、8,192 个 256 字节键填满 2 MiB payload；检查 scratch 增长/边界、不可变表指纹，以及 16 次真实 external object 的资源提前释放、重复 borrow、最终 finalizer。会话验证另覆盖构建失败和每个 lazy memo/scratch 分配失败后的重复调用、输入释放后的完整键、独立会话不共享状态、8,192 个完整 256-byte 跨文档键填满 payload、增长时 24 MiB scratch 瞬时上限、16 次真实会话 FFI 生命周期与两种 owner/session finalizer 顺序。所有 C-owned 分配跟踪（块数和字节数）最终必须为 0。可在源码根执行（`MOON_HOME` 指向匹配版本的工具链）：
 
 ```sh
 mkdir -p _build/native-counter-evidence

@@ -1,7 +1,7 @@
 // Original private C count implementation. The linked-symbol BPE algorithm is
 // also used by bpe.mbt (adapted from tokenizers-moonbit 0.16.3, Apache-2.0;
 // LICENSES/tokenizer-tokenizers-moonbit-Apache-2.0.txt). This implementation uses
-// an indexed array min-heap, C-owned immutable ranks and call-local storage.
+// an indexed array min-heap, C-owned immutable ranks and isolated count storage.
 #include "native_counter.h"
 #include <limits.h>
 #include <stdlib.h>
@@ -330,11 +330,13 @@ static void nt_memo_put(NtMemo *m, const uint8_t *s, size_t n, uint64_t h, int32
   m->used += n;
   ++m->keys;
 }
-int32_t nt_counter_count(const NtCounter *c, const uint8_t *text, size_t len) {
+// Shared loop: a temporary call uses input-sized storage, while an explicit
+// session lazily allocates the bounded memo once for its entire lifetime.
+static int32_t nt_count(const NtCounter *c, const uint8_t *text, size_t len,
+                        NtScratch *scratch, NtMemo *memo, size_t memo_input_len) {
+  scratch->size = 0;
   if (!c || len > INT32_MAX || (!text && len)) return -1;
   if (!len) return 0;
-  NtScratch scratch = {0};
-  NtMemo memo = {0};
   size_t start = 0;
   int32_t total = 0;
   while (start < len) {
@@ -344,15 +346,15 @@ int32_t nt_counter_count(const NtCounter *c, const uint8_t *text, size_t len) {
     const uint8_t *piece = text + start;
     int32_t count = 1;
     if (n > 1) {
-      // Lazy, input-sized bounded memo; no per-piece allocation and no table
-      // allocation at all for empty/single-byte-only documents.
-      if (n <= NT_MEMO_KEY && !memo.attempted) nt_memo_init(&memo, len);
+      // Lazy bounded memo; a temporary call sizes it to this input. No
+      // per-piece allocation, nor any table for empty/single-byte-only input.
+      if (n <= NT_MEMO_KEY && !memo->attempted) nt_memo_init(memo, memo_input_len);
       uint64_t h = n <= NT_MEMO_KEY ? nt_hash(piece, n) : 0;
-      count = nt_memo_get(&memo, piece, n, h);
+      count = nt_memo_get(memo, piece, n, h);
       if (count < 0) {
-        count = nt_bpe(c, piece, n, &scratch);
+        count = nt_bpe(c, piece, n, scratch);
         if (count < 0) { total = -1; break; }
-        nt_memo_put(&memo, piece, n, h, count);
+        nt_memo_put(memo, piece, n, h, count);
       }
     }
     // count <= piece bytes, and len <= INT32_MAX, including the final sum.
@@ -360,10 +362,39 @@ int32_t nt_counter_count(const NtCounter *c, const uint8_t *text, size_t len) {
     total += count;
     start = end;
   }
+  // No partial total or heap/error state survives a call, including fallback.
+  // Already copied exact memo entries remain valid after a later piece fails.
+  scratch->size = 0;
+  return total;
+}
+int32_t nt_counter_count(const NtCounter *c, const uint8_t *text, size_t len) {
+  NtScratch scratch = {0};
+  NtMemo memo = {0};
+  int32_t total = nt_count(c, text, len, &scratch, &memo, len);
   free(scratch.nodes);
   free(memo.entries);
   free(memo.payload);
   return total;
+}
+
+struct NtSession { NtScratch scratch; NtMemo memo; };
+NtSession *nt_session_new(void) { return nt_array(1, sizeof(NtSession), 1); }
+void nt_session_free(NtSession *session) {
+  if (!session) return;
+  free(session->scratch.nodes);
+  free(session->memo.entries);
+  free(session->memo.payload);
+  free(session);
+}
+int32_t nt_session_count(NtSession *session, const NtCounter *owner,
+                          const uint8_t *text, size_t len) {
+  if (!session) return -1;
+  // No owner or borrowed input pointer is stored in the session. The MoonBit
+  // CountSession strongly owns its Encoder and supplies it on every call.
+  // Memo OOM disables memo for this session (no retry); scratch OOM discards
+  // that buffer and requests fallback for this document. Later calls may
+  // allocate scratch again and remain usable; an oversize piece is not poison.
+  return nt_count(owner, text, len, &session->scratch, &session->memo, SIZE_MAX);
 }
 int32_t nt_counter_piece_end(const NtCounter *c, const uint8_t *text, size_t len, int32_t start) {
   if (!c || !text || len > INT32_MAX || start < 0 || (size_t)start >= len) return -1;

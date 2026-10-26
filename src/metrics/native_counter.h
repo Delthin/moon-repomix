@@ -10,6 +10,16 @@ NtCounter *nt_counter_new(const uint8_t *ranks, size_t ranks_len,
 void nt_counter_free(NtCounter *counter);
 // -1 requests the exact MoonBit fallback; never a partial/approximate count.
 int32_t nt_counter_count(const NtCounter *counter, const uint8_t *text, size_t len);
+// Explicit single-threaded count storage. It owns no vocabulary/owner pointer;
+// the caller must keep one fixed counter alive and borrow it on every call.
+// NULL construction or a negative count requests exact MoonBit fallback.
+// Memo OOM disables caching for the session. Scratch failure/oversize rejects
+// only the current document; later calls remain usable. Limits are unchanged.
+typedef struct NtSession NtSession;
+NtSession *nt_session_new(void);
+void nt_session_free(NtSession *session);
+int32_t nt_session_count(NtSession *session, const NtCounter *owner,
+                          const uint8_t *text, size_t len);
 // Private boundary probe shared by the FFI differential tests.
 int32_t nt_counter_piece_end(const NtCounter *counter, const uint8_t *text,
                              size_t len, int32_t start);

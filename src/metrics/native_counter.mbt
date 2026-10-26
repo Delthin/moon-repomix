@@ -16,3 +16,18 @@ extern "c" fn native_counter_count(
   counter : NativeCounter,
   text : Bytes,
 ) -> Int32 = "moon_repomix_counter_count"
+
+///|
+// Owns only mutable C memo/scratch, never an Encoder or borrowed MoonBit bytes.
+priv type NativeCountSession
+
+///|
+extern "c" fn native_session_new() -> NativeCountSession = "moon_repomix_count_session_new"
+
+///|
+#borrow(session, owner, text)
+extern "c" fn native_session_count(
+  session : NativeCountSession,
+  owner : NativeCounter,
+  text : Bytes,
+) -> Int32 = "moon_repomix_count_session_count"
