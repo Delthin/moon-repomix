@@ -143,6 +143,23 @@ async test "native ordered alternatives Unicode widths NUL and deterministic mix
     ] {
     assert_native_differential(encoder, text, session)
   }
+  // ASCII-only upper*/lower* fast exits, optional one-byte prefixes, and
+  // non-ASCII extensions must keep the original ordered Unicode boundaries.
+  for prefix in ["", " ", "!", "\u{0}", "\t", "\r", "\n", "1"] {
+    for word in ["a", "ABC", "ABCdef", "abCD"] {
+      for
+        edge in [
+          "", "é", "İ", "ǅ", "ʰ", "猫", "\u{0301}", "\u{0903}", "𐐨", "😀",
+          "'ſ", "'RE", "'lL", "'ré", "\u{2028}",
+        ] {
+        assert_native_differential(
+          encoder,
+          prefix + word + edge + "aB!",
+          session,
+        )
+      }
+    }
+  }
   let alphabet = [
     "a", "B", "猫", "𐐨", "𐐀", "\u{0301}", "\u{0903}", "ſ", "'", "r", "E",
     "l", "L", "0", "²", "Ⅷ", "𝟛", "١", "\u{0}", "\u{7f}", "!", "/", "😀",
@@ -217,6 +234,22 @@ async test "native long pieces memo saturation repetition handle reuse and exact
     for document in [" memokeyaaa", " memokeymkb", " newlateword", "", "hello!"] {
       assert_native_differential(encoder, document, session)
     }
+  }
+  // Alternate late document vocabularies after saturation; their memo contents
+  // may replace earlier pieces, but every full document must match both oracles.
+  for round in 0..<3 {
+    let later = StringBuilder()
+    for i in 0..<256 {
+      let word = String::from_array([
+        (97 + round).unsafe_to_char(),
+        (97 + i / 26).unsafe_to_char(),
+        (97 + i % 26).unsafe_to_char(),
+      ])
+      later.write_string(" clockword" + word + "'ſ\u{0}Aé")
+    }
+    let document = later.to_string()
+    assert_native_differential(encoder, document, session)
+    assert_native_differential(encoder, document, session)
   }
   assert_eq(session.count("a") + session.count("b"), 2)
   assert_eq(session.count("ab"), 1)

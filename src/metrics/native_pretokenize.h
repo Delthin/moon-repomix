@@ -62,8 +62,31 @@ static size_t nt_contraction(const uint8_t *s, size_t n, size_t end) {
     default: return end;
   }
 }
-static size_t nt_piece_end(const NtCounter *c, const uint8_t *s, size_t n,
-                           size_t start) {
+// In ASCII the two ordered letter branches both reduce to upper* lower*.
+// A lower->upper transition ends this piece. Only an ASCII non-CR/LF,
+// non-letter/digit may prefix it. A non-ASCII extension boundary must use the
+// original Unicode branches, including their overlapping Lm/Lo/M categories.
+static size_t nt_ascii_letter_end(const uint8_t *s, size_t n, size_t start) {
+  size_t end = start;
+  unsigned first = s[end];
+  if ((unsigned)((first | 32u) - 'a') >= 26) {
+    if (first >= 128 || first == '\r' || first == '\n' ||
+        (first >= '0' && first <= '9') || ++end == n ||
+        (unsigned)((s[end] | 32u) - 'a') >= 26) return 0;
+  }
+  unsigned lower = 0;
+  while (end < n) {
+    unsigned b = s[end];
+    if ((unsigned)((b | 32u) - 'a') >= 26 || (!(b & 32u) && lower)) break;
+    lower |= b & 32u;
+    ++end;
+  }
+  if (end < n && s[end] >= 128) return 0;
+  // Shared case-insensitive suffix logic also handles Unicode long-s (ſ).
+  return nt_contraction(s, n, end);
+}
+static size_t nt_piece_end_general(const NtCounter *c, const uint8_t *s, size_t n,
+                                   size_t start) {
   uint32_t first = nt_scalar(s, n, start);
   size_t after = start + nt_width(first);
   unsigned cat = nt_category(c, first);
@@ -106,5 +129,10 @@ static size_t nt_piece_end(const NtCounter *c, const uint8_t *s, size_t n,
   if (newline > start) return newline;
   if (end == n) return end;
   return last_space > start ? last_space : end;
+}
+static size_t nt_piece_end(const NtCounter *c, const uint8_t *s, size_t n,
+                           size_t start) {
+  size_t end = nt_ascii_letter_end(s, n, start);
+  return end ? end : nt_piece_end_general(c, s, n, start);
 }
 #endif

@@ -127,6 +127,105 @@ static void memo_tests(void) {
   assert(live == 0);
   puts("memo: exact NUL/collisions, 8192 keys, 2MiB payload, 256/257-byte boundary passed");
 }
+static void clock_tests(void) {
+  // A tiny full clock forces wraparound probe clusters and real deletion on
+  // every insertion. Same-hash keys differ by NUL contents and length.
+  NtMemoEntry entries[8] = {0}; uint8_t payload[4 * NT_MEMO_KEY];
+  NtMemo m = {.entries = entries, .payload = payload, .slots = 8,
+              .key_limit = 4, .payload_capacity = sizeof(payload), .replacing = 1};
+  const uint8_t keys[4][3] = {{'a',0,'b'}, {'a',0,'c'}, {'a',0,0}, {'b',0,'a'}};
+  for (size_t i = 0; i < 4; ++i) nt_memo_put(&m, keys[i], i == 2 ? 2 : 3, 7, (int32_t)i);
+  assert(m.keys == 4 && m.used == sizeof(payload));
+  assert(nt_memo_get(&m, keys[0], 3, 7) == 0);
+  assert(nt_memo_get(&m, keys[2], 2, 7) == 2);
+  assert(nt_memo_get(&m, keys[2], 3, 7) == -1);
+  for (size_t i = 0; i < 8; ++i) entries[i].recent = 0;
+  assert(nt_memo_get(&m, keys[0], 3, 7) == 0); // second chance protects slot 7
+  m.hand = 7;
+  uint8_t incoming[] = {'n',0,'w'};
+  nt_memo_put(&m, incoming, 3, 7, 9);
+  incoming[1] = '!'; // borrowed source is never retained or aliased
+  const uint8_t original[] = {'n',0,'w'};
+  assert(nt_memo_get(&m, incoming, 3, 7) == -1);
+  assert(nt_memo_get(&m, original, 3, 7) == 9);
+  assert(nt_memo_get(&m, keys[0], 3, 7) == 0);
+  assert(nt_memo_get(&m, keys[1], 3, 7) == -1);
+  assert(nt_memo_get(&m, keys[2], 2, 7) == 2);
+  assert(nt_memo_get(&m, keys[3], 3, 7) == 3);
+  uint8_t too_long[257] = {0}; size_t hand = m.hand;
+  nt_memo_put(&m, too_long, sizeof(too_long), 7, 99);
+  assert(m.hand == hand && m.keys == 4 && m.used == sizeof(payload));
+  for (uint32_t round = 0; round < 4096; ++round) {
+    struct { uint8_t key[8]; size_t n; uint64_t h; int32_t count; } previous[4];
+    size_t found = 0;
+    for (size_t i = 0; i < 8; ++i) if (entries[i].len) {
+      NtMemoEntry e = entries[i]; assert(found < 4 && e.len <= 8);
+      previous[found].n = e.len; previous[found].h = e.hash;
+      previous[found].count = (int32_t)e.count;
+      memcpy(previous[found++].key, payload + e.offset, e.len);
+    }
+    assert(found == 4);
+    uint8_t key[] = {'x', 0, (uint8_t)(round >> 8), (uint8_t)round, 'z', 0};
+    uint64_t h = round % 3 ? 7 : nt_hash(key, sizeof(key));
+    nt_memo_put(&m, key, sizeof(key), h, (int32_t)round + 100);
+    assert(nt_memo_get(&m, key, sizeof(key), h) == (int32_t)round + 100);
+    memset(key, 0xff, sizeof(key));
+    size_t survivors = 0;
+    for (size_t i = 0; i < 4; ++i) {
+      int32_t got = nt_memo_get(&m, previous[i].key, previous[i].n, previous[i].h);
+      assert(got == -1 || got == previous[i].count);
+      survivors += got >= 0;
+    }
+    assert(survivors == 3); // exactly the selected victim, no broken probe chain
+    unsigned occupied = 0, cells = 0;
+    for (size_t i = 0; i < 8; ++i) if (entries[i].len) {
+      size_t cell = entries[i].offset / NT_MEMO_KEY;
+      assert(entries[i].offset % NT_MEMO_KEY == 0 && cell < 4);
+      assert(!(cells & (1u << cell))); cells |= 1u << cell; ++occupied;
+    }
+    assert(occupied == 4 && cells == 15 && m.keys == 4 && m.used == sizeof(payload));
+  }
+  assert(live == 0 && live_bytes == 0);
+  puts("clock: 4096 evictions, second chance, wrapped mixed/full-hash collisions, NUL/length, source mutation, unique fixed cells and exact survivor counts passed");
+}
+static void assert_scanner(const NtCounter *c, const uint8_t *s, size_t n) {
+  for (size_t start = 0; start < n;) {
+    size_t expected = nt_piece_end_general(c, s, n, start);
+    assert(expected > start && expected <= n);
+    assert(nt_piece_end(c, s, n, start) == expected);
+    start = expected;
+  }
+}
+static void scanner_tests(const NtCounter *c) {
+  const char *words[] = {"a", "A", "ABC", "abc", "ABCdef", "abCD", "ABcdEFgh"};
+  const char *edges[] = {"", "'s", "'S", "'RE", "'vE", "'lL", "'r", "'r\xc3\xa9",
+    "'\xc5\xbf", "\xc3\xa9", "\xc4\xb0", "\xc7\x85", "\xca\xb0", "\xe7\x8c\xab",
+    "\xcc\x81", "\xe0\xa4\x83", "\xe0\xb8\xb1", "\xd9\xa1", "\xc2\xb2",
+    "\xf0\x90\x90\xa8", "\xf0\x9f\x98\x80", "\xe2\x80\xa8", "\xe2\x80\x8d"};
+  uint8_t text[128];
+  for (unsigned prefix = 0; prefix < 128; ++prefix)
+    for (size_t w = 0; w < sizeof(words) / sizeof(words[0]); ++w)
+      for (size_t e = 0; e < sizeof(edges) / sizeof(edges[0]); ++e) {
+        size_t wn = strlen(words[w]), en = strlen(edges[e]);
+        text[0] = (uint8_t)prefix; memcpy(text + 1, words[w], wn);
+        memcpy(text + 1 + wn, edges[e], en); memcpy(text + 1 + wn + en, "aB!", 3);
+        assert_scanner(c, text, 1 + wn + en + 3);
+        assert_scanner(c, text + 1, wn + en); // exact ends, not just padded input
+      }
+  // Exhaustive short ASCII strings cover priority, prefix, CR/LF, numbers,
+  // contractions and end bounds; every original boundary must remain identical.
+  const uint8_t alphabet[] = {'a','A','b','B',' ',0,'\r','\n','\t','\'','s','1','!','/'};
+  for (size_t sample = 0; sample < 38416; ++sample) { // 14^4
+    size_t code = sample;
+    for (size_t j = 0; j < 4; ++j) { text[j] = alphabet[code % 14]; code /= 14; }
+    for (size_t n = 1; n <= 4; ++n) assert_scanner(c, text, n);
+  }
+  assert(nt_ascii_letter_end((const uint8_t *)" ABCdef", 7, 0) == 7);
+  assert(nt_ascii_letter_end((const uint8_t *)"aB", 2, 0) == 1);
+  assert(nt_ascii_letter_end((const uint8_t *)"a'\xc5\xbf", 4, 0) == 4);
+  assert(nt_ascii_letter_end((const uint8_t *)"A\xcc\x81", 3, 0) == 0);
+  puts("scanner: all 128 ASCII prefixes x 7 case patterns x 23 Unicode/contraction edges and 14^4 short ASCII strings match unchanged general scanner");
+}
 static void synthetic_tie(void) {
   // aa is rank zero: in aaaab the left tie produces aa|aab (2), whereas
   // a middle-first tie strands a|aa|a|b (4). Never treat zero as miss.
@@ -141,6 +240,8 @@ static void synthetic_tie(void) {
   while (c.slots[slot]) slot = (slot + 1) & (NT_SLOTS - 1);
   c.slots[slot] = 2;
   assert(nt_rank(&c, aa, 2) == 0);
+  assert(nt_rank_hashed(&c, aa, 2, nt_hash(aa, 2)) == 0);
+  assert(nt_rank_hashed(&c, aab, 3, nt_hash(aab, 3)) == 1);
   NtScratch scratch = {0};
   assert(nt_bpe(&c, (const uint8_t *)"aaaab", 5, &scratch) == 2);
   assert(slow_bpe(&c, (const uint8_t *)"aaaab", 5) == 2);
@@ -239,6 +340,44 @@ static void session_tests(const NtCounter *c) {
   assert(nt_session_count(s, c, (uint8_t *)"hello", 5) == 1);
   assert(nt_session_count(s, c, NULL, 0) == 0);
   assert(s->memo.keys == NT_MEMO_KEYS && s->memo.used == NT_MEMO_PAYLOAD);
+  // Two later file vocabularies replace all first keys without growing payload.
+  // The last file's pieces must now hit instead of being excluded forever.
+  NtSession *isolated = nt_session_new(); assert(isolated);
+  assert(nt_session_count(isolated, c, (const uint8_t *)"hello", 5) == 1);
+  assert(isolated->memo.keys == 1 && isolated->memo.payload != s->memo.payload);
+  for (size_t epoch = 0; epoch < 2; ++epoch) {
+    uint8_t recent_key[] = " clockaaa";
+    for (size_t i = 0; i < NT_MEMO_KEYS; ++i) {
+      size_t id = epoch * NT_MEMO_KEYS + i;
+      recent_key[6] = (uint8_t)('a' + id / 676);
+      recent_key[7] = (uint8_t)('a' + id / 26 % 26);
+      recent_key[8] = (uint8_t)('a' + id % 26);
+      int32_t exact = nt_counter_count(c, recent_key, 9);
+      size_t before_allocation = allocation_no;
+      assert(nt_session_count(s, c, recent_key, 9) == exact);
+      assert(allocation_no == before_allocation); // eviction/insertion allocate nothing
+      assert(nt_memo_get(&s->memo, recent_key, 9, nt_hash(recent_key, 9)) == exact);
+      memset(recent_key + 6, '!', 3); // source overwritten before next call
+    }
+    reset(0);
+    for (size_t i = NT_MEMO_KEYS - 128; i < NT_MEMO_KEYS; ++i) {
+      size_t id = epoch * NT_MEMO_KEYS + i;
+      recent_key[6] = (uint8_t)('a' + id / 676);
+      recent_key[7] = (uint8_t)('a' + id / 26 % 26);
+      recent_key[8] = (uint8_t)('a' + id % 26);
+      int32_t cached = nt_memo_get(&s->memo, recent_key, 9, nt_hash(recent_key, 9));
+      assert(cached > 0 && nt_session_count(s, c, recent_key, 9) == cached);
+    }
+    assert(allocation_no == 0);
+    assert(s->memo.keys == NT_MEMO_KEYS && s->memo.used == NT_MEMO_PAYLOAD);
+    assert(s->memo.payload_capacity == NT_MEMO_PAYLOAD && s->memo.slots == NT_MEMO_SLOTS);
+    assert(isolated->memo.keys == 1);
+    assert(nt_memo_get(&isolated->memo, (const uint8_t *)"hello", 5,
+                       nt_hash((const uint8_t *)"hello", 5)) == 1);
+    assert(nt_session_count(isolated, c, (const uint8_t *)"hello", 5) == 1);
+    assert(allocation_no == 0);
+  }
+  nt_session_free(isolated);
   nt_session_free(s); assert(live == baseline && live_bytes == baseline_bytes);
   puts("session: lazy bounded memo/scratch, owned cross-document keys, independent sessions, saturation, every OOM recovery, heap reset and 24MiB transient bound passed");
 }
@@ -246,7 +385,7 @@ int main(void) {
   size_t rn, un;
   uint8_t *r = read_bytes("assets/tokenizer-o200k_base.tiktoken", &rn);
   uint8_t *u = read_bytes("assets/tokenizer-unicode-16.0.0.txt", &un);
-  memo_tests(); synthetic_tie();
+  memo_tests(); clock_tests(); synthetic_tie();
   reset(0);
   assert(!nt_array(SIZE_MAX, 2, 0));
   assert(!nt_counter_new(r, SIZE_MAX, u, un));
@@ -267,6 +406,7 @@ int main(void) {
   }
   NtCounter *c = nt_counter_new(r, rn, u, un); assert(c);
   size_t immutable_live = live;
+  scanner_tests(c);
   assert(nt_counter_count(c, NULL, 0) == 0);
   assert(nt_counter_count(c, r, (size_t)INT32_MAX + 1) == -1);
   uint64_t before = nt_hash(c->arena, c->offsets[NT_RANKS]) ^

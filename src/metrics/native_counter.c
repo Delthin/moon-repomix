@@ -33,9 +33,9 @@ static uint64_t nt_hash(const uint8_t *s, size_t n) {
   for (size_t i = 0; i < n; ++i) h = (h ^ s[i]) * UINT64_C(1099511628211);
   return h ^ (h >> 32);
 }
-static int32_t nt_rank(const NtCounter *c, const uint8_t *s, size_t n) {
+static int32_t nt_rank_hashed(const NtCounter *c, const uint8_t *s, size_t n, uint64_t h) {
   if (!n || n > c->max_token) return -1;
-  uint32_t slot = (uint32_t)nt_hash(s, n) & (NT_SLOTS - 1);
+  uint32_t slot = (uint32_t)h & (NT_SLOTS - 1);
   for (uint32_t probes = 0; probes < NT_SLOTS; ++probes) {
     uint32_t id = c->slots[slot];
     if (!id) return -1;
@@ -45,6 +45,10 @@ static int32_t nt_rank(const NtCounter *c, const uint8_t *s, size_t n) {
     slot = (slot + 1) & (NT_SLOTS - 1);
   }
   return -1;
+}
+static int32_t nt_rank(const NtCounter *c, const uint8_t *s, size_t n) {
+  if (!n || n > c->max_token) return -1;
+  return nt_rank_hashed(c, s, n, nt_hash(s, n));
 }
 void nt_counter_free(NtCounter *c) {
   if (!c) return;
@@ -265,8 +269,7 @@ static int nt_scratch_reserve(NtScratch *s, size_t n) {
   s->capacity = capacity;
   return 1;
 }
-static int32_t nt_bpe(const NtCounter *c, const uint8_t *word, size_t n, NtScratch *s) {
-  if (nt_rank(c, word, n) >= 0) return 1;
+static int32_t nt_merge(const NtCounter *c, const uint8_t *word, size_t n, NtScratch *s) {
   if (!nt_scratch_reserve(s, n)) return -1;
   s->size = 0;
   for (size_t i = 0; i < n; ++i)
@@ -290,12 +293,16 @@ static int32_t nt_bpe(const NtCounter *c, const uint8_t *word, size_t n, NtScrat
   return count;
 }
 
-typedef struct { uint64_t hash; uint32_t offset, count; uint16_t len; } NtMemoEntry;
+static int32_t nt_bpe(const NtCounter *c, const uint8_t *word, size_t n, NtScratch *s) {
+  return nt_rank(c, word, n) >= 0 ? 1 : nt_merge(c, word, n, s);
+}
+
+typedef struct { uint64_t hash; uint32_t offset, count; uint16_t len; uint8_t recent; } NtMemoEntry;
 typedef struct {
   NtMemoEntry *entries;
   uint8_t *payload;
-  size_t used, keys, slots, key_limit, payload_capacity;
-  int attempted;
+  size_t used, keys, slots, key_limit, payload_capacity, hand;
+  int attempted, replacing;
 } NtMemo;
 static void nt_memo_init(NtMemo *m, size_t input_len) {
   m->attempted = 1;
@@ -309,26 +316,64 @@ static void nt_memo_init(NtMemo *m, size_t input_len) {
     if (!m->payload) { free(m->entries); m->entries = NULL; }
   }
 }
-static int32_t nt_memo_get(const NtMemo *m, const uint8_t *s, size_t n, uint64_t h) {
+static int32_t nt_memo_get(NtMemo *m, const uint8_t *s, size_t n, uint64_t h) {
   if (!m->entries || n > NT_MEMO_KEY) return -1;
   size_t slot = (size_t)h & (m->slots - 1);
   for (size_t i = 0; i < m->slots; ++i) {
-    const NtMemoEntry *e = m->entries + slot;
+    NtMemoEntry *e = m->entries + slot;
     if (!e->len) return -1;
-    if (e->hash == h && e->len == n && !memcmp(m->payload + e->offset, s, n)) return (int32_t)e->count;
+    if (e->hash == h && e->len == n && !memcmp(m->payload + e->offset, s, n)) {
+      if (m->replacing) e->recent = 1;
+      return (int32_t)e->count;
+    }
     slot = (slot + 1) & (m->slots - 1);
   }
   return -1;
 }
+// Backward-shift deletion preserves every probe chain without accumulating
+// tombstones. Entries carry their fixed payload offset while moving in the index.
+static void nt_memo_remove(NtMemo *m, size_t hole) {
+  size_t mask = m->slots - 1, pos = (hole + 1) & mask;
+  while (m->entries[pos].len) {
+    size_t home = (size_t)m->entries[pos].hash & mask;
+    if (((pos - home) & mask) >= ((pos - hole) & mask)) {
+      m->entries[hole] = m->entries[pos];
+      hole = pos;
+    }
+    pos = (pos + 1) & mask;
+  }
+  m->entries[hole].len = 0;
+}
 static void nt_memo_put(NtMemo *m, const uint8_t *s, size_t n, uint64_t h, int32_t count) {
-  if (!n || n > NT_MEMO_KEY || m->keys >= m->key_limit || n > m->payload_capacity - m->used) return;
-  if (!m->entries) return; // optional memo allocation failure never loses exactness
+  if (!m->entries || !n || n > NT_MEMO_KEY) return;
+  size_t offset;
+  if (m->replacing && m->keys == m->key_limit) {
+    // Session-only second-chance clock, with at most two index revolutions.
+    // All keys own fixed 256-byte cells: replacement never fragments payload,
+    // borrows old input, grows storage, or allocates on insertion/eviction.
+    size_t probes = 0;
+    for (; probes < m->slots * 2; ++probes) {
+      size_t victim = m->hand;
+      m->hand = (m->hand + 1) & (m->slots - 1);
+      NtMemoEntry *e = m->entries + victim;
+      if (!e->len) continue;
+      if (e->recent) { e->recent = 0; continue; }
+      offset = e->offset;
+      nt_memo_remove(m, victim);
+      break;
+    }
+    if (probes == m->slots * 2) return; // skipping cache is always exact
+  } else {
+    size_t reserve = m->replacing ? NT_MEMO_KEY : n;
+    if (m->keys >= m->key_limit || reserve > m->payload_capacity - m->used) return;
+    offset = m->used;
+    m->used += reserve;
+    ++m->keys;
+  }
   size_t slot = (size_t)h & (m->slots - 1);
   while (m->entries[slot].len) slot = (slot + 1) & (m->slots - 1);
-  memcpy(m->payload + m->used, s, n);
-  m->entries[slot] = (NtMemoEntry){h, (uint32_t)m->used, (uint32_t)count, (uint16_t)n};
-  m->used += n;
-  ++m->keys;
+  memcpy(m->payload + offset, s, n);
+  m->entries[slot] = (NtMemoEntry){h, (uint32_t)offset, (uint32_t)count, (uint16_t)n, 1};
 }
 // Shared loop: a temporary call uses input-sized storage, while an explicit
 // session lazily allocates the bounded memo once for its entire lifetime.
@@ -352,7 +397,11 @@ static int32_t nt_count(const NtCounter *c, const uint8_t *text, size_t len,
       uint64_t h = n <= NT_MEMO_KEY ? nt_hash(piece, n) : 0;
       count = nt_memo_get(memo, piece, n, h);
       if (count < 0) {
-        count = nt_bpe(c, piece, n, scratch);
+        // The memo and immutable dictionary use the same hash. Do not hash
+        // the complete piece twice on a memo miss; BPE pair lookups are separate.
+        count = n <= NT_MEMO_KEY
+          ? (nt_rank_hashed(c, piece, n, h) >= 0 ? 1 : nt_merge(c, piece, n, scratch))
+          : nt_bpe(c, piece, n, scratch);
         if (count < 0) { total = -1; break; }
         nt_memo_put(memo, piece, n, h, count);
       }
@@ -378,7 +427,11 @@ int32_t nt_counter_count(const NtCounter *c, const uint8_t *text, size_t len) {
 }
 
 struct NtSession { NtScratch scratch; NtMemo memo; };
-NtSession *nt_session_new(void) { return nt_array(1, sizeof(NtSession), 1); }
+NtSession *nt_session_new(void) {
+  NtSession *s = nt_array(1, sizeof(NtSession), 1);
+  if (s) s->memo.replacing = 1;
+  return s;
+}
 void nt_session_free(NtSession *session) {
   if (!session) return;
   free(session->scratch.nodes);
