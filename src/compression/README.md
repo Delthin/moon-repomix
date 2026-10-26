@@ -193,6 +193,16 @@ per task. Runtime allocator function pointers and locale are process-global:
 embedding callers must not change Tree-sitter allocators or the locale while
 planning. No grammar/runtime dependency has been upgraded.
 
+Complete child enumeration uses forward Tree-sitter cursors rather than repeated
+indexed child lookup. In the pinned runtime, indexed lookup scans from the first
+child; a forward cursor retains sibling position, including hidden grammar
+nodes. Named-only walks filter visible cursor nodes with the alias-aware
+`ts_node_is_named`, preserving anonymous-token handling, order and original node
+identity. Each walk owns and closes its cursor on exhaustion, cancellation and
+early return. Constant-index lookups, parent/field rules, selection depth and
+all compression decisions are unchanged. This makes each child enumeration
+linear; it does not cache or change repeated outline/binding queries.
+
 ## Build and verification
 
 Package-local C translation units include vendored resources using relative
@@ -240,6 +250,20 @@ all eight grammars, multi-batch reuse, source-array ownership, fallbacks, limits
 empty input, busy/finished/closed states and protected cancellation with zero live
 workers afterward. Its scenarios run sequentially because the async test driver
 can otherwise run them concurrently against the process-wide hard budget.
+
+`tests/traversal_test.c` is a standalone POSIX white-box traversal harness. It
+checks complete named/all-child sequences against indexed runtime access,
+including alias identity, anonymous tokens, extras and parents; all eight
+grammars have wide and nested fixtures. It also checks exact depth guards,
+early-return cursor ownership, deterministic mid-traversal cancellation and
+four concurrent independent plans. To run it, use the grammar/runtime compiler
+command below, replacing the worker harness with `tests/traversal_test.c` and
+omitting both `compression_core.c` (included by the test) and the pool object.
+For before/after full-mask differential checks, define `SC_TRAVERSAL_REFERENCE`
+and link an independently captured original core compiled with
+`-Dsc_plan=sc_reference_plan -Dsc_plan_cancelable=sc_reference_plan_cancelable`.
+Only differential fixtures disable the parser clock, so scheduling cannot create
+false mismatches; production and package tests retain the 200 ms parser budget.
 
 `tests/worker_pool_test.c` is a standalone POSIX harness. It also checks copied
 input ownership after the caller mutates/frees its input, independent original
