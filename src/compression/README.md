@@ -143,6 +143,8 @@ pub(all) struct Source {
 }
 pub fn Planner::new(workers? : Int) -> Planner raise PlannerError
 pub fn Planner::submit(Self, Array[Source]) -> BatchTicket raise PlannerError
+pub async fn BatchTicket::collect(Self) -> PlannedBatch
+pub fn PlannedBatch::materialize(Self) -> Array[Outcome]
 pub async fn BatchTicket::finish(Self) -> Array[Outcome]
 pub async fn Planner::compress(Self, Array[Source]) -> Array[Outcome]
 pub async fn Planner::close(Self) -> Unit
@@ -152,18 +154,35 @@ pub async fn Planner::close(Self) -> Unit
 batch before returning. The caller may then count original tokens on the main
 thread before awaiting `ticket.finish()`. `compress` is `submit(...).finish()`.
 Use `defer planner.close()` immediately after construction, including around work
-between submit and finish. Close after the final batch; reuse the pool between
-batches. A ticket retains its planner and its own snapshot of the source array.
-Results, ranges and fallback semantics match the single-source `compress`.
+between submit and collect/finish. Close after the final batch; reuse the pool
+between batches. A ticket retains its planner and its own snapshot of the source
+array. Results, ranges and fallback semantics match the single-source `compress`.
 Neither API performs security scanning.
 
-Planner and ticket state is opaque outside the package. Workers default to 2
-and must be 1..4 (otherwise `InvalidWorkers`); a batch contains at most four
+`collect` waits for all jobs, validates each returned wire, then releases the
+native batch and clears the pool's active state **before** converting any wire
+into output text/ranges. The existing main-thread bridge allocates fresh
+`moonbit_make_bytes` storage and `memcpy`s each wire before native release; no
+borrowed C buffer escapes. The opaque `PlannedBatch` holds only private managed
+source/preparation data and owned wire bytes, with no planner/handle/C pointer.
+`materialize` is synchronous, non-raising and repeatable: it reads that data,
+returns fresh output arrays/ranges and performs no pool calls or I/O. It is safe
+while the next batch runs, after close, and after the original owner is dropped.
+`finish` remains `collect().materialize()`; `compress` remains `submit(...).finish()`.
+For overlap, call `let planned = current.collect()`, then submit the next bounded
+batch, then call `planned.materialize()` before awaiting that next ticket. Keep
+`defer planner.close()` covering any ticket not yet collected. Retained detached
+batches keep their managed text/UTF-8/wires alive until dropped; callers must
+bound that retention. They hold no native task/input leases.
+
+Planner, ticket and detached result state is opaque outside the package. Workers
+default to 2 and must be 1..4 (otherwise `InvalidWorkers`); a batch contains at most four
 sources and at most 16 MiB of eligible original UTF-8 (`BatchLimit`). Unsupported
 and over-8-MiB sources return the existing exact fallback without copying into C.
-Only one unfinished ticket per pool is allowed (`Busy`), even for empty batches;
-a second finish raises `Finished`. Closing invalidates pending tickets and future
-submissions (`Closed`). Thread creation, staging allocation or result allocation
+Only one uncollected ticket per pool is allowed (`Busy`), even for empty batches;
+a second collect or finish, in any combination, raises `Finished`. A concurrent
+collector/finisher raises `Busy` without disturbing the first. Closing invalidates
+pending tickets and future submissions (`Closed`). Thread creation, staging allocation or result allocation
 failure raises `Unavailable`, not a retry or a synthetic timeout. Process-wide
 atomic reservations additionally cap all open planners together at four workers,
 four C-owned task inputs and 16 MiB raw UTF-8; exhausting another pool's budget
@@ -171,7 +190,7 @@ also raises `Unavailable`. Reservations are released on staging failure, batch
 release and close (including partial thread-creation failure). Callers may
 explicitly choose the original serial API if construction or staging is
 unavailable; a failed submit has not started any tasks. Do not retry a failed
-finish or discard its timeout/cancellation.
+collect/finish or discard its timeout/cancellation.
 
 Each OS worker performs the entire parse, AST walk, keep-mask and wire-plan
 construction with its own input/parser/tree/scanner/selection/result. Workers
@@ -179,8 +198,8 @@ never access managed values or call MoonBit allocation. The main thread converts
 wire plans to MoonBit bytes/text/ranges, preserving input order. Parser budgets
 remain 200 ms, traversal depth 512, fragments 65,536 and source size 8 MiB.
 Waiting polls with async sleep; it does not join on the event-loop thread while
-workers are running. Cancellation of finish stops queued work, atomically notifies
-parsing (Tree-sitter 0.25.3 progress callback) and postprocessing, drains under
+workers are running. Cancellation of collect/finish stops queued work, atomically
+notifies parsing (Tree-sitter 0.25.3 progress callback) and postprocessing, drains under
 `async@0.19.2` cancellation protection, joins and frees the pool, then propagates
 cancellation. Close is idempotent and also cancellation-protected. The external
 object finalizer is an emergency stop/join, not a substitute for explicit close.
@@ -248,8 +267,21 @@ fallbacks. Java uses the fixed native parser described in `THIRD_PARTY.md`.
 The worker lifecycle group checks 1/2/4-worker ordered serial equivalence across
 all eight grammars, multi-batch reuse, source-array ownership, fallbacks, limits,
 empty input, busy/finished/closed states and protected cancellation with zero live
-workers afterward. Its scenarios run sequentially because the async test driver
+workers afterward. Detached-result scenarios in `detached_wbtest.mbt` also check
+collect-before-next-submit across all eight grammars and 1/2/4 workers, retained
+results after reuse/close/owner scope exit, empty/all-fallback/mixed inputs,
+mutable output isolation, once-only collection, partial missing-wire cleanup and
+protected collect cancellation. The original 16 test groups remain; these
+scenarios run sequentially inside the worker group because the async test driver
 can otherwise run them concurrently against the process-wide hard budget.
+
+Managed bridge ASan checks can use the white-box test driver's generated C plus
+`ffi.c`, `worker_ffi.c` and locally compiled MoonBit runtime sources with
+`-fsanitize=address -DMOONBIT_ALLOCATOR=MOONBIT_ALLOCATOR_SYSTEM`. Omit the
+mimalloc `libmoonbitrun.o` when linking this diagnostic executable; do not replace
+or modify shared toolchain objects. This instruments managed allocation/copy and
+post-release materialization, unlike the standalone C tests below. Reusing the
+normal grammar/pool archives does not instrument their internal memory accesses.
 
 `tests/traversal_test.c` is a standalone POSIX white-box traversal harness. It
 checks complete named/all-child sequences against indexed runtime access,

@@ -97,6 +97,13 @@ struct BatchTicket {
 }
 
 ///|
+/// Detached, immutable planning data. No planner, C pointer or native lease.
+struct PlannedBatch {
+  inputs : Array[Prepared]
+  wires : Array[Bytes]
+}
+
+///|
 /// Workers must be 1..4. Thread/allocation failure raises Unavailable.
 pub fn Planner::new(workers~ : Int32 = 2) -> Planner raise PlannerError {
   if workers < 1 || workers > 4 {
@@ -178,9 +185,10 @@ pub fn Planner::submit(
 }
 
 ///|
-/// Wait without blocking the event loop; return outcomes in input order.
+/// Wait without blocking the event loop, copy all wire plans into owned Bytes,
+/// then release the native batch without materializing text/ranges.
 /// Cancellation closes this planner and joins all workers before propagating.
-pub async fn BatchTicket::finish(self : BatchTicket) -> Array[Outcome] {
+pub async fn BatchTicket::collect(self : BatchTicket) -> PlannedBatch {
   if self.finished {
     raise Finished
   }
@@ -208,30 +216,65 @@ pub async fn BatchTicket::finish(self : BatchTicket) -> Array[Outcome] {
   if planner.closed {
     raise Closed
   }
+  let wires : Array[Bytes] = []
+  for input in self.inputs {
+    if input.native is Some(_) {
+      // worker_ffi.c allocates moonbit_make_bytes and memcpy's the native wire;
+      // this is an owning managed value, not a view of pool-owned storage.
+      let wire = pool_result(planner.handle, wires.length())
+      if wire.length() < 4 || u32(wire, 0) == 5 {
+        raise Unavailable
+      }
+      wires.push(wire)
+    }
+  }
+  // No suspension between copying, releasing and consuming the ticket.
+  pool_release(planner.handle)
+  planner.busy = false
+  self.finished = true
+  { inputs: self.inputs, wires, }
+}
+
+///|
+/// Pure, repeatable conversion of private owned data; safe after pool reuse,
+/// close or destruction. Never accesses a planner or calls pool FFI.
+pub fn PlannedBatch::materialize(self : PlannedBatch) -> Array[Outcome] {
   let results : Array[Outcome] = []
   let mut index = 0
   for input in self.inputs {
     match input.native {
       None => {
         guard input.fallback is Some(result) else { abort("missing fallback") }
-        results.push(result)
+        // Do not expose the private fallback's mutable range array on repeat calls.
+        results.push({
+          text: result.text,
+          language: result.language,
+          applied: result.applied,
+          reason: result.reason,
+          ranges: result.ranges[:].to_owned(),
+        })
       }
       Some((id, language, source)) => {
-        let wire = pool_result(planner.handle, index)
-        if wire.length() < 4 || u32(wire, 0) == 5 {
-          raise Unavailable
-        }
         results.push(
-          outcome_from_plan(input.source.text, id, language, source, wire),
+          outcome_from_plan(
+            input.source.text,
+            id,
+            language,
+            source,
+            self.wires[index],
+          ),
         )
         index += 1
       }
     }
   }
-  pool_release(planner.handle)
-  planner.busy = false
-  self.finished = true
   results
+}
+
+///|
+/// Compatibility wrapper: collect, release native storage, then materialize.
+pub async fn BatchTicket::finish(self : BatchTicket) -> Array[Outcome] {
+  self.collect().materialize()
 }
 
 ///|

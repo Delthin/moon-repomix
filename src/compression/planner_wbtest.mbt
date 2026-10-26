@@ -113,7 +113,7 @@ async fn check_limits_and_close() -> Unit {
 }
 
 ///|
-async fn check_cancelled_finish() -> Unit {
+async fn check_cancelled_finish(collect~ : Bool = false) -> Unit {
   let planner = Planner::new(workers=4)
   defer planner.close()
   let source : Source = {
@@ -137,7 +137,11 @@ async fn check_cancelled_finish() -> Unit {
           },
           resume_on_cancel=true,
         )
-        ignore(ticket.finish())
+        if collect {
+          ignore(ticket.collect())
+        } else {
+          ignore(ticket.finish())
+        }
       },
       allow_failure=true,
     )
@@ -163,5 +167,8 @@ async test "worker pool: ordered batches, ownership, limits, protected cancellat
   // deliberately share the process-wide hard quota, so execute them in order.
   check_ordered_batches()
   check_limits_and_close()
+  check_detached_batches()
+  check_detached_fallbacks_and_errors()
   check_cancelled_finish()
+  check_cancelled_finish(collect=true)
 }

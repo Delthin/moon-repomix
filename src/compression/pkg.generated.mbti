@@ -21,6 +21,7 @@ pub fn PlannerError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
 type BatchTicket
+pub async fn BatchTicket::collect(Self) -> PlannedBatch
 pub async fn BatchTicket::finish(Self) -> Array[Outcome]
 
 pub(all) struct LineRange {
@@ -41,6 +42,9 @@ pub(all) struct Outcome {
 pub fn Outcome::equal(Self, Self) -> Bool
 pub fn Outcome::not_equal(Self, Self) -> Bool
 pub fn Outcome::to_repr(Self) -> @debug.Repr
+
+type PlannedBatch
+pub fn PlannedBatch::materialize(Self) -> Array[Outcome]
 
 type Planner
 pub async fn Planner::close(Self) -> Unit
