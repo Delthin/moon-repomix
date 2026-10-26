@@ -165,6 +165,70 @@ async test "bounded source pipeline preserves serial bodies, metadata order and 
     assert_eq(path, "entry-\{i}.txt")
   }
 
+  // Use real process-global leases to exercise constructor and submission
+  // fallback; no production fault hook or relaxed result assertion is needed.
+  let fallback_source = "export function fallback(): number { return 123456789; }\n"
+  let fallback_snapshot : @input.Snapshot = {
+    text: fallback_source,
+    disk_bytes: @utf8.encode(fallback_source).length(),
+    bom_bytes: 0,
+  }
+  let occupied = @compression.Planner::new(workers=4)
+  let denied_output : Array[@document.File] = []
+  let denied = FilePipeline::new(
+    runtime.encoder.session(),
+    true,
+    denied_output,
+    [],
+    [],
+  )
+  defer denied.close()
+  denied.push("constructor.ts", fallback_snapshot, false)
+  assert_true(denied.creation_disabled)
+  assert_true(denied.lanes.is_empty())
+  denied.flush()
+  assert_eq(
+    denied_output[0].text,
+    @compression.compress("constructor.ts", fallback_source).text,
+  )
+  occupied.close()
+  denied.close()
+
+  let submit_output : Array[@document.File] = []
+  let submit_fallback = FilePipeline::new(
+    runtime.encoder.session(),
+    true,
+    submit_output,
+    [],
+    [],
+  )
+  defer submit_fallback.close()
+  submit_fallback.push("before.ts", fallback_snapshot, false)
+  submit_fallback.flush()
+  assert_eq(submit_fallback.lanes.length(), 1)
+  let lease_holder = @compression.Planner::new(workers=3)
+  defer lease_holder.close()
+  let held = lease_holder.submit([
+    { path: "lease-0.ts", text: fallback_source, },
+    { path: "lease-1.ts", text: fallback_source, },
+    { path: "lease-2.ts", text: fallback_source, },
+    { path: "lease-3.ts", text: fallback_source, },
+  ])
+  submit_fallback.push("after.ts", fallback_snapshot, false)
+  assert_true(submit_fallback.creation_disabled)
+  assert_true(submit_fallback.lanes[0].failed)
+  submit_fallback.flush()
+  assert_eq(submit_output.length(), 2)
+  assert_eq(submit_output[0].path, "before.ts")
+  assert_eq(submit_output[1].path, "after.ts")
+  assert_eq(
+    submit_output[1].text,
+    @compression.compress("after.ts", fallback_source).text,
+  )
+  ignore(held.finish())
+  lease_holder.close()
+  submit_fallback.close()
+
   let raw : Array[@document.File] = []
   let raw_files : Array[FileStats] = []
   let raw_records : Array[Json] = []
