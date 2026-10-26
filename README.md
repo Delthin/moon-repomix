@@ -86,7 +86,7 @@ moon-repomix --webui
 - 默认扫描压缩前原文，命中时排除整个文件、Git 补丁或提交；模板命中则停止整个打包。扫描是启发式检测，分享前仍应审阅结果，详见 [安全边界](SECURITY.md) 和 [检测规则](docs/security.md)。
 - 对完整渲染字符串精确计算 `o200k_base` tokens，包含格式包装、模板与显示装饰。文件排名和目录统计不能代替最终预算；分卷的独立索引开销见 [分卷](docs/partition.md)。
 
-打包与计数在内存中完成，token 预算不是内存配额。v0.3.0 在固定三仓库、六场景的 macOS CLI 对照中耗时减少约 31%–76%；新增 35 MB TypeScript 大库中 Native CLI 耗时更高、RSS 更低。常驻 MCP 和其他场景的版本、选项、样本及平台范围见 [性能测量](docs/performance.md)。
+打包与计数在内存中完成，token 预算不是内存配额。当前源码在固定 35 MB TypeScript 大库的 macOS 五轮 CLI 对照中，原文和完整元数据压缩的耗时中位数为 1.05 / 1.43 秒，原版为 1.37 / 1.62 秒。平台、内存代价、全部样本及常驻 MCP 结果见 [性能测量](docs/performance.md)。
 
 ## SDK
 
