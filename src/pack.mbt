@@ -149,6 +149,14 @@ async fn pack_directory(
   let excluded : Set[String] = Set([])
   let skipped = selected.skipped.copy()
   let findings : Array[Finding] = []
+  let pipeline = FilePipeline::new(
+    runtime,
+    options.compress,
+    accepted,
+    files,
+    transforms,
+  )
+  defer pipeline.close()
   let mut since_timer_poll = 0
   let mut read_bytes = 0L
   for candidate in selected.files {
@@ -174,71 +182,16 @@ async fn pack_directory(
         skipped.push({ path: candidate.relative, reason, })
         excluded.add(context_path_key(candidate.relative))
       }
-      Loaded(snapshot) => {
-        let original_tokens = runtime.encoder.count(snapshot.text)
-        let mut text = snapshot.text
-        let mut tokens = original_tokens
-        if options.compress {
-          let result : @compression.Outcome = if keep_full.matches(
-              candidate.relative,
-            ) {
-            {
-              text: snapshot.text,
-              language: None,
-              applied: false,
-              reason: Some("kept-full"),
-              ranges: [],
-            }
-          } else {
-            @compression.compress(candidate.relative, snapshot.text)
-          }
-          let compressed_tokens = if result.applied {
-            runtime.encoder.count(result.text)
-          } else {
-            original_tokens
-          }
-          let applied = result.applied && compressed_tokens < original_tokens
-          if applied {
-            text = result.text
-            tokens = compressed_tokens
-          }
-          let ranges : Array[Json] = if applied {
-            context_ranges(result.ranges)
-          } else {
-            []
-          }
-          let reason : Json = if result.applied && !applied {
-            Json("not-fewer-tokens")
-          } else {
-            match result.reason {
-              None => Json::null()
-              Some(reason) => Json(reason)
-            }
-          }
-          let language : Json = match result.language {
-            None => Json::null()
-            Some(name) => Json(name)
-          }
-          transforms.push({
-            "path": candidate.relative,
-            "language": language,
-            "applied": applied,
-            "reason": reason,
-            "ranges": ranges,
-            "originalTokens": original_tokens,
-            "outputTokens": tokens,
-          })
-        }
-        accepted.push({ path: candidate.relative, text, })
-        files.push({
-          path: candidate.relative,
-          disk_bytes: snapshot.disk_bytes,
-          tokens,
-          original_tokens,
-        })
-      }
+      Loaded(snapshot) =>
+        pipeline.push(
+          candidate.relative,
+          snapshot,
+          options.compress && keep_full.matches(candidate.relative),
+        )
     }
   }
+  pipeline.flush()
+  pipeline.close()
   let git = git_context(
     selected.root,
     options,
