@@ -2,11 +2,14 @@
 package "Delthin/moon_repomix/security"
 
 import {
+  "Delthin/moon_repomix/validated_text",
   "moonbitlang/core/debug",
 }
 
 // Values
 pub fn scan(String, String, Int) -> Array[Finding] raise ScanError
+
+pub fn scan_validated(String, @validated_text.Text) -> Array[Finding] raise ScanError
 
 // Errors
 pub(all) suberror ScanError {

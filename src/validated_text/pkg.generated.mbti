@@ -1,0 +1,17 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Delthin/moon_repomix/validated_text"
+
+// Values
+pub fn decode(Bytes) -> Text raise
+
+// Errors
+
+// Types and methods
+type Text
+pub fn Text::bom_bytes(Self) -> Int
+pub fn Text::disk_bytes(Self) -> Int
+pub fn Text::text(Self) -> String
+
+// Type aliases
+
+// Traits

@@ -28,13 +28,16 @@
 ```text
 pub(all) struct Finding { rule:String, path:String, start:Int, end:Int, line:Int }
 pub fn scan(path:String, text:String, bom_bytes:Int) -> Array[Finding] raise ScanError
+pub fn scan_validated(path:String, text:@validated_text.Text) -> Array[Finding] raise ScanError
 ```
 
 调用者传入与渲染相同的已解码快照。读取时去掉 UTF-8 BOM，传 `bom_bytes=3`；否则传 `0`。`start`、`end` 是以磁盘文件首字节为 0 的 UTF-8 字节半开区间；`line` 从 1 开始，CRLF 计一次换行，裸 CR、LF 也各计一次。
 
+有界读取器也提供 `read_validated_metered`：严格 UTF-8 解码后保留文本、原始字节数和 BOM 长度的验证值，打包和入选查询将其交给 `scan_validated`，复用已完成的验证。`Delthin/moon_repomix/validated_text` 的 `Text` 字段私有，只能通过严格解码获得；复制并更新普通 `Snapshot` 不会改变验证值。直接调用 `scan(String, bom_bytes)` 时仍先验证文本和 BOM 参数。
+
 Git 诊断使用 `git:diff:N` 或 `git:commit:ID` 标签，偏移和行号相对于补丁正文或提交章节，而非磁盘文件。补丁行标记不作为源代码参与边界判断，位置仍与原补丁一致。
 
-引擎返回 UTF-16 单位索引，适配层先校验文本，仅在命中时记录所需边界的 UTF-8 字节偏移和行号，并将 BOM 长度计入磁盘偏移。无命中文件不分配逐字符坐标表，坐标存储随命中数量增长。范围落在代理对内部时报错。回归覆盖中文、emoji、组合字符、CRLF 和 BOM。
+引擎返回 UTF-16 单位索引，适配层使用已验证的文本，仅在命中时记录所需边界的 UTF-8 字节偏移和行号，并将 BOM 长度计入磁盘偏移。无命中文件不分配逐字符坐标表，坐标存储随命中数量增长。范围落在代理对内部时报错。回归覆盖中文、emoji、组合字符、CRLF 和 BOM。
 
 ## 错误与调用约束
 

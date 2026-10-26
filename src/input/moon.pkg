@@ -3,7 +3,7 @@ import {
   "moonbitlang/async/fs",
   "moonbitlang/async/io",
   "moonbitlang/core/buffer",
-  "moonbitlang/core/encoding/utf8",
+  "Delthin/moon_repomix/validated_text",
 }
 
 import {

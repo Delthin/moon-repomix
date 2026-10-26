@@ -23,7 +23,7 @@ pub(all) suberror TotalSizeLimitExceeded
 ///|
 /// Read at most max_bytes + one sentinel byte. Only regular files are opened.
 pub async fn read(path : String, max_bytes : Int32) -> ReadResult {
-  read_impl(path, max_bytes, None).result
+  ordinary_result(read_impl(path, max_bytes, None).result)
 }
 
 ///|
@@ -38,6 +38,21 @@ pub async fn read_metered(
   if remaining_bytes < 0 {
     raise TotalSizeLimitExceeded
   }
+  let read = read_impl(path, max_bytes, Some(remaining_bytes))
+  { result: ordinary_result(read.result), read_bytes: read.read_bytes, }
+}
+
+///|
+/// The metered reader with an unforgeable strict-UTF-8 snapshot. Byte accounting,
+/// exclusions and the single excess-byte probe are identical to read_metered.
+pub async fn read_validated_metered(
+  path : String,
+  max_bytes : Int32,
+  remaining_bytes : Int64,
+) -> ValidatedMeteredRead {
+  if remaining_bytes < 0 {
+    raise TotalSizeLimitExceeded
+  }
   read_impl(path, max_bytes, Some(remaining_bytes))
 }
 
@@ -46,9 +61,9 @@ async fn read_impl(
   path : String,
   max_bytes : Int32,
   remaining_bytes : Int64?,
-) -> MeteredRead {
+) -> ValidatedMeteredRead {
   let consumed = Ref(0L)
-  let result = if max_bytes <= 0 {
+  let result : ValidatedReadResult = if max_bytes <= 0 {
     Skipped("TooLarge")
   } else {
     read_regular(path, max_bytes, remaining_bytes, consumed)
@@ -62,7 +77,7 @@ async fn read_regular(
   max_bytes : Int32,
   remaining_bytes : Int64?,
   consumed : Ref[Int64],
-) -> ReadResult {
+) -> ValidatedReadResult {
   try {
     match @fs.kind(path, follow_symlink=false) {
       @fs.SymLink => return Skipped("SymbolicLink")
@@ -94,7 +109,7 @@ async fn read_bounded(
   max_bytes : Int32,
   remaining_bytes : Int64?,
   consumed : Ref[Int64],
-) -> ReadResult {
+) -> ValidatedReadResult {
   let buffer = @buffer.Buffer(size_hint=4096)
   let chunk = FixedArray::make(65536, b'\x00')
   for ;; {
@@ -135,9 +150,8 @@ async fn read_bounded(
       return Skipped("Binary")
     }
   }
-  let bom = if bytes is [0xef, 0xbb, 0xbf, ..] { 3 } else { 0 }
-  let text = @utf8.decode(bytes[bom:], ignore_bom=false) catch {
+  let proof = @validated_text.decode(bytes) catch {
     _ => return Skipped("InvalidUtf8")
   }
-  Loaded({ text, disk_bytes: bytes.length(), bom_bytes: bom, })
+  Loaded({ proof, })
 }

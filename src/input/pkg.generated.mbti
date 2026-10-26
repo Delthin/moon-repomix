@@ -1,10 +1,16 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "Delthin/moon_repomix/input"
 
+import {
+  "Delthin/moon_repomix/validated_text",
+}
+
 // Values
 pub async fn read(String, Int) -> ReadResult
 
 pub async fn read_metered(String, Int, Int64) -> MeteredRead
+
+pub async fn read_validated_metered(String, Int, Int64) -> ValidatedMeteredRead
 
 // Errors
 pub(all) suberror TotalSizeLimitExceeded
@@ -25,6 +31,20 @@ pub(all) struct Snapshot {
   disk_bytes : Int
   bom_bytes : Int
 }
+
+pub(all) struct ValidatedMeteredRead {
+  result : ValidatedReadResult
+  read_bytes : Int64
+}
+
+pub(all) enum ValidatedReadResult {
+  Loaded(ValidatedSnapshot)
+  Skipped(String)
+}
+
+type ValidatedSnapshot
+pub fn ValidatedSnapshot::snapshot(Self) -> Snapshot
+pub fn ValidatedSnapshot::validated_text(Self) -> @validated_text.Text
 
 // Type aliases
 

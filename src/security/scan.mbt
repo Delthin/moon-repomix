@@ -60,6 +60,25 @@ pub fn scan(
     }
     offset += width
   }
+  scan_validated_text(path, text, bom_bytes)
+}
+
+///|
+/// Scan the reader's strict-UTF-8 value without repeating UTF-16 validation.
+/// All credential detectors and finding-coordinate checks still run unchanged.
+pub fn scan_validated(
+  path : String,
+  validated : @validated_text.Text,
+) -> Array[Finding] raise ScanError {
+  scan_validated_text(path, validated.text(), validated.bom_bytes())
+}
+
+///|
+fn scan_validated_text(
+  path : String,
+  text : String,
+  bom_bytes : Int32,
+) -> Array[Finding] raise ScanError {
   let hits = scan_credentials(text)
   if hits.is_empty() {
     return []
@@ -80,7 +99,7 @@ pub fn scan(
   )
   coordinates[0] = (bom_bytes, 1)
   let mut unit = 0
-  offset = bom_bytes
+  let mut offset = bom_bytes
   let mut line = 1
   let mut previous_cr = false
   for c in text {

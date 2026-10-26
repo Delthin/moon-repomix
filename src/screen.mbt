@@ -23,7 +23,7 @@ async fn read_screened(
   options : Options,
   remaining : Int64,
 ) -> ScreenedRead {
-  let metered = @input.read_metered(
+  let metered = @input.read_validated_metered(
     candidate.path,
     options.max_file_size,
     remaining,
@@ -35,18 +35,20 @@ async fn read_screened(
       )
     err => raise err
   }
-  guard metered.result is Loaded(snapshot) else {
-    return {
-      result: metered.result,
-      findings: [],
-      read_bytes: metered.read_bytes,
-    }
+  let validated = match metered.result {
+    Loaded(snapshot) => snapshot
+    Skipped(reason) =>
+      return {
+        result: @input.Skipped(reason),
+        findings: [],
+        read_bytes: metered.read_bytes,
+      }
   }
+  let snapshot = validated.snapshot()
   if options.security_check {
-    let findings = @security.scan(
+    let findings = @security.scan_validated(
       candidate.relative,
-      snapshot.text,
-      snapshot.bom_bytes,
+      validated.validated_text(),
     ) catch {
       _ => raise ScanError
     }
@@ -69,5 +71,9 @@ async fn read_screened(
       read_bytes: metered.read_bytes,
     }
   }
-  { result: metered.result, findings: [], read_bytes: metered.read_bytes, }
+  {
+    result: @input.Loaded(snapshot),
+    findings: [],
+    read_bytes: metered.read_bytes,
+  }
 }
