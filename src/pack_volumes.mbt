@@ -25,7 +25,7 @@ pub async fn pack_volumes(
         prepared.display,
       )
     },
-    count=text => runtime.encoder.count(text),
+    count=text => prepared.counter.count(text),
     project_metadata=(files, sections) => metadata.project(files, sections),
   )
   let (partition, file_names) = volume_names(partition, options.style, runtime)

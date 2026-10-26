@@ -17,11 +17,20 @@ async test "bounded source pipeline preserves serial bodies, metadata order and 
     ("README.md", "ordinary text 中文 😀\r\n", false),
     ("a.ts", ts, false),
     ("b.go", go, false),
+    ("more.ts", ts, false),
+    ("tail.txt", "last unsupported", false),
+    ("more.go", go, false),
   ]
   let accepted : Array[@document.File] = []
   let files : Array[FileStats] = []
   let transforms : Array[Json] = []
-  let pipeline = FilePipeline::new(runtime, true, accepted, files, transforms)
+  let pipeline = FilePipeline::new(
+    runtime.encoder.session(),
+    true,
+    accepted,
+    files,
+    transforms,
+  )
   defer pipeline.close()
   for i in 0..<sources.length() {
     let (path, text, kept_full) = sources[i]
@@ -60,7 +69,11 @@ async test "bounded source pipeline preserves serial bodies, metadata order and 
       fail("expected complete compression record")
     }
     assert_eq(recorded, path)
-    if path == "z.ts" || path == "a.ts" || path == "b.go" {
+    if path == "z.ts" ||
+      path == "a.ts" ||
+      path == "b.go" ||
+      path == "more.ts" ||
+      path == "more.go" {
       assert_true(direct.applied)
       assert_eq(applied, Json(true))
       assert_true(!ranges.is_empty())
@@ -78,7 +91,11 @@ async test "bounded source pipeline preserves serial bodies, metadata order and 
   let raw_files : Array[FileStats] = []
   let raw_records : Array[Json] = []
   let raw_pipeline = FilePipeline::new(
-    runtime, false, raw, raw_files, raw_records,
+    runtime.encoder.session(),
+    false,
+    raw,
+    raw_files,
+    raw_records,
   )
   defer raw_pipeline.close()
   for (path, text, _) in sources {

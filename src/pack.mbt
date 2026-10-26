@@ -2,6 +2,7 @@
 priv struct PreparedPack {
   document : Document
   display : @output.Display
+  counter : @metrics.CountSession
   files : Array[FileStats]
   skipped : Array[Skipped]
   findings : Array[Finding]
@@ -20,7 +21,7 @@ pub async fn pack(options : Options, runtime : Runtime) -> PackResult {
     prepared.display,
   )
   @async.sleep(0)
-  let tokens = runtime.encoder.count(text)
+  let tokens = prepared.counter.count(text)
   let budget = match options.token_budget {
     None => NotSet
     Some(limit) if tokens > limit => Exceeded(limit)
@@ -149,8 +150,9 @@ async fn pack_directory(
   let excluded : Set[String] = Set([])
   let skipped = selected.skipped.copy()
   let findings : Array[Finding] = []
+  let counter = runtime.encoder.session()
   let pipeline = FilePipeline::new(
-    runtime,
+    counter,
     options.compress,
     accepted,
     files,
@@ -233,6 +235,7 @@ async fn pack_directory(
   {
     document,
     display,
+    counter,
     files,
     skipped,
     findings,

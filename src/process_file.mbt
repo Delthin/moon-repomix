@@ -6,7 +6,7 @@ fn record_file_result(
   snapshot : @input.Snapshot,
   original_tokens : Int32,
   outcome : @compression.Outcome?,
-  runtime : Runtime,
+  counter : @metrics.CountSession,
   accepted : Array[@document.File],
   files : Array[FileStats],
   transforms : Array[Json],
@@ -15,7 +15,7 @@ fn record_file_result(
   let mut tokens = original_tokens
   if outcome is Some(result) {
     let compressed_tokens = if result.applied {
-      runtime.encoder.count(result.text)
+      counter.count(result.text)
     } else {
       original_tokens
     }
