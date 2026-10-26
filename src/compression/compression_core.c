@@ -2,6 +2,13 @@
 #include "vendor/runtime/lib/include/tree_sitter/api.h"
 #include <stdlib.h>
 #include <string.h>
+#include "compression_predicates.h"
+
+/* Actual type-name pointers are immutable for the lifetime of the parsed tree.
+ * No grammar symbol numbers or canonical-symbol/alias assumptions are used. */
+#define TYPE_SLOTS 1024u
+typedef struct { const char *name; NodeKind kind; } TypeEntry;
+_Static_assert(sizeof(TypeEntry) * TYPE_SLOTS <= 16 * 1024, "bounded type cache");
 
 const TSLanguage *tree_sitter_javascript(void);
 const TSLanguage *tree_sitter_typescript(void);
@@ -17,6 +24,9 @@ typedef struct {
   int python;
   const char *source;
   const atomic_bool *cancel;
+  TypeEntry *types; /* Optional <=16 KiB; allocation failure keeps string predicates. */
+  TSNode type_node; /* Full key, not id alone: aliases/context may change the type. */
+  NodeKind type_kind;
 } Selection;
 
 static int stopped(Selection *s) {
@@ -73,8 +83,32 @@ static int children_next(Selection *s, Children *it, TSNode *child) {
   return 0;
 }
 
-static int is(TSNode node, const char *type) {
-  return !ts_node_is_null(node) && strcmp(ts_node_type(node), type) == 0;
+static NodeKind node_kind(Selection *s, TSNode node) {
+  if (!node.id) return K_other;
+  if (s->type_node.id == node.id && s->type_node.tree == node.tree &&
+      !memcmp(s->type_node.context, node.context, sizeof(node.context))) return s->type_kind;
+  const char *name = ts_node_type(node);
+  uintptr_t hash = (uintptr_t)name;
+  hash ^= hash >> 11;
+  hash ^= hash >> 21;
+  TypeEntry *entry = &s->types[hash & (TYPE_SLOTS - 1)];
+  if (entry->name == name) {
+    s->type_node = node;
+    return s->type_kind = entry->kind;
+  }
+  NodeKind kind = K_other;
+  for (unsigned i = 1; i < K_count; ++i)
+    if (strcmp(name, kind_names[i]) == 0) { kind = (NodeKind)i; break; }
+  /* A collision is a full original name classification, never a false hit.
+   * Direct replacement bounds memory and probe work even when all slots fill. */
+  *entry = (TypeEntry){name, kind};
+  s->type_node = node;
+  return s->type_kind = kind;
+}
+
+static int is(Selection *s, TSNode node, NodeKind kind) {
+  return node.id && (s->types ? node_kind(s, node) == kind :
+    strcmp(ts_node_type(node), kind_names[kind]) == 0);
 }
 
 static TSNode field(TSNode node, const char *name) {
@@ -106,50 +140,83 @@ static void remove_statement(Selection *s, TSNode node) {
   }
 }
 
-static int callable(TSNode node) {
-  return is(node, "function_declaration") || is(node, "generator_function_declaration") ||
-    is(node, "function_expression") || is(node, "function") ||
-    is(node, "generator_function") || is(node, "arrow_function") ||
-    is(node, "method_definition") || is(node, "function_definition") ||
-    is(node, "lambda");
+static int callable(Selection *s, TSNode node) {
+  if (s->types) switch (node_kind(s, node)) {
+    case K_function_declaration: case K_generator_function_declaration:
+    case K_function_expression: case K_function: case K_generator_function:
+    case K_arrow_function: case K_method_definition: case K_function_definition:
+    case K_lambda: return 1;
+    default: return 0;
+  }
+  return is(s, node, K_function_declaration) || is(s, node, K_generator_function_declaration) ||
+    is(s, node, K_function_expression) || is(s, node, K_function) ||
+    is(s, node, K_generator_function) || is(s, node, K_arrow_function) ||
+    is(s, node, K_method_definition) || is(s, node, K_function_definition) ||
+    is(s, node, K_lambda);
 }
 
-static int classlike(TSNode node) {
-  return is(node, "class_declaration") || is(node, "class") ||
-    is(node, "abstract_class_declaration") || is(node, "class_definition");
+static int classlike(Selection *s, TSNode node) {
+  if (s->types) switch (node_kind(s, node)) {
+    case K_class_declaration: case K_class: case K_abstract_class_declaration:
+    case K_class_definition: return 1;
+    default: return 0;
+  }
+  return is(s, node, K_class_declaration) || is(s, node, K_class) ||
+    is(s, node, K_abstract_class_declaration) || is(s, node, K_class_definition);
 }
 
-static int importlike(TSNode node) {
-  return is(node, "import_statement") || is(node, "import_from_statement") ||
-    is(node, "future_import_statement") || is(node, "import_alias");
+static int importlike(Selection *s, TSNode node) {
+  if (s->types) switch (node_kind(s, node)) {
+    case K_import_statement: case K_import_from_statement:
+    case K_future_import_statement: case K_import_alias: return 1;
+    default: return 0;
+  }
+  return is(s, node, K_import_statement) || is(s, node, K_import_from_statement) ||
+    is(s, node, K_future_import_statement) || is(s, node, K_import_alias);
 }
 
-static int type_declaration(TSNode node) {
-  return is(node, "interface_declaration") || is(node, "type_alias_declaration") ||
-    is(node, "enum_declaration") || is(node, "type_alias_statement") ||
-    is(node, "function_signature") || is(node, "method_signature") ||
-    is(node, "abstract_method_signature");
+static int type_declaration(Selection *s, TSNode node) {
+  if (s->types) switch (node_kind(s, node)) {
+    case K_interface_declaration: case K_type_alias_declaration:
+    case K_enum_declaration: case K_type_alias_statement: case K_function_signature:
+    case K_method_signature: case K_abstract_method_signature: return 1;
+    default: return 0;
+  }
+  return is(s, node, K_interface_declaration) || is(s, node, K_type_alias_declaration) ||
+    is(s, node, K_enum_declaration) || is(s, node, K_type_alias_statement) ||
+    is(s, node, K_function_signature) || is(s, node, K_method_signature) ||
+    is(s, node, K_abstract_method_signature);
 }
 
-static int structural(TSNode node) {
-  return is(node, "if_statement") || is(node, "elif_clause") ||
-    is(node, "else_clause") || is(node, "for_statement") ||
-    is(node, "for_in_statement") || is(node, "while_statement") ||
-    is(node, "do_statement") || is(node, "try_statement") ||
-    is(node, "except_clause") || is(node, "except_group_clause") ||
-    is(node, "finally_clause") || is(node, "catch_clause") ||
-    is(node, "with_statement") || is(node, "match_statement") ||
-    is(node, "case_clause") || is(node, "switch_statement") ||
-    is(node, "switch_body") || is(node, "switch_case") ||
-    is(node, "switch_default");
+static int structural(Selection *s, TSNode node) {
+  if (s->types) switch (node_kind(s, node)) {
+    case K_if_statement: case K_elif_clause: case K_else_clause:
+    case K_for_statement: case K_for_in_statement: case K_while_statement:
+    case K_do_statement: case K_try_statement: case K_except_clause:
+    case K_except_group_clause: case K_finally_clause: case K_catch_clause:
+    case K_with_statement: case K_match_statement: case K_case_clause:
+    case K_switch_statement: case K_switch_body: case K_switch_case:
+    case K_switch_default: return 1;
+    default: return 0;
+  }
+  return is(s, node, K_if_statement) || is(s, node, K_elif_clause) ||
+    is(s, node, K_else_clause) || is(s, node, K_for_statement) ||
+    is(s, node, K_for_in_statement) || is(s, node, K_while_statement) ||
+    is(s, node, K_do_statement) || is(s, node, K_try_statement) ||
+    is(s, node, K_except_clause) || is(s, node, K_except_group_clause) ||
+    is(s, node, K_finally_clause) || is(s, node, K_catch_clause) ||
+    is(s, node, K_with_statement) || is(s, node, K_match_statement) ||
+    is(s, node, K_case_clause) || is(s, node, K_switch_statement) ||
+    is(s, node, K_switch_body) || is(s, node, K_switch_case) ||
+    is(s, node, K_switch_default);
 }
 
 static void walk(Selection *, TSNode, unsigned, int);
 static void statements(Selection *, TSNode, unsigned, int);
 static int signature_binding(Selection *, TSNode, unsigned);
 
-static int js_assignment(TSNode node) {
-  return is(node, "assignment_expression");
+static int js_assignment(Selection *s, TSNode node) {
+  return is(s, node, K_assignment_expression);
 }
 
 /* Member assignments describe JS APIs even when installed inside a callback.
@@ -161,22 +228,22 @@ static int text_is(Selection *s, TSNode node, const char *text) {
 }
 
 static int member_assignment(Selection *s, TSNode node) {
-  if (!js_assignment(node)) return 0;
+  if (!js_assignment(s, node)) return 0;
   TSNode left = field(node, "left"), right = field(node, "right");
-  if (!(is(left, "member_expression") || is(left, "subscript_expression"))) return 0;
+  if (!(is(s, left, K_member_expression) || is(s, left, K_subscript_expression))) return 0;
   TSNode base = left;
-  while (!stopped(s) && (is(base, "member_expression") || is(base, "subscript_expression"))) {
+  while (!stopped(s) && (is(s, base, K_member_expression) || is(s, base, K_subscript_expression))) {
     TSNode object = field(base, "object");
-    TSNode property = field(base, is(base, "member_expression") ? "property" : "index");
+    TSNode property = field(base, is(s, base, K_member_expression) ? "property" : "index");
     if (text_is(s, object, "module") &&
         (text_is(s, property, "exports") || text_is(s, property, "'exports'") ||
          text_is(s, property, "\"exports\""))) return 1;
     base = object;
   }
   if (text_is(s, base, "exports")) return 1;
-  return callable(right) || classlike(right) || is(right, "identifier") ||
-    is(right, "member_expression") || is(right, "subscript_expression") ||
-    js_assignment(right);
+  return callable(s, right) || classlike(s, right) || is(s, right, K_identifier) ||
+    is(s, right, K_member_expression) || is(s, right, K_subscript_expression) ||
+    js_assignment(s, right);
 }
 
 /* Keep enclosing conditions only when they contain an outline declaration.
@@ -184,14 +251,14 @@ static int member_assignment(Selection *s, TSNode node) {
 static int contains_outline(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s) || ts_node_is_null(node)) return 0;
   if (depth > 512) { s->plan.status = 3; return 0; }
-  if (classlike(node) || type_declaration(node) || importlike(node) ||
-      is(node, "function_declaration") || is(node, "generator_function_declaration") ||
-      is(node, "function_definition") || is(node, "method_definition") ||
+  if (classlike(s, node) || type_declaration(s, node) || importlike(s, node) ||
+      is(s, node, K_function_declaration) || is(s, node, K_generator_function_declaration) ||
+      is(s, node, K_function_definition) || is(s, node, K_method_definition) ||
       member_assignment(s, node)) return 1;
-  if ((is(node, "lexical_declaration") || is(node, "variable_declaration") ||
-       is(node, "expression_statement")) && signature_binding(s, node, depth + 1)) return 1;
-  if (s->python && is(node, "expression_statement") &&
-      is(ts_node_named_child(node, 0), "string")) return 1;
+  if ((is(s, node, K_lexical_declaration) || is(s, node, K_variable_declaration) ||
+       is(s, node, K_expression_statement)) && signature_binding(s, node, depth + 1)) return 1;
+  if (s->python && is(s, node, K_expression_statement) &&
+      is(s, ts_node_named_child(node, 0), K_string)) return 1;
   Children it = children(node, 1);
   TSNode child;
   while (children_next(s, &it, &child))
@@ -202,11 +269,11 @@ static int contains_outline(Selection *s, TSNode node, unsigned depth) {
   return 0;
 }
 
-static int implementation_statement(TSNode node) {
-  if (is(node, "lexical_declaration") || is(node, "variable_declaration")) {
+static int implementation_statement(Selection *s, TSNode node) {
+  if (is(s, node, K_lexical_declaration) || is(s, node, K_variable_declaration)) {
     /* A loop header is not its single-statement body. Keep its binding. */
     TSNode parent = ts_node_parent(node);
-    return !is(parent, "for_statement") && !is(parent, "for_in_statement");
+    return !is(s, parent, K_for_statement) && !is(s, parent, K_for_in_statement);
   }
   const char *type = ts_node_type(node);
   size_t length = strlen(type);
@@ -225,22 +292,22 @@ static TSNode scope_binding(Selection *s, TSNode node, TSNode name, unsigned dep
   if (stopped(s)) return (TSNode){0};
   if (depth > 512) { s->plan.status = 3; return (TSNode){0}; }
   if (ts_node_is_null(node)) return (TSNode){0};
-  if (is(node, "assignment_pattern"))
+  if (is(s, node, K_assignment_pattern))
     return scope_binding(s, field(node, "left"), name, depth + 1);
   TSNode declared = field(node, "name");
   if (same_name(s, declared, name)) return node;
-  if ((is(node, "identifier") || is(node, "shorthand_property_identifier_pattern")) &&
+  if ((is(s, node, K_identifier) || is(s, node, K_shorthand_property_identifier_pattern)) &&
       same_name(s, node, name)) return node;
-  if (callable(node) || classlike(node) || type_declaration(node)) return (TSNode){0};
-  if (!(is(node, "lexical_declaration") || is(node, "variable_declaration") ||
-        is(node, "export_statement") || is(node, "formal_parameters") ||
-        is(node, "required_parameter") || is(node, "optional_parameter") ||
-        is(node, "object_pattern") || is(node, "array_pattern") ||
-        is(node, "pair_pattern") || is(node, "assignment_pattern") ||
-        is(node, "rest_pattern") || is(node, "import_statement") ||
-        is(node, "import_clause") || is(node, "named_imports") ||
-        is(node, "import_specifier") || is(node, "namespace_import") ||
-        is(node, "variable_declarator"))) return (TSNode){0};
+  if (callable(s, node) || classlike(s, node) || type_declaration(s, node)) return (TSNode){0};
+  if (!(is(s, node, K_lexical_declaration) || is(s, node, K_variable_declaration) ||
+        is(s, node, K_export_statement) || is(s, node, K_formal_parameters) ||
+        is(s, node, K_required_parameter) || is(s, node, K_optional_parameter) ||
+        is(s, node, K_object_pattern) || is(s, node, K_array_pattern) ||
+        is(s, node, K_pair_pattern) || is(s, node, K_assignment_pattern) ||
+        is(s, node, K_rest_pattern) || is(s, node, K_import_statement) ||
+        is(s, node, K_import_clause) || is(s, node, K_named_imports) ||
+        is(s, node, K_import_specifier) || is(s, node, K_namespace_import) ||
+        is(s, node, K_variable_declarator))) return (TSNode){0};
   Children it = children(node, 1);
   TSNode child;
   while (children_next(s, &it, &child)) {
@@ -260,7 +327,7 @@ static TSNode hoisted_binding(Selection *s, TSNode node, TSNode name, unsigned d
   if (stopped(s)) return (TSNode){0};
   if (depth > 512) { s->plan.status = 3; return (TSNode){0}; }
   if (ts_node_is_null(node)) return (TSNode){0};
-  if (is(node, "variable_declaration") || callable(node) || classlike(node))
+  if (is(s, node, K_variable_declaration) || callable(s, node) || classlike(s, node))
     return scope_binding(s, node, name, depth + 1);
   Children it = children(node, 1);
   TSNode child;
@@ -277,7 +344,7 @@ static TSNode hoisted_binding(Selection *s, TSNode node, TSNode name, unsigned d
 static TSNode binding(Selection *s, TSNode from, TSNode name) {
   if (ts_node_is_null(from) || ts_node_is_null(name)) return (TSNode){0};
   for (TSNode scope = ts_node_parent(from); !ts_node_is_null(scope) && !stopped(s); scope = ts_node_parent(scope)) {
-    if (callable(scope)) {
+    if (callable(s, scope)) {
       TSNode found = scope_binding(s, field(scope, "parameters"), name, 0);
       if (!ts_node_is_null(found)) return found;
       if (same_name(s, field(scope, "parameter"), name)) return scope;
@@ -288,12 +355,12 @@ static TSNode binding(Selection *s, TSNode from, TSNode name) {
         found = hoisted_binding(s, body, name, 0);
         if (!ts_node_is_null(found)) return found;
       }
-    } else if (is(scope, "for_in_statement") || is(scope, "for_statement") || is(scope, "catch_clause")) {
-      TSNode pattern = field(scope, is(scope, "catch_clause") ? "parameter" :
-                                   is(scope, "for_statement") ? "initializer" : "left");
+    } else if (is(s, scope, K_for_in_statement) || is(s, scope, K_for_statement) || is(s, scope, K_catch_clause)) {
+      TSNode pattern = field(scope, is(s, scope, K_catch_clause) ? "parameter" :
+                                   is(s, scope, K_for_statement) ? "initializer" : "left");
       TSNode found = scope_binding(s, pattern, name, 0);
       if (!ts_node_is_null(found)) return found;
-    } else if (is(scope, "statement_block") || is(scope, "program")) {
+    } else if (is(s, scope, K_statement_block) || is(s, scope, K_program)) {
       Children it = children(scope, 1);
       TSNode child;
       while (children_next(s, &it, &child)) {
@@ -311,7 +378,7 @@ static TSNode binding(Selection *s, TSNode from, TSNode name) {
 static int scalar_type(Selection *s, TSNode node) {
   for (unsigned depth = 0; depth < 32; ++depth) {
     if (text_is(s, node, "string") || text_is(s, node, "number") || text_is(s, node, "boolean")) return 1;
-    if (!is(node, "array_type")) return 0;
+    if (!is(s, node, K_array_type)) return 0;
     node = ts_node_named_child(node, 0);
   }
   return 0;
@@ -319,12 +386,12 @@ static int scalar_type(Selection *s, TSNode node) {
 
 static int scalar_value(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s) || depth > 32) return 0;
-  if (is(node, "string") || is(node, "number") || is(node, "true") || is(node, "false")) return 1;
-  if (!is(node, "array")) return 0;
+  if (is(s, node, K_string) || is(s, node, K_number) || is(s, node, K_true) || is(s, node, K_false)) return 1;
+  if (!is(s, node, K_array)) return 0;
   Children it = children(node, 1);
   TSNode child;
   while (children_next(s, &it, &child)) {
-    if (!is(child, "comment") && !scalar_value(s, child, depth + 1)) {
+    if (!is(s, child, K_comment) && !scalar_value(s, child, depth + 1)) {
       children_close(&it);
       return 0;
     }
@@ -334,10 +401,10 @@ static int scalar_value(Selection *s, TSNode node, unsigned depth) {
 
 static int opaque_value(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s) || depth > 32) return 0;
-  if (callable(node) || classlike(node) || is(node, "as_expression") ||
-      is(node, "satisfies_expression") || is(node, "spread_element") ||
-      is(node, "computed_property_name") || is(node, "object") ||
-      is(node, "call_expression")) return 0;
+  if (callable(s, node) || classlike(s, node) || is(s, node, K_as_expression) ||
+      is(s, node, K_satisfies_expression) || is(s, node, K_spread_element) ||
+      is(s, node, K_computed_property_name) || is(s, node, K_object) ||
+      is(s, node, K_call_expression)) return 0;
   Children it = children(node, 1);
   TSNode child;
   while (children_next(s, &it, &child))
@@ -351,37 +418,37 @@ static int opaque_value(Selection *s, TSNode node, unsigned depth) {
 /* Widened scalar/array maps need two entries; inferred scalar and widened
  * constructor tables need eight. All require private index-only consumers. */
 static int scalar_table(Selection *s, TSNode node) {
-  if (!is(node, "variable_declarator") || !is(field(node, "name"), "identifier")) return 0;
+  if (!is(s, node, K_variable_declarator) || !is(s, field(node, "name"), K_identifier)) return 0;
   TSNode annotation = field(node, "type"), value_type = {0};
   int widened = 0;
   if (!ts_node_is_null(annotation)) {
     TSNode type = ts_node_named_child(annotation, 0);
-    if (!is(type, "generic_type") || ts_node_named_child_count(type) != 2 ||
+    if (!is(s, type, K_generic_type) || ts_node_named_child_count(type) != 2 ||
         !text_is(s, ts_node_named_child(type, 0), "Record") ||
         !ts_node_is_null(binding(s, type, ts_node_named_child(type, 0)))) return 0;
     TSNode args = ts_node_named_child(type, 1);
-    if (!is(args, "type_arguments") || ts_node_named_child_count(args) != 2) return 0;
+    if (!is(s, args, K_type_arguments) || ts_node_named_child_count(args) != 2) return 0;
     TSNode key = ts_node_named_child(args, 0);
     if (!(text_is(s, key, "string") || text_is(s, key, "number"))) return 0;
     value_type = ts_node_named_child(args, 1);
     widened = scalar_type(s, value_type);
   }
   TSNode value = field(node, "value");
-  if (!is(value, "object")) return 0;
+  if (!is(s, value, K_object)) return 0;
   unsigned pairs = 0;
-  int scalars = 1, constructors = is(value_type, "type_identifier") || is(value_type, "generic_type");
+  int scalars = 1, constructors = is(s, value_type, K_type_identifier) || is(s, value_type, K_generic_type);
   Children it = children(value, 1);
   TSNode pair;
   while (children_next(s, &it, &pair)) {
-    if (is(pair, "comment")) continue;
+    if (is(s, pair, K_comment)) continue;
     TSNode k = field(pair, "key"), v = field(pair, "value");
-    if (!is(pair, "pair") ||
-        !(is(k, "property_identifier") || is(k, "string") || is(k, "number"))) {
+    if (!is(s, pair, K_pair) ||
+        !(is(s, k, K_property_identifier) || is(s, k, K_string) || is(s, k, K_number))) {
       children_close(&it);
       return 0;
     }
     scalars = scalars && scalar_value(s, v, 0);
-    constructors = constructors && is(v, "new_expression") && opaque_value(s, v, 0);
+    constructors = constructors && is(s, v, K_new_expression) && opaque_value(s, v, 0);
     ++pairs;
   }
   if (widened && scalars && pairs >= 2) return 1;
@@ -396,25 +463,25 @@ static int index_only(Selection *s, TSNode node, TSNode declaration, unsigned de
   if (stopped(s)) return 0;
   if (depth > 512) { s->plan.status = 3; return 0; }
   TSNode name = field(declaration, "name");
-  if ((is(node, "identifier") || is(node, "shorthand_property_identifier")) &&
+  if ((is(s, node, K_identifier) || is(s, node, K_shorthand_property_identifier)) &&
       same_name(s, node, name) && !ts_node_eq(node, name)) {
     TSNode bound = binding(s, node, node);
     if (!ts_node_eq(bound, declaration)) {
       /* Only definite value declarations prove that this is a different table.
        * Type-only names and mode-dependent block functions stay ambiguous. */
-      int shadow = is(bound, "variable_declarator") || is(bound, "required_parameter") ||
-        is(bound, "optional_parameter");
-      if (is(bound, "identifier") || is(bound, "shorthand_property_identifier_pattern")) {
+      int shadow = is(s, bound, K_variable_declarator) || is(s, bound, K_required_parameter) ||
+        is(s, bound, K_optional_parameter);
+      if (is(s, bound, K_identifier) || is(s, bound, K_shorthand_property_identifier_pattern)) {
         TSNode owner = ts_node_parent(bound);
-        shadow = is(owner, "formal_parameters") || is(owner, "required_parameter") ||
-          is(owner, "optional_parameter") || is(owner, "rest_pattern") ||
-          is(owner, "assignment_pattern") || is(owner, "object_pattern") ||
-          is(owner, "array_pattern") || is(owner, "pair_pattern") || is(owner, "catch_clause");
-        if (is(owner, "for_in_statement")) {
+        shadow = is(s, owner, K_formal_parameters) || is(s, owner, K_required_parameter) ||
+          is(s, owner, K_optional_parameter) || is(s, owner, K_rest_pattern) ||
+          is(s, owner, K_assignment_pattern) || is(s, owner, K_object_pattern) ||
+          is(s, owner, K_array_pattern) || is(s, owner, K_pair_pattern) || is(s, owner, K_catch_clause);
+        if (is(s, owner, K_for_in_statement)) {
           Children tokens = children(owner, 0);
           TSNode token;
           while (children_next(s, &tokens, &token)) {
-            if (is(token, "const") || is(token, "let") || is(token, "var")) shadow = 1;
+            if (is(s, token, K_const) || is(s, token, K_let) || is(s, token, K_var)) shadow = 1;
           }
         }
       }
@@ -422,14 +489,14 @@ static int index_only(Selection *s, TSNode node, TSNode declaration, unsigned de
     } else {
       TSNode parent = ts_node_parent(node);
       for (TSNode ancestor = parent; !ts_node_is_null(ancestor) && !stopped(s); ancestor = ts_node_parent(ancestor))
-        if (is(ancestor, "type_query")) return 0;
-      if (!is(parent, "subscript_expression") || !ts_node_eq(field(parent, "object"), node)) return 0;
+        if (is(s, ancestor, K_type_query)) return 0;
+      if (!is(s, parent, K_subscript_expression) || !ts_node_eq(field(parent, "object"), node)) return 0;
       for (TSNode use = ts_node_parent(parent); !ts_node_is_null(use) && !stopped(s); use = ts_node_parent(use)) {
         TSNode left = field(use, "left");
-        if (((js_assignment(use) || is(use, "augmented_assignment_expression")) &&
+        if (((js_assignment(s, use) || is(s, use, K_augmented_assignment_expression)) &&
              !ts_node_is_null(left) && ts_node_start_byte(left) <= ts_node_start_byte(parent) &&
              ts_node_end_byte(left) >= ts_node_end_byte(parent)) ||
-            is(use, "update_expression") || is(use, "unary_expression")) return 0;
+            is(s, use, K_update_expression) || is(s, use, K_unary_expression)) return 0;
       }
     }
   }
@@ -448,7 +515,7 @@ static int private_scalar_table(Selection *s, TSNode node, unsigned depth) {
   TSNode root = node;
   while (!ts_node_is_null(ts_node_parent(root)) && !stopped(s)) {
     root = ts_node_parent(root);
-    if (is(root, "export_statement")) return 0;
+    if (is(s, root, K_export_statement)) return 0;
   }
   return index_only(s, root, node, depth + 1);
 }
@@ -456,7 +523,7 @@ static int private_scalar_table(Selection *s, TSNode node, unsigned depth) {
 static void literal_outline(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
-  if (callable(node) || classlike(node)) {
+  if (callable(s, node) || classlike(s, node)) {
     walk(s, node, depth + 1, 0);
     return;
   }
@@ -469,24 +536,24 @@ static void literal_outline(Selection *s, TSNode node, unsigned depth) {
 static void initializer(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s) || ts_node_is_null(node)) return;
   if (depth > 512) { s->plan.status = 3; return; }
-  if (callable(node) || classlike(node) || is(node, "object")) {
+  if (callable(s, node) || classlike(s, node) || is(s, node, K_object)) {
     walk(s, node, depth + 1, 0);
-  } else if (is(node, "as_expression") || is(node, "satisfies_expression")) {
+  } else if (is(s, node, K_as_expression) || is(s, node, K_satisfies_expression)) {
     /* Literal assertions may define public unions through typeof/keyof. */
     literal_outline(s, node, depth + 1);
-  } else if (is(node, "identifier") || is(node, "member_expression") ||
-             is(node, "subscript_expression")) {
+  } else if (is(s, node, K_identifier) || is(s, node, K_member_expression) ||
+             is(s, node, K_subscript_expression)) {
     /* Binding aliases, especially CommonJS exports, are part of the outline. */
     return;
-  } else if (is(node, "call_expression") &&
+  } else if (is(s, node, K_call_expression) &&
              text_is(s, field(node, "function"), "require") &&
              ts_node_named_child_count(field(node, "arguments")) == 1 &&
-             is(ts_node_named_child(field(node, "arguments"), 0), "string")) {
+             is(s, ts_node_named_child(field(node, "arguments"), 0), K_string)) {
     /* Static CommonJS imports/re-exports are binding aliases, not bodies. */
     return;
-  } else if (js_assignment(node) || contains_outline(s, node, depth + 1)) {
+  } else if (js_assignment(s, node) || contains_outline(s, node, depth + 1)) {
     walk(s, node, depth + 1, 0);
-  } else if (is(node, "parenthesized_expression")) {
+  } else if (is(s, node, K_parenthesized_expression)) {
     uint32_t n = ts_node_named_child_count(node);
     if (n == 1) initializer(s, ts_node_named_child(node, 0), depth + 1);
     else select_node(s, node, 0);
@@ -501,49 +568,49 @@ static void initializer(Selection *s, TSNode node, unsigned depth) {
 static void walk(Selection *s, TSNode node, unsigned depth, int local) {
   if (stopped(s) || ts_node_is_null(node)) return;
   if (depth > 512) { s->plan.status = 3; return; }
-  if (callable(node)) {
+  if (callable(s, node)) {
     TSNode body = field(node, "body");
-    if (is(body, "statement_block") || is(body, "block")) {
+    if (is(s, body, K_statement_block) || is(s, body, K_block)) {
       statements(s, body, depth + 1, 1);
     } else {
       select_node(s, body, 0);
     }
     return;
   }
-  if (classlike(node)) {
+  if (classlike(s, node)) {
     TSNode body = field(node, "body");
     statements(s, body, depth + 1, 0);
     return;
   }
-  if (type_declaration(node) || importlike(node) || is(node, "comment")) return;
-  if (local && (structural(node) || implementation_statement(node)) &&
+  if (type_declaration(s, node) || importlike(s, node) || is(s, node, K_comment)) return;
+  if (local && (structural(s, node) || implementation_statement(s, node)) &&
       !contains_outline(s, node, depth + 1)) {
     remove_statement(s, node);
     return;
   }
-  if (is(node, "variable_declarator") || is(node, "public_field_definition") ||
-      is(node, "field_definition") || is(node, "pair")) {
+  if (is(s, node, K_variable_declarator) || is(s, node, K_public_field_definition) ||
+      is(s, node, K_field_definition) || is(s, node, K_pair)) {
     TSNode value = field(node, "value");
     if (private_scalar_table(s, node, depth + 1)) select_node(s, value, 0);
     else if (!ts_node_is_null(value)) initializer(s, value, depth + 1);
     return;
   }
-  if (is(node, "assignment") || is(node, "augmented_assignment") || js_assignment(node)) {
+  if (is(s, node, K_assignment) || is(s, node, K_augmented_assignment) || js_assignment(s, node)) {
     TSNode right = field(node, "right");
     /* Conventional Python type aliases are ordinary name assignments. Preserve
      * non-local bindings, as the upstream Python type-alias query does; inline
      * lambdas still need their implementation expression removed. */
-    if (s->python && !local && is(node, "assignment") &&
-        is(field(node, "left"), "identifier") && !callable(right)) return;
+    if (s->python && !local && is(s, node, K_assignment) &&
+        is(s, field(node, "left"), K_identifier) && !callable(s, right)) return;
     initializer(s, right, depth + 1);
     return;
   }
-  if (is(node, "class_static_block")) {
+  if (is(s, node, K_class_static_block)) {
     statements(s, field(node, "body"), depth + 1, 1);
     return;
   }
-  if (is(node, "statement_block") || is(node, "block") ||
-      is(node, "program") || is(node, "module") || is(node, "class_body")) {
+  if (is(s, node, K_statement_block) || is(s, node, K_block) ||
+      is(s, node, K_program) || is(s, node, K_module) || is(s, node, K_class_body)) {
     statements(s, node, depth + 1, local);
     return;
   }
@@ -557,15 +624,15 @@ static void walk(Selection *s, TSNode node, unsigned depth, int local) {
  * classes still belong to the outline (including arrow/lambda bindings). */
 static int signature_binding(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s) || depth > 512 || ts_node_is_null(node)) return 0;
-  if (callable(node) || classlike(node)) return 1;
-  if (is(node, "variable_declarator") || is(node, "pair"))
+  if (callable(s, node) || classlike(s, node)) return 1;
+  if (is(s, node, K_variable_declarator) || is(s, node, K_pair))
     return signature_binding(s, field(node, "value"), depth + 1);
   if (member_assignment(s, node)) return 1;
-  if (is(node, "assignment") || js_assignment(node))
+  if (is(s, node, K_assignment) || js_assignment(s, node))
     return signature_binding(s, field(node, "right"), depth + 1);
-  if (!(is(node, "lexical_declaration") || is(node, "variable_declaration") ||
-        is(node, "expression_statement") || is(node, "parenthesized_expression") ||
-        is(node, "object"))) return 0;
+  if (!(is(s, node, K_lexical_declaration) || is(s, node, K_variable_declaration) ||
+        is(s, node, K_expression_statement) || is(s, node, K_parenthesized_expression) ||
+        is(s, node, K_object))) return 0;
   Children it = children(node, 1);
   TSNode child;
   while (children_next(s, &it, &child))
@@ -583,25 +650,25 @@ static void statements(Selection *s, TSNode node, unsigned depth, int local) {
   Children it = children(node, 1);
   TSNode child;
   while (children_next(s, &it, &child)) {
-    if (is(child, "comment")) continue;
-    int docstring = s->python && first && is(child, "expression_statement") &&
-      is(ts_node_named_child(child, 0), "string");
+    if (is(s, child, K_comment)) continue;
+    int docstring = s->python && first && is(s, child, K_expression_statement) &&
+      is(s, ts_node_named_child(child, 0), K_string);
     first = 0;
-    if (docstring || importlike(child) || type_declaration(child)) continue;
-    if (callable(child) || classlike(child) || is(child, "decorated_definition") ||
-        is(child, "export_statement") || structural(child) ||
-        is(child, "class_static_block")) {
+    if (docstring || importlike(s, child) || type_declaration(s, child)) continue;
+    if (callable(s, child) || classlike(s, child) || is(s, child, K_decorated_definition) ||
+        is(s, child, K_export_statement) || structural(s, child) ||
+        is(s, child, K_class_static_block)) {
       walk(s, child, depth + 1, local);
     } else if (contains_outline(s, child, depth + 1)) {
       walk(s, child, depth + 1, local);
-    } else if (!local && (is(child, "lexical_declaration") ||
-               is(child, "variable_declaration") || is(child, "public_field_definition") ||
-               is(child, "field_definition") || is(child, "ambient_declaration") ||
-               is(child, "internal_module") || is(child, "module") ||
-               is(child, "property_signature") || is(child, "index_signature"))) {
+    } else if (!local && (is(s, child, K_lexical_declaration) ||
+               is(s, child, K_variable_declaration) || is(s, child, K_public_field_definition) ||
+               is(s, child, K_field_definition) || is(s, child, K_ambient_declaration) ||
+               is(s, child, K_internal_module) || is(s, child, K_module) ||
+               is(s, child, K_property_signature) || is(s, child, K_index_signature))) {
       walk(s, child, depth + 1, 0);
-    } else if (!local && s->python && is(child, "expression_statement") &&
-               is(ts_node_named_child(child, 0), "assignment")) {
+    } else if (!local && s->python && is(s, child, K_expression_statement) &&
+               is(s, ts_node_named_child(child, 0), K_assignment)) {
       walk(s, child, depth + 1, 0);
     } else {
       remove_statement(s, child);
@@ -616,10 +683,10 @@ static void comments(Selection *s, TSNode node, unsigned depth) {
   if (depth > 512) { s->plan.status = 3; return; }
   /* A folded table owns its implementation-category comments. Its binding
    * remains selected; ordinary discarded statements still restore comments. */
-  if (is(node, "object") && is(ts_node_parent(node), "variable_declarator") &&
+  if (is(s, node, K_object) && is(s, ts_node_parent(node), K_variable_declarator) &&
       s->plan.keep[ts_node_start_byte(ts_node_parent(node))] &&
       !s->plan.keep[ts_node_start_byte(node)]) return;
-  if (is(node, "comment") || is(node, "block_comment") || is(node, "line_comment")) {
+  if (is(s, node, K_comment) || is(s, node, K_block_comment) || is(s, node, K_line_comment)) {
     select_node(s, node, 1);
     /* A removed statement may have owned the following newline. Without it,
      * adjacent // comments become one line and swallow the next fragment. */
@@ -643,9 +710,9 @@ static int whitespace(char c) {
 static void presentation(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
-  int container = is(node, "program") || is(node, "module") ||
-    is(node, "statement_block") || is(node, "block") || is(node, "class_body") ||
-    is(node, "interface_body") || is(node, "enum_body") || is(node, "object");
+  int container = is(s, node, K_program) || is(s, node, K_module) ||
+    is(s, node, K_statement_block) || is(s, node, K_block) || is(s, node, K_class_body) ||
+    is(s, node, K_interface_body) || is(s, node, K_enum_body) || is(s, node, K_object);
   uint32_t previous = ts_node_start_byte(node);
   Children it = children(node, 0);
   TSNode child;
@@ -664,8 +731,8 @@ static void presentation(Selection *s, TSNode node, unsigned depth) {
         memset(s->plan.keep + first + 1, 0, last - first);
     }
     /* These nodes can contain raw text, including physical blank lines. */
-    if (!(is(child, "string") || is(child, "template_string") ||
-          is(child, "comment") || is(child, "regex")))
+    if (!(is(s, child, K_string) || is(s, child, K_template_string) ||
+          is(s, child, K_comment) || is(s, child, K_regex)))
       presentation(s, child, depth + 1);
     previous = ts_node_end_byte(child);
   }
@@ -691,16 +758,16 @@ static void merge_omissions(Selection *s) {
  * implementation. Never treat struct literals, record updates, attributes,
  * parameter defaults, return/effect types or type declaration braces as bodies.
  * The root grammar also handles .mbti declarations without bodies. */
-static int moonbit_callable(TSNode node) {
-  return is(node, "function_definition") || is(node, "impl_definition") ||
-    is(node, "test_definition") || is(node, "named_lambda_expression") ||
-    is(node, "anonymous_lambda_expression") ||
-    is(node, "named_matrix_expression") || is(node, "anonymous_matrix_lambda_expression");
+static int moonbit_callable(Selection *s, TSNode node) {
+  return is(s, node, K_function_definition) || is(s, node, K_impl_definition) ||
+    is(s, node, K_test_definition) || is(s, node, K_named_lambda_expression) ||
+    is(s, node, K_anonymous_lambda_expression) ||
+    is(s, node, K_named_matrix_expression) || is(s, node, K_anonymous_matrix_lambda_expression);
 }
 
-static int moonbit_type(TSNode node) {
-  return is(node, "struct_definition") || is(node, "enum_definition") ||
-    is(node, "type_definition");
+static int moonbit_type(Selection *s, TSNode node) {
+  return is(s, node, K_struct_definition) || is(s, node, K_enum_definition) ||
+    is(s, node, K_type_definition);
 }
 
 static void moonbit_walk(Selection *, TSNode, unsigned);
@@ -710,14 +777,14 @@ static void moonbit_walk(Selection *, TSNode, unsigned);
 static void moonbit_nested(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
-  if (moonbit_type(node) || is(node, "named_lambda_expression") ||
-      is(node, "named_matrix_expression")) {
+  if (moonbit_type(s, node) || is(s, node, K_named_lambda_expression) ||
+      is(s, node, K_named_matrix_expression)) {
     select_node(s, node, 1);
     moonbit_walk(s, node, depth + 1);
     return;
   }
   /* Literal interiors are indivisible original fragments, not declarations. */
-  if (is(node, "literal") || is(node, "string_interpolation")) return;
+  if (is(s, node, K_literal) || is(s, node, K_string_interpolation)) return;
   Children it = children(node, 1);
   TSNode child;
   while (children_next(s, &it, &child))
@@ -730,8 +797,8 @@ static void moonbit_body(Selection *s, TSNode body, unsigned depth) {
   Children tokens = children(body, 0);
   TSNode child;
   while (children_next(s, &tokens, &child)) {
-    if (is(child, "{") && ts_node_is_null(open)) open = child;
-    if (is(child, "}")) close = child;
+    if (is(s, child, K_open_brace) && ts_node_is_null(open)) open = child;
+    if (is(s, child, K_close_brace)) close = child;
   }
   if (!ts_node_is_null(open) && !ts_node_is_null(close)) {
     uint32_t start = ts_node_end_byte(open), end = ts_node_start_byte(close);
@@ -745,23 +812,23 @@ static void moonbit_body(Selection *s, TSNode body, unsigned depth) {
 static void moonbit_walk(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
-  if (is(node, "named_matrix_expression") || is(node, "anonymous_matrix_lambda_expression")) {
+  if (is(s, node, K_named_matrix_expression) || is(s, node, K_anonymous_matrix_lambda_expression)) {
     moonbit_body(s, node, depth + 1);
     return;
   }
-  int callable_node = moonbit_callable(node);
+  int callable_node = moonbit_callable(s, node);
   Children it = children(node, 1);
   TSNode child;
   while (children_next(s, &it, &child)) {
-    if (callable_node && is(child, "block_expression"))
+    if (callable_node && is(s, child, K_block_expression))
       moonbit_body(s, child, depth + 1);
-    else if (callable_node && is(child, "external_source")) {
+    else if (callable_node && is(s, child, K_external_source)) {
       /* Foreign symbol/module strings are declaration linkage, not bodies.
        * Only an inline multiline implementation is safe to replace here. */
       Children sources = children(child, 1);
       TSNode source;
       while (children_next(s, &sources, &source)) {
-        if (is(source, "multiline_string_literal")) select_node(s, source, 0);
+        if (is(s, source, K_multiline_string_literal)) select_node(s, source, 0);
       }
     } else if (!callable_node)
       moonbit_walk(s, child, depth + 1);
@@ -773,24 +840,24 @@ static void moonbit_walk(Selection *s, TSNode node, unsigned depth) {
  * field can lose bytes, never braces in a type, literal or macro token tree. */
 static void systems_walk(Selection *, TSNode, unsigned, int);
 
-static int rust_item(TSNode node) {
+static int rust_item(Selection *s, TSNode node) {
   const char *type = ts_node_type(node);
   size_t n = strlen(type);
   return (n >= 5 && strcmp(type + n - 5, "_item") == 0) ||
-    is(node, "associated_type") || is(node, "use_declaration") ||
-    is(node, "extern_crate_declaration") || is(node, "macro_definition") ||
-    is(node, "macro_invocation");
+    is(s, node, K_associated_type) || is(s, node, K_use_declaration) ||
+    is(s, node, K_extern_crate_declaration) || is(s, node, K_macro_definition) ||
+    is(s, node, K_macro_invocation);
 }
 
-static int go_callable(TSNode node) {
-  return is(node, "function_declaration") || is(node, "method_declaration") ||
-    is(node, "func_literal");
+static int go_callable(Selection *s, TSNode node) {
+  return is(s, node, K_function_declaration) || is(s, node, K_method_declaration) ||
+    is(s, node, K_func_literal);
 }
 
 static int go_has_callable(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s)) return 0;
   if (depth > 512) { s->plan.status = 3; return 0; }
-  if (go_callable(node)) return 1;
+  if (go_callable(s, node)) return 1;
   Children it = children(node, 1);
   TSNode child;
   while (children_next(s, &it, &child))
@@ -807,11 +874,11 @@ static int go_has_callable(Selection *s, TSNode node, unsigned depth) {
 static void systems_nested(Selection *s, TSNode node, unsigned depth, int rust) {
   if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
-  int binding = !rust && (is(node, "var_declaration") ||
-    is(node, "short_var_declaration") || is(node, "assignment_statement")) &&
+  int binding = !rust && (is(s, node, K_var_declaration) ||
+    is(s, node, K_short_var_declaration) || is(s, node, K_assignment_statement)) &&
     go_has_callable(s, node, depth + 1);
-  if ((rust && rust_item(node)) || (!rust &&
-      (is(node, "type_declaration") || go_callable(node) || binding))) {
+  if ((rust && rust_item(s, node)) || (!rust &&
+      (is(s, node, K_type_declaration) || go_callable(s, node) || binding))) {
     select_node(s, node, 1);
     systems_walk(s, node, depth + 1, rust);
     return;
@@ -827,8 +894,8 @@ static void systems_body(Selection *s, TSNode body, unsigned depth, int rust) {
   Children tokens = children(body, 0);
   TSNode token;
   while (children_next(s, &tokens, &token)) {
-    if (is(token, "{") && ts_node_is_null(open)) open = token;
-    if (is(token, "}")) close = token;
+    if (is(s, token, K_open_brace) && ts_node_is_null(open)) open = token;
+    if (is(s, token, K_close_brace)) close = token;
   }
   if (ts_node_is_null(open) || ts_node_is_null(close)) return;
   uint32_t start = ts_node_end_byte(open), end = ts_node_start_byte(close);
@@ -843,22 +910,22 @@ static void systems_body(Selection *s, TSNode body, unsigned depth, int rust) {
 static void systems_walk(Selection *s, TSNode node, unsigned depth, int rust) {
   if (stopped(s)) return;
   if (depth > 512) { s->plan.status = 3; return; }
-  if ((!rust && go_callable(node)) || (rust && is(node, "function_item"))) {
+  if ((!rust && go_callable(s, node)) || (rust && is(s, node, K_function_item))) {
     TSNode body = field(node, "body");
-    if (is(body, "block")) systems_body(s, body, depth + 1, rust);
+    if (is(s, body, K_block)) systems_body(s, body, depth + 1, rust);
     return;
   }
   if (rust) {
     /* Extern declarations, structs/enums/unions, associated types, macros,
      * attributes and unknown items are deliberately indivisible. */
-    if (is(node, "mod_item") || is(node, "impl_item") || is(node, "trait_item")) {
+    if (is(s, node, K_mod_item) || is(s, node, K_impl_item) || is(s, node, K_trait_item)) {
       TSNode body = field(node, "body");
       if (!ts_node_is_null(body)) systems_walk(s, body, depth + 1, rust);
       return;
     }
-    if (!(is(node, "source_file") || is(node, "declaration_list"))) return;
-  } else if (is(node, "type_declaration") || is(node, "import_declaration") ||
-             is(node, "package_clause") || is(node, "comment")) return;
+    if (!(is(s, node, K_source_file) || is(s, node, K_declaration_list))) return;
+  } else if (is(s, node, K_type_declaration) || is(s, node, K_import_declaration) ||
+             is(s, node, K_package_clause) || is(s, node, K_comment)) return;
   Children it = children(node, 1);
   TSNode child;
   while (children_next(s, &it, &child))
@@ -873,17 +940,17 @@ static void java_walk(Selection *, TSNode, unsigned);
 static void java_nested(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s) || ts_node_is_null(node)) return;
   if (depth > 512) { s->plan.status = 3; return; }
-  int type = is(node, "class_declaration") || is(node, "interface_declaration") ||
-    is(node, "enum_declaration") || is(node, "record_declaration") ||
-    is(node, "annotation_type_declaration");
+  int type = is(s, node, K_class_declaration) || is(s, node, K_interface_declaration) ||
+    is(s, node, K_enum_declaration) || is(s, node, K_record_declaration) ||
+    is(s, node, K_annotation_type_declaration);
   /* An anonymous class has no name, but its implemented method signatures are
    * useful even in a returned/local instance. Retain its creation header too. */
   int anonymous = 0;
-  if (is(node, "object_creation_expression")) {
+  if (is(s, node, K_object_creation_expression)) {
     Children it = children(node, 1);
     TSNode child;
     while (children_next(s, &it, &child))
-      if (is(child, "class_body")) anonymous = 1;
+      if (is(s, child, K_class_body)) anonymous = 1;
   }
   if (type || anonymous) {
     select_node(s, node, 1);
@@ -899,10 +966,10 @@ static void java_nested(Selection *s, TSNode node, unsigned depth) {
 static void java_walk(Selection *s, TSNode node, unsigned depth) {
   if (stopped(s) || ts_node_is_null(node)) return;
   if (depth > 512) { s->plan.status = 3; return; }
-  if (is(node, "method_declaration") || is(node, "constructor_declaration") ||
-      is(node, "compact_constructor_declaration") || is(node, "lambda_expression")) {
+  if (is(s, node, K_method_declaration) || is(s, node, K_constructor_declaration) ||
+      is(s, node, K_compact_constructor_declaration) || is(s, node, K_lambda_expression)) {
     TSNode body = field(node, "body");
-    if (is(body, "block") || is(body, "constructor_body")) {
+    if (is(s, body, K_block) || is(s, body, K_constructor_body)) {
       Children it = children(body, 1);
       TSNode child;
       while (children_next(s, &it, &child))
@@ -913,9 +980,9 @@ static void java_walk(Selection *s, TSNode node, unsigned depth) {
     java_nested(s, body, depth + 1);
     return;
   }
-  if (is(node, "static_initializer") ||
-      (is(node, "block") && (is(ts_node_parent(node), "class_body") ||
-                              is(ts_node_parent(node), "enum_body_declarations")))) {
+  if (is(s, node, K_static_initializer) ||
+      (is(s, node, K_block) && (is(s, ts_node_parent(node), K_class_body) ||
+                              is(s, ts_node_parent(node), K_enum_body_declarations)))) {
     select_node(s, node, 0);
     java_nested(s, node, depth + 1);
     return;
@@ -945,7 +1012,8 @@ SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
 
 SCPlan sc_plan_cancelable(int32_t language, const char *source, uint32_t length,
                           uint64_t timeout_micros, const atomic_bool *cancel) {
-  Selection s = {{NULL, length, 0}, language == 3, source, cancel};
+  Selection s = {.plan = {NULL, length, 0}, .python = language == 3,
+                 .source = source, .cancel = cancel};
   if (stopped(&s)) return s.plan;
   if (length > 8 * 1024 * 1024) { s.plan.status = 3; return s.plan; }
   const TSLanguage *grammar = NULL;
@@ -983,6 +1051,9 @@ SCPlan sc_plan_cancelable(int32_t language, const char *source, uint32_t length,
     if (!s.plan.keep) {
       s.plan.status = 3;
     } else {
+      /* Classifications only: no depth/source/python-dependent predicate result
+       * or parse is cached. A fresh optional table belongs to this Selection. */
+      s.types = calloc(TYPE_SLOTS, sizeof(TypeEntry));
       memset(s.plan.keep, 1, length);
       if (language == 7) java_walk(&s, ts_tree_root_node(tree), 0);
       else if (language == 4) moonbit_walk(&s, ts_tree_root_node(tree), 0);
@@ -994,6 +1065,7 @@ SCPlan sc_plan_cancelable(int32_t language, const char *source, uint32_t length,
       merge_omissions(&s);
     }
   }
+  free(s.types);
   if (tree) ts_tree_delete(tree);
   ts_parser_delete(parser);
   if (stopped(&s)) { free(s.plan.keep); s.plan.keep = NULL; }

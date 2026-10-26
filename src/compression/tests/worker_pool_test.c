@@ -39,9 +39,18 @@ static void stop_join(SCWorkerPool *p) {
 static uint32_t u32(const uint8_t *p) {
   return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
 }
+#ifdef SC_TRAVERSAL_REFERENCE
+SCPlan sc_reference_plan(int32_t, const char *, uint32_t, uint64_t);
+#endif
 static void check_result(SCWorkerPool *p, int index, int language, const char *source) {
   size_t size = strlen(source);
   SCPlan serial = sc_plan(language, source, (uint32_t)size, 200000);
+#ifdef SC_TRAVERSAL_REFERENCE
+  SCPlan reference = sc_reference_plan(language, source, (uint32_t)size, 200000);
+  assert(serial.status == reference.status && serial.length == reference.length);
+  assert(serial.status || !memcmp(serial.keep, reference.keep, size));
+  free(reference.keep);
+#endif
   uint32_t length = 0;
   const uint8_t *wire = sc_pool_result(p, index, &length);
   assert(wire && length >= 4 && (length - 4) % 16 == 0);
@@ -54,6 +63,9 @@ static void check_result(SCWorkerPool *p, int index, int language, const char *s
     for (uint32_t offset = 4; offset < length; offset += 16) {
       uint32_t start = u32(wire + offset), end = u32(wire + offset + 4);
       assert(start >= previous && start < end && end <= size);
+      /* Maximal runs plus the independent newline oracle uniquely determine
+       * every wire byte, not only the reconstructed keep mask. */
+      assert((start == 0 || !serial.keep[start - 1]) && (end == size || !serial.keep[end]));
       memset(actual + start, 1, end - start);
       /* Independent range oracle counts original newlines at both endpoints. */
       uint32_t first = 1, last = 1;
@@ -70,16 +82,31 @@ static void check_result(SCWorkerPool *p, int index, int language, const char *s
   free(serial.keep);
 }
 static const char *fixtures[] = {
-  "// café\r\nexport function f(x) {\r\n  return x + 123456789;\r\n}\r\n",
-  "export function f(x: number): number { return x + 123456789; }\n",
-  "export function F() { return <div>hello world</div>; }\n",
-  "# café\r\ndef f(x):\r\n    return x + 123456789\r\n",
-  "pub fn f(x : Int) -> Int { x + 123456789 }\n",
-  "package p\nfunc F(x int) int { return x + 123456789 }\n",
-  "pub fn f(x: i32) -> i32 { x + 123456789 }\n",
-  "class C { int f(int x) { return x + 123456789; } }\n",
+  "// café\r\nexport function f(x) {\r\n  return x + 123456789;\r\n}\r\n"
+  "class Api { read(x) { if(x) { function nested() { return 123456789; } } return x; } }\n",
+  "export function f(x: number): number { return x + 123456789; }\n"
+  "interface Api<T> { read(x:T): T; } type Shape = { key: string };\n"
+  "const table: Record<string, number[]> = {a:[1,2],b:[3,4]};\n",
+  "export function F() { return <div>hello world</div>; }\n"
+  "export function View() { const callback = () => { return 123456789; }; return <span>{callback()}</span>; }\n",
+  "# café\r\ndef f(x):\r\n    return x + 123456789\r\n"
+  "class Api:\n    \"\"\"docs\"\"\"\n    def read(self, x):\n        def nested(y):\n            return y + 123456789\n        return nested(x)\n",
+  "pub fn f(x : Int) -> Int { x + 123456789 }\n"
+  "pub(all) struct Point { x : Int; y : Int } derive(Eq)\n"
+  "pub fn outer(x : Int) -> Int { fn nested(y : Int) -> Int { y + 123456789 }; nested(x) }\n",
+  "package p\nfunc F(x int) int { return x + 123456789 }\n"
+  "type Point struct { X, Y int }; func Outer(x int) int { callback := func(y int) int { return y + 123456789 }; return callback(x) }\n",
+  "pub fn f(x: i32) -> i32 { x + 123456789 }\n"
+  "pub struct Point { pub value: i32 }\n"
+  "pub fn outer(x: i32) -> i32 { if x > 0 { fn nested(y: i32) -> i32 { y + 123456789 } } x }\n",
+  "class C { int f(int x) { return x + 123456789; } }\n"
+  "class Api<T> { <R extends T> R read(R x) { class Local { int get() { return 123456789; } } return x; } }\n",
 };
 static void differential(void) {
+  for (int language = 0; language < 8; ++language) {
+    SCPlan plan = sc_plan(language, fixtures[language], (uint32_t)strlen(fixtures[language]), 200000);
+    assert(plan.status == 0 && plan.keep); free(plan.keep);
+  }
   const int workers[] = {1, 2, 4};
   for (int w = 0; w < 3; ++w) {
     SCWorkerPool *p = sc_pool_new(workers[w]);

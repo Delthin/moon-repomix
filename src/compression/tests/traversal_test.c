@@ -1,7 +1,21 @@
 /* Copyright (c) 2026 moon-repomix contributors. MIT licensed; see LICENSE.
  * Synthetic white-box traversal tests. No MoonBit runtime is linked.
  * Define SC_TRAVERSAL_REFERENCE and link a separately renamed original core
- * to compare complete plans against the pre-cursor implementation. */
+ * to compare complete plans against a separately compiled prior core.
+ * Build this file with SC_PREDICATE_REFERENCE_CORE="path/to/prior_core.c"
+ * (and -I for its original includes) to produce that independent oracle. */
+#ifdef SC_PREDICATE_REFERENCE_CORE
+#define sc_plan sc_reference_plan
+#define sc_plan_cancelable sc_reference_plan_cancelable
+#include SC_PREDICATE_REFERENCE_CORE
+unsigned sc_reference_predicates(TSNode node) {
+  return (unsigned)callable(node) | (unsigned)classlike(node) << 1 |
+    (unsigned)importlike(node) << 2 | (unsigned)type_declaration(node) << 3 |
+    (unsigned)structural(node) << 4 | (unsigned)js_assignment(node) << 5 |
+    (unsigned)implementation_statement(node) << 6 | (unsigned)moonbit_callable(node) << 7 |
+    (unsigned)moonbit_type(node) << 8 | (unsigned)rust_item(node) << 9 | (unsigned)go_callable(node) << 10;
+}
+#else
 #include "../compression_core.h"
 #include "../vendor/runtime/lib/include/tree_sitter/api.h"
 #include <assert.h>
@@ -18,6 +32,15 @@ static _Thread_local atomic_bool *cancel_hook;
 static TSTreeCursor tracked_new(TSNode);
 static void tracked_delete(TSTreeCursor *);
 static TSNode tracked_current(const TSTreeCursor *);
+static _Thread_local int fail_cache, fail_keep;
+static _Thread_local void *core_cache;
+static _Thread_local unsigned cache_allocations, cache_frees, cache_failures;
+static void *predicate_calloc(size_t, size_t);
+static void *predicate_malloc(size_t);
+static void predicate_free(void *);
+#define calloc predicate_calloc
+#define malloc predicate_malloc
+#define free predicate_free
 #define ts_tree_cursor_new tracked_new
 #define ts_tree_cursor_delete tracked_delete
 #define ts_tree_cursor_current_node tracked_current
@@ -25,6 +48,23 @@ static TSNode tracked_current(const TSTreeCursor *);
 #undef ts_tree_cursor_new
 #undef ts_tree_cursor_delete
 #undef ts_tree_cursor_current_node
+#undef calloc
+#undef malloc
+#undef free
+
+static void *predicate_calloc(size_t count, size_t size) {
+  assert(count == TYPE_SLOTS && size == sizeof(TypeEntry));
+  assert(!core_cache);
+  if (fail_cache) { ++cache_failures; return NULL; }
+  core_cache = calloc(count, size);
+  assert(core_cache); ++cache_allocations;
+  return core_cache;
+}
+static void *predicate_malloc(size_t size) { return fail_keep ? NULL : malloc(size); }
+static void predicate_free(void *p) {
+  if (p && p == core_cache) { core_cache = NULL; ++cache_frees; }
+  free(p);
+}
 
 static TSTreeCursor tracked_new(TSNode node) {
   ++cursors;
@@ -43,6 +83,7 @@ static TSNode tracked_current(const TSTreeCursor *cursor) {
 
 #ifdef SC_TRAVERSAL_REFERENCE
 SCPlan sc_reference_plan(int32_t, const char *, uint32_t, uint64_t);
+unsigned sc_reference_predicates(TSNode);
 #endif
 
 static const TSLanguage *grammar(int language) {
@@ -111,7 +152,8 @@ static void compare(int language, const char *source, int status, const char *la
   SCPlan actual = sc_plan(language, source, n, 0);
   if (actual.status != status)
     fprintf(stderr, "unexpected status: language %d %s, %d vs %d\n", language, label, actual.status, status);
-  assert(actual.status == status && cursors == 0);
+  assert(actual.status == status && cursors == 0 && !core_cache);
+  assert(cache_allocations == cache_frees);
 #ifdef SC_TRAVERSAL_REFERENCE
   SCPlan expected = sc_reference_plan(language, source, n, 0);
   equal_plan(actual, expected, label);
@@ -223,7 +265,7 @@ static void fixture_tests(void) {
     char *wide = wide_source(language);
     compare(language, wide, 0, "wide fixture");
     TSTree *tree = parse(language, wide);
-    Selection s = {{NULL, (uint32_t)strlen(wide), 0}, language == 3, wide, NULL};
+    Selection s = {.plan={NULL, (uint32_t)strlen(wide), 0}, .python=language == 3, .source=wide};
     enumerate(&s, ts_tree_root_node(tree));
     assert(!s.plan.status && !cursors);
     ts_tree_delete(tree); free(wide);
@@ -252,10 +294,11 @@ static void fixture_tests(void) {
 static void depth_tests(void) {
   TSTree *tree = parse(0, "identifier;");
   TSNode leaf = ts_node_named_child(ts_node_named_child(ts_tree_root_node(tree), 0), 0);
-  assert(is(leaf, "identifier"));
+  Selection identity = {0};
+  assert(is(&identity, leaf, K_identifier));
   for (unsigned depth = 512; depth <= 513; ++depth) {
     uint8_t keep[11]; memset(keep, 1, sizeof(keep));
-    Selection s = {{keep, sizeof(keep), 0}, 0, "identifier;", NULL};
+    Selection s = {.plan={keep, sizeof(keep), 0}, .source="identifier;"};
     comments(&s, leaf, depth); assert(s.plan.status == (depth > 512 ? 3 : 0));
     s.plan.status = 0;
     presentation(&s, leaf, depth); assert(s.plan.status == (depth > 512 ? 3 : 0));
@@ -300,6 +343,73 @@ static void cancel_tests(void) {
   }
   assert(peak_cursors > 1);
 }
+static void check_type_node(Selection *s, TSNode node) {
+  /* String equality is the independent type contract, including aliases.
+   * Every predicate is also checked against the unmodified old C below. */
+  for (unsigned k = 1; k < K_count; ++k)
+    assert(is(s, node, (NodeKind)k) == (!strcmp(ts_node_type(node), kind_names[k])));
+#ifdef SC_TRAVERSAL_REFERENCE
+  unsigned actual = (unsigned)callable(s, node) |
+    (unsigned)classlike(s, node) << 1 | (unsigned)importlike(s, node) << 2 |
+    (unsigned)type_declaration(s, node) << 3 | (unsigned)structural(s, node) << 4 |
+    (unsigned)js_assignment(s, node) << 5 | (unsigned)implementation_statement(s, node) << 6 |
+    (unsigned)moonbit_callable(s, node) << 7 | (unsigned)moonbit_type(s, node) << 8 |
+    (unsigned)rust_item(s, node) << 9 | (unsigned)go_callable(s, node) << 10;
+  assert(actual == sc_reference_predicates(node));
+#endif
+}
+static void check_type_tree(Selection *s, TSNode node) {
+  check_type_node(s, node);
+  uint32_t n = ts_node_child_count(node);
+  for (uint32_t i = 0; i < n; ++i) check_type_tree(s, ts_node_child(node, i));
+}
+static void predicate_tests(void) {
+  for (int language = 0; language < 8; ++language) {
+    TSTree *tree = parse(language, fixtures[language]);
+    TSNode root = ts_tree_root_node(tree);
+    Selection s = {.source=fixtures[language], .python=language == 3};
+    s.types = calloc(TYPE_SLOTS, sizeof(TypeEntry)); assert(s.types);
+    /* Full table with colliding/mismatched names and deliberately wrong kinds:
+     * a miss must classify the real name, not trust hash/index/last-node alone. */
+    for (unsigned i = 0; i < TYPE_SLOTS; ++i)
+      s.types[i] = (TypeEntry){"#cache-collision", K_function_declaration};
+    check_type_tree(&s, root);
+    check_type_tree(&s, root); /* populated positive and negative hits */
+    /* Exercise all runtime alias names, even distinct/duplicate namedness
+     * symbols absent from this fixture. Pinned TSNode alias context is part of
+     * the full-node key; the independent old predicates use ts_node_type. */
+    for (uint32_t symbol = 1; symbol < ts_language_symbol_count(grammar(language)); ++symbol) {
+      TSNode alias = root; alias.context[3] = symbol;
+      check_type_node(&s, alias);
+      alias.context[0]++; alias.context[1]++; alias.context[2]++;
+      check_type_node(&s, alias);
+    }
+    assert(!is(&s, (TSNode){0}, K_identifier));
+    free(s.types); ts_tree_delete(tree);
+    fail_cache = 1;
+    compare(language, fixtures[language], 0, "cache allocation failure");
+    char *wide = wide_source(language);
+    compare(language, wide, 0, "wide cache allocation failure");
+    free(wide); fail_cache = 0;
+  }
+  TSTree *tree = parse(0, "'doc';");
+  TSNode expression = ts_node_named_child(ts_tree_root_node(tree), 0);
+  atomic_bool cancel = false;
+  Selection s = {.source="'doc';", .cancel=&cancel};
+  s.types = calloc(TYPE_SLOTS, sizeof(TypeEntry)); assert(s.types);
+  assert(!contains_outline(&s, expression, 0));
+  s.python = 1;
+  assert(contains_outline(&s, expression, 0)); /* never cache source/mode-dependent booleans */
+  assert(!contains_outline(&s, expression, 513) && s.plan.status == 3);
+  s.plan.status = 0; atomic_store(&cancel, true);
+  assert(!contains_outline(&s, expression, 0) && s.plan.status == 5);
+  free(s.types); ts_tree_delete(tree);
+  fail_keep = 1;
+  SCPlan failure = sc_plan(0, "identifier;", 11, 200000);
+  assert(failure.status == 3 && !failure.keep && !core_cache);
+  fail_keep = 0;
+  assert(cache_failures == 32 && cache_allocations == cache_frees);
+}
 static void *parallel(void *unused) {
   (void)unused;
   for (int language = 0; language < 8; ++language)
@@ -311,12 +421,14 @@ int main(void) {
   fixture_tests(); puts("PASS: all 8 grammars, wide/multilevel outlines, full plan differential, alias/named/anonymous/extra order");
   depth_tests(); puts("PASS: exact 512/513 guards, original signature cutoff, nested source boundaries");
   cancel_tests(); puts("PASS: deterministic mid-traversal cancellation and early-return cursor cleanup");
+  predicate_tests(); puts("PASS: type cache full/collision/mismatch, all alias names, mode/depth/cancel and allocation-failure fallback");
   pthread_t threads[4];
   for (int i = 0; i < 4; ++i) assert(!pthread_create(&threads[i], NULL, parallel, NULL));
   for (int i = 0; i < 4; ++i) assert(!pthread_join(threads[i], NULL));
   puts("PASS: four concurrent independent planners, no shared traversal state");
 #ifdef SC_TRAVERSAL_REFERENCE
-  puts("REFERENCE: original separately compiled indexed planner compared byte-for-byte");
+  puts("REFERENCE: prior separately compiled core and predicates compared byte-for-byte");
 #endif
   return 0;
 }
+#endif /* SC_PREDICATE_REFERENCE_CORE */
