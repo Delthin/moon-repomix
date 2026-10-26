@@ -2,3 +2,11 @@ import {
   "123123213weqw/moon_scrub",
   "Delthin/moon_repomix/validated_text",
 }
+
+import {
+  "moonbitlang/core/encoding/utf8",
+} for "wbtest"
+
+options(
+  "native-stub": [ "prefilter.c" ],
+)
