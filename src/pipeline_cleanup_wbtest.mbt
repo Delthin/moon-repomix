@@ -1,5 +1,7 @@
 ///|
 async test "pipeline teardown releases native leases after input failure and cancellation" {
+  pipeline_test_mutex.acquire()
+  defer pipeline_test_mutex.release()
   let runtime = Runtime::load(
     @env.current_dir().unwrap() + "/assets/tokenizer-o200k_base.tiktoken",
   )
