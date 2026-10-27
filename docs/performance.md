@@ -1,6 +1,29 @@
 # 性能与测量方法
 
-2026-10-27 的架构优化在固定 35 MB TypeScript 大库中，使原文和完整元数据压缩的 CLI 耗时中位数均低于原版。各批结果对应固定输入、选项和平台，CLI 与常驻 MCP 分开测量；历史不利结果保留在下文。
+2026-10-27 的架构优化在固定 35 MB TypeScript 大库中，使 macOS 和 Linux 两批的原文及完整元数据压缩 CLI 耗时中位数均低于原版。各批结果对应固定输入、选项和平台，CLI 与常驻 MCP 分开测量；历史不利结果保留在下文。
+
+## 2026-10-27：Linux 大库复验
+
+测量源码为 `4bf0d990ceb656c2dddf267315bd914ea5888d71`，[完整工作流与原始材料](https://github.com/Delthin/moon-repomix/actions/runs/40432025882) 保留了全部样本。环境是 GitHub-hosted `ubuntu-latest` x64（实际 Ubuntu 26.04 image），MoonBit `0.10.15+943464bfa` native release，Repomix `1.18.1` / Node `25.9.0`，使用 GNU `/usr/bin/time`；没有单独记录 CPU 型号。
+
+输入与下文相同：TypeScript v5.9.3 的 736 份源码/许可、35,182,011 bytes，另有 chi 8 份和 itoa 4 份。三源 × 原文/完整元数据压缩 × Native/Node，每端每场景预热一次后交替运行五轮，共 **12 预热、60 正式、72 份完整 JSON**，全部退出 0。所有构建、依赖安装和准备在预热前完成；正常 Node workers 与预热后缓存保留。源码、407 份 tracked 文件散列、二进制、词表/Unicode、配置和参考安装身份在批前后相同。离线复核 36 份 Native stderr 报告及已有正文/API/ranges/fallback/stability，不再调用产品。
+
+以下为五轮中位数，wall 单位秒，RSS 为被测进程峰值 MiB（不是全部 worker 合计）。
+
+| 场景 | Native wall | Node wall | Native RSS | Node RSS |
+| --- | ---: | ---: | ---: | ---: |
+| TypeScript 原文 | 1.82 | 2.62 | 353.8 | 995.7 |
+| TypeScript 完整元数据压缩 | 2.40 | 3.59 | 322.2 | 934.3 |
+| chi 原文 | 0.09 | 0.27 | 36.8 | 158.7 |
+| chi 完整元数据压缩 | 0.09 | 0.34 | 38.1 | 188.6 |
+| itoa 原文 | 0.08 | 0.28 | 36.2 | 158.0 |
+| itoa 完整元数据压缩 | 0.08 | 0.32 | 38.1 | 191.8 |
+
+六场景 wall/RSS 均较低；TypeScript 原文/压缩 wall 分别降低 **30.5% / 33.1%**，RSS 降低 64.5% / 65.5%。全部慢样本保留，例如 Node TypeScript 压缩最大 4.24 s、Native chi 原文最大 0.19 s。速度不决定工作流退出码，绿灯表示执行和正确性守卫通过；本批没有同机旧 Native 基线，也不据两台机器的绝对秒数判断平台优劣。
+
+Linux 的压缩结果有一项平台差异：六轮均为 **534 applied、1 timeout**（另有 116 `not-fewer-tokens`、45 `not-smaller`、35 `unsupported`、4 `parse-error`）。`src/compiler/checker.ts` 触及原有 200 ms 边界，完整原文回退、ranges 为空；其余 734 份正文与 macOS 同配置输出相同。Linux 压缩整文为 **8,087,099 tokens / 30,210,970 bytes**，不能沿用 macOS 的 7,739,936 / 28,488,489。已下载的 36 份 Native 产物中，另五场景的 30 份完整文档与 macOS 逐字节相同；TypeScript 压缩的六份差异均来自这一回退及对应元数据，没有为取得相同输出放宽限额或重测。
+
+Native 仍因凭证规则接受 735 份 TypeScript、Node 接受 736；Node 大文分块计数、压缩保留策略和 API 差异沿用下文说明。这是固定端到端工作负载比较，不是相同计算工作的证明。冻结 Linux binary SHA-256 为 `e86035443cee84044c97bff3aac5de8da81aa4da775c9cb0dbf332134314f81b`。对应源码的[三平台常规 CI](https://github.com/Delthin/moon-repomix/actions/runs/40432024550) 也完整通过：macOS/Linux 各 106/106，Windows 103/103；Windows 大库性能和新的常驻 MCP/WebUI 性能尚未测量。
 
 ## 2026-10-27：精确计数内核与滚动 AST 流水线
 
@@ -30,7 +53,7 @@
 
 TypeScript 相对同批 Node，原文 wall 降低 **23.4%**、压缩降低 **11.7%**；相对旧 Native 降低 54.9% / 62.7%。新版原文五轮为 `[1.06,1.03,1.05,1.02,1.05]`，压缩为 `[1.41,1.41,1.43,1.43,1.43]`；Node 分别为 `[1.40,1.37,1.35,1.40,1.35]`、`[1.47,1.46,1.65,1.62,1.97]`，全部样本保留。
 
-代价同样保留：TypeScript RSS 相对旧 Native 增加 0.9% / 8.5%；四个小场景各增加约 0.01 s，RSS 增加约 24%–26%，仍低于本批 Node。五轮本机结果不代表统计显著性或跨平台保证，本轮没有新增 Linux/Windows、常驻 MCP 或 WebUI 测量。
+代价同样保留：TypeScript RSS 相对旧 Native 增加 0.9% / 8.5%；四个小场景各增加约 0.01 s，RSS 增加约 24%–26%，仍低于本批 Node。五轮本机结果不代表统计显著性或跨平台保证；这批仅测 macOS，后续 Linux 复验见上节，常驻 MCP 和 WebUI 不在此批范围。
 
 36 对旧/新 Native 完整 JSON 逐字节相同，schema-1 的精确 tokens、bytes、安全发现、集合、配额、metadata/ranges/fallback 均核对通过。TypeScript 原文仍为 9,709,413 tokens / 37,206,811 bytes，完整元数据压缩为 7,739,936 / 28,488,489。metrics 16/16、compression 16/16、security 7/7、Root 五个定点组及取消/配额清理检查通过；新 C 内核、选择器与所有权有独立差分和 ASan/UBSan 证据，线程池未变层复用既有 TSan，不能据此声称全部 managed 桥或跨平台验证完成。
 
@@ -280,11 +303,11 @@ moon run --target native scripts/benchmark-resident.mbtx -- verify "$MCP_WORK" "
 
 每批自带 `manifest/`（固定来源、逐文件 SHA、配置及运行身份）、`logs/`（完整 argv、退出码、stdout/stderr/time）、`documents/` 和 `report/`。CLI `verify` 同时产出 `report/native-stderr-audit.json`；`audit-reports CLI_WORK` 可仅复核原生 stderr 报告。常驻各 session 保存真实工具 schema、NDJSON、pack/read 正文、固定 PID/PPID/RSS、退出码及全部五轮统计；`verify` 的末尾可选新收据路径，避免覆盖旧证据。关闭结果以 `exit.json` / `shutdown-result.json` 的实际状态为准，`/bin/kill` 返回 0 只证明信号发送成功。
 
-脚本不安装原版依赖、不清理用户缓存，已有目录拒绝覆盖；没有盲重试。可用 `--target-dir` 将编译产物放到独立目录。此组仅实测 macOS，未测 Linux/Windows、冷页缓存、付费模型；协议、内容与性能结果不能外推。
+脚本不安装原版依赖、不清理用户缓存，已有目录拒绝覆盖；没有盲重试。可用 `--target-dir` 将编译产物放到独立目录。上述历史批仅实测 macOS，未测 Linux/Windows、冷页缓存、付费模型；协议、内容与性能结果不能外推。
 
 ### 当前源码的 Linux 大库复验入口
 
-`.github/workflows/benchmark-large.yml` 仅由 **workflow_dispatch** 手动运行，不随 push 自动测量。它检出 dispatch 所选 ref，以 `github.sha` 冻结源码身份，使用同一 MoonBit `0.10.15+943464bfa`、Node `25.9.0`，只构建 native release CLI；参考 Repomix `1.18.1` 在 runner 临时目录独立安装，禁止生命周期脚本并归档 package-lock。语料与上文相同，所有编译、安装和准备均在预热前完成。**此新增入口尚待 Linux 真实执行，没有新的 Linux 大库结果，也不保证 Native 更快。**
+`.github/workflows/benchmark-large.yml` 仅由 **workflow_dispatch** 手动运行，不随 push 自动测量。它检出 dispatch 所选 ref，以 `github.sha` 冻结源码身份，使用同一 MoonBit `0.10.15+943464bfa`、Node `25.9.0`，只构建 native release CLI；参考 Repomix `1.18.1` 在 runner 临时目录独立安装，禁止生命周期脚本并归档 package-lock。语料与上文相同，所有编译、安装和准备均在预热前完成。此入口已完成上节 Linux 五轮实测；未来运行仍保留有利与不利结果，速度不作为通过条件。
 
 也可在 Linux 的干净产品 Git 根目录直接复现；先准备指定工具链、Node、npm、Git 和 GNU `/usr/bin/time`，再使用各自尚不存在的绝对临时路径：
 
