@@ -1,8 +1,10 @@
-# 从 v0.3.0 升级到 v0.4.0
+# 升级到 v0.4.1
 
-升级 CLI 时下载 [v0.4.0 安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.4.0)，使用 SDK 时将 `moon.mod` 中的 `Delthin/moon_repomix` 依赖更新到 `0.4.0`，再运行 `moon update`。
+升级 CLI 时下载 [v0.4.1 安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.4.1)，使用 SDK 时将 `moon.mod` 中的 `Delthin/moon_repomix` 依赖更新到 `0.4.1`，再运行 `moon update`。
 
-本页对照 v0.3.0 与 v0.4.0 的 [CLI help](../src/cmd/moon-repomix/help.mbt)、[配置类型及默认值](../src/config/types.mbt)、[JSON 解析](../src/config/json.mbt) 和 [SDK 接口](../src/pkg.generated.mbti)。问题报告请附 `--version` 输出；自行构建时另附 commit。
+从 v0.4.0 升级时，现有 CLI、JSON 配置和 Root SDK 调用保持兼容。v0.4.1 主要优化精确计数、扫描和 AST 调度；原有资源限额、超时回原文、单文档预算和分卷语义保持一致。包内已包含所需原生内核，运行仍不依赖 Node。具体平台、缓存内存代价及测量范围见 [性能文档](performance.md)。
+
+从 v0.3.0 升级时，还需核对下文 v0.4.0 引入的默认限制和 SDK 字段变化。本页对照 v0.3.0 与 v0.4.x 的 [CLI help](../src/cmd/moon-repomix/help.mbt)、[配置类型及默认值](../src/config/types.mbt)、[JSON 解析](../src/config/json.mbt) 和 [SDK 接口](../src/pkg.generated.mbti)。问题报告请附 `--version` 输出；自行构建时另附 commit。
 
 ## 保留现有用法，先检查新默认限制
 

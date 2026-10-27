@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-27
+
+### Changed
+
+- 精确计数改用私有 C 内核和请求级有界缓存，减少 UTF-8 预切分、BPE 与分卷/索引的重复工作；既有编码路径作为差分参考和精确保守回退。
+- 严格 UTF-8 快照复用验证结果；固定凭证规则通过必要字面条件预筛选，最终发现才计算字节/行坐标。完整原文扫描和命中排除策略保持一致。
+- 原生 AST 使用有界滚动 lane、前向 cursor 与每次 Selection 的类型分类缓存；结果按原始顺序发布，取消时回收工作。原有 200 ms、8 MiB、深度和片段边界继续生效。
+- 固定 35 MB TypeScript 的五轮对照中，macOS 原文/完整元数据压缩 wall 比 Node 降低 23.4% / 11.7%，Linux 降低 30.5% / 33.1%。完整样本、内存代价、小库回退和 Linux checker.ts 原文回退见 [性能文档](docs/performance.md)。
+
+### Added
+
+- 可复现的手动 Linux 大库工作流和 `run-verified` 身份校验入口，归档全部五轮、预热产物与正确性收据。
+
+### Fixed
+
+- Windows MSVC 使用兼容的原子操作封装，保留原子取消、CAS 和全进程 worker/job/源副本配额。
+- 固定语料准备分别核对 annotated tag 对象、解引用提交与 HEAD，保持已有源码/许可散列。
+
 ## [0.4.0] - 2026-10-25
 
 ### Added
@@ -39,6 +57,7 @@
 - 对齐默认排除、ignore 开关、自定义 glob 与精确磁盘拼写行为，修正跨平台字面路径选择。
 - 优化精确 tokenizer 的初始化、分词计数、文件选择和安全命中定位，减少文件处理中的定时器分配。
 
-[Unreleased]: https://github.com/Delthin/moon-repomix/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Delthin/moon-repomix/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Delthin/moon-repomix/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.3.0

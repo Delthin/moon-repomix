@@ -8,7 +8,7 @@ import {
 ///|
 async fn main {
   assert_eq(@process.run("moon", ["package"]), 0)
-  let archive = @fs.realpath("_build/publish/Delthin-moon_repomix-0.4.0.zip")
+  let archive = @fs.realpath("_build/publish/Delthin-moon_repomix-0.4.1.zip")
   let temp = @fs.tmpdir(prefix="moon-repomix-source-")
   defer @fs.rmdir(temp, recursive=true)
   assert_eq(@process.run("unzip", ["-q", archive, "-d", temp]), 0)
@@ -26,9 +26,13 @@ async fn main {
       "src/compression/vendor/java/src/parser.c", "LICENSES/tree-sitter-go-MIT.txt",
       "LICENSES/tree-sitter-rust-MIT.txt", "LICENSES/tree-sitter-java-MIT.txt", "src/platform/directory.c",
       "src/partition/reindex.mbt", "src/mcp/server.mbt", "src/mcp_rpc/dispatch.mbt",
-      "docs/mcp.md", "docs/reports.md", "docs/webui.md",
-      "assets/webui/index.html", "assets/webui/app.css", "assets/webui/app.js",
-      "assets/demo/webui.gif",
+      "docs/mcp.md", "docs/reports.md", "docs/webui.md", "assets/webui/index.html",
+      "assets/webui/app.css", "assets/webui/app.js", "assets/demo/webui.gif", "src/validated_text/text.mbt",
+      "src/file_pipeline.mbt", "src/metrics/native_counter.c", "src/metrics/native_counter.h",
+      "src/metrics/native_counter_ffi.c", "src/metrics/native_pretokenize.h", "src/metrics/count_session.mbt",
+      "src/security/prefilter.c", "src/security/prefilter.h", "src/compression/worker_pool.c",
+      "src/compression/worker_pool.h", "src/compression/worker_ffi.c", "src/compression/sc_atomic.h",
+      "src/compression/compression_predicates.h",
     ] {
     assert_true(@fs.exists(temp + "/" + path))
   }
