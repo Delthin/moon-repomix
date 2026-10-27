@@ -297,6 +297,27 @@ and link an independently captured original core compiled with
 Only differential fixtures disable the parser clock, so scheduling cannot create
 false mismatches; production and package tests retain the 200 ms parser budget.
 
+`sc_atomic.h` is the private bool/unsigned atomic boundary used by both the
+pool and cancelable core. MSVC uses aligned 32-bit Interlocked intrinsics without
+experimental C11 atomic flags; their full barriers are stronger than required.
+Other compilers retain C11 relaxed operations. CAS failure writes back the
+observed unsigned value, and subtraction preserves unsigned wraparound. Read
+parameters are logically const, but the underlying objects must be writable
+because Interlocked reads use compare-exchange.
+
+`tests/sc_atomic_test.c` checks bool initialization/load/store, const reads, CAS
+success/failure writeback, unsigned boundaries/wraparound and four-thread CAS
+contention. With Clang, build it with `-std=c11 -pthread` and optionally the
+sanitizer flags below. In a Windows MSVC developer prompt, run:
+
+```sh
+cl /nologo /std:c11 /W4 /WX /TC src/compression/tests/sc_atomic_test.c /Fe:_build/sc-atomic-test.exe /Fo:_build/sc-atomic-test.obj
+_build/sc-atomic-test.exe
+```
+
+Create `_build` first. This focused test does not replace native package tests
+on Windows, which also exercise cancellation, quotas and worker shutdown.
+
 `tests/worker_pool_test.c` is a standalone POSIX harness. It also checks copied
 input ownership after the caller mutates/frees its input, independent original
 line-range accounting, deterministic parser timeout/depth limits, allocation and

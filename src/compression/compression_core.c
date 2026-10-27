@@ -23,14 +23,14 @@ typedef struct {
   SCPlan plan;
   int python;
   const char *source;
-  const atomic_bool *cancel;
+  const SCAtomicBool *cancel;
   TypeEntry *types; /* Optional <=16 KiB; allocation failure keeps string predicates. */
   TSNode type_node; /* Full key, not id alone: aliases/context may change the type. */
   NodeKind type_kind;
 } Selection;
 
 static int stopped(Selection *s) {
-  if (s->cancel && atomic_load_explicit(s->cancel, memory_order_relaxed))
+  if (s->cancel && sc_atomic_bool_load(s->cancel))
     s->plan.status = 5;
   return s->plan.status != 0;
 }
@@ -1011,7 +1011,7 @@ SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
 }
 
 SCPlan sc_plan_cancelable(int32_t language, const char *source, uint32_t length,
-                          uint64_t timeout_micros, const atomic_bool *cancel) {
+                          uint64_t timeout_micros, const SCAtomicBool *cancel) {
   Selection s = {.plan = {NULL, length, 0}, .python = language == 3,
                  .source = source, .cancel = cancel};
   if (stopped(&s)) return s.plan;

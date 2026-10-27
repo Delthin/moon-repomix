@@ -36,22 +36,23 @@ struct SCWorkerPool {
   Thread threads[4];
   int created, live, stop, active, count, next, completed, reserved_workers;
   uint32_t bytes;
-  atomic_bool cancel;
+  SCAtomicBool cancel;
   Task tasks[4];
 };
 /* Process-wide reservations prevent multiple planners from multiplying the
  * hard budgets. Only reservation counters are shared between pools. */
-static atomic_uint reserved_workers = 0, reserved_tasks = 0, reserved_bytes = 0;
-static bool reserve(atomic_uint *counter, unsigned amount, unsigned limit) {
-  unsigned current = atomic_load_explicit(counter, memory_order_relaxed);
+static SCAtomicUInt reserved_workers = SC_ATOMIC_UINT_ZERO;
+static SCAtomicUInt reserved_tasks = SC_ATOMIC_UINT_ZERO;
+static SCAtomicUInt reserved_bytes = SC_ATOMIC_UINT_ZERO;
+static bool reserve(SCAtomicUInt *counter, unsigned amount, unsigned limit) {
+  unsigned current = sc_atomic_uint_load(counter);
   do {
     if (amount > limit || current > limit - amount) return false;
-  } while (!atomic_compare_exchange_weak_explicit(counter, &current, current + amount,
-                                                memory_order_relaxed, memory_order_relaxed));
+  } while (!sc_atomic_uint_compare_exchange_weak(counter, &current, current + amount));
   return true;
 }
 static bool cancelled(SCWorkerPool *p) {
-  return atomic_load_explicit(&p->cancel, memory_order_relaxed);
+  return sc_atomic_bool_load(&p->cancel);
 }
 static void put_u32(uint8_t *out, uint32_t value) {
   for (int i = 0; i < 4; ++i) out[i] = (uint8_t)(value >> (8 * i));
@@ -128,18 +129,18 @@ SCWorkerPool *sc_pool_new(int workers) {
   if (!p) return NULL;
   if (!reserve(&reserved_workers, (unsigned)workers, 4)) { free(p); return NULL; }
   p->reserved_workers = workers;
-  atomic_init(&p->cancel, false);
+  sc_atomic_bool_init(&p->cancel, false);
 #ifdef _WIN32
   InitializeSRWLock(&p->mutex);
   InitializeConditionVariable(&p->ready);
 #else
   if (pthread_mutex_init(&p->mutex, NULL)) {
-    atomic_fetch_sub_explicit(&reserved_workers, (unsigned)workers, memory_order_relaxed);
+    sc_atomic_uint_fetch_sub(&reserved_workers, (unsigned)workers);
     free(p); return NULL;
   }
   if (pthread_cond_init(&p->ready, NULL)) {
     pthread_mutex_destroy(&p->mutex);
-    atomic_fetch_sub_explicit(&reserved_workers, (unsigned)workers, memory_order_relaxed);
+    sc_atomic_uint_fetch_sub(&reserved_workers, (unsigned)workers);
     free(p); return NULL;
   }
 #endif
@@ -165,13 +166,13 @@ int sc_pool_add(SCWorkerPool *p, int language, const uint8_t *source, uint32_t l
       length > 8u * 1024 * 1024 || length > 16u * 1024 * 1024 - p->bytes) return 0;
   if (!reserve(&reserved_tasks, 1, 4)) return 0;
   if (!reserve(&reserved_bytes, length, 16u * 1024 * 1024)) {
-    atomic_fetch_sub_explicit(&reserved_tasks, 1, memory_order_relaxed);
+    sc_atomic_uint_fetch_sub(&reserved_tasks, 1);
     return 0;
   }
   uint8_t *copy = malloc(length ? length : 1);
   if (!copy) {
-    atomic_fetch_sub_explicit(&reserved_tasks, 1, memory_order_relaxed);
-    atomic_fetch_sub_explicit(&reserved_bytes, length, memory_order_relaxed);
+    sc_atomic_uint_fetch_sub(&reserved_tasks, 1);
+    sc_atomic_uint_fetch_sub(&reserved_bytes, length);
     return 0;
   }
   if (length) memcpy(copy, source, length);
@@ -209,8 +210,8 @@ void sc_pool_release(SCWorkerPool *p) {
       free(p->tasks[i].wire);
       memset(&p->tasks[i], 0, sizeof(Task));
     }
-    atomic_fetch_sub_explicit(&reserved_tasks, (unsigned)p->count, memory_order_relaxed);
-    atomic_fetch_sub_explicit(&reserved_bytes, p->bytes, memory_order_relaxed);
+    sc_atomic_uint_fetch_sub(&reserved_tasks, (unsigned)p->count);
+    sc_atomic_uint_fetch_sub(&reserved_bytes, p->bytes);
     p->active = p->count = p->next = p->completed = 0;
     p->bytes = 0;
   }
@@ -218,7 +219,7 @@ void sc_pool_release(SCWorkerPool *p) {
 }
 void sc_pool_stop(SCWorkerPool *p) {
   if (!p) return;
-  atomic_store_explicit(&p->cancel, true, memory_order_relaxed);
+  sc_atomic_bool_store(&p->cancel, true);
   LOCK(&p->mutex);
   p->stop = 1;
   WAKE(&p->ready);
@@ -247,6 +248,6 @@ void sc_pool_delete(SCWorkerPool *p) {
   pthread_cond_destroy(&p->ready);
   pthread_mutex_destroy(&p->mutex);
 #endif
-  atomic_fetch_sub_explicit(&reserved_workers, (unsigned)p->reserved_workers, memory_order_relaxed);
+  sc_atomic_uint_fetch_sub(&reserved_workers, (unsigned)p->reserved_workers);
   free(p);
 }

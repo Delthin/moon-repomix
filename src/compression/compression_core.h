@@ -1,7 +1,7 @@
 #ifndef MOON_REPOMIX_COMPRESSION_CORE_H
 #define MOON_REPOMIX_COMPRESSION_CORE_H
 #include <stdint.h>
-#include <stdatomic.h>
+#include "sc_atomic.h"
 /* A call-scoped byte selection. Caller frees keep with free(). */
 typedef struct {
   uint8_t *keep;
@@ -14,5 +14,5 @@ typedef struct {
 SCPlan sc_plan(int32_t language, const char *source, uint32_t length,
                uint64_t timeout_micros);
 SCPlan sc_plan_cancelable(int32_t language, const char *source, uint32_t length,
-                          uint64_t timeout_micros, const atomic_bool *cancel);
+                          uint64_t timeout_micros, const SCAtomicBool *cancel);
 #endif
