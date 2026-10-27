@@ -284,6 +284,26 @@ fn anchor_manifest() -> String {
 }
 
 ///|
+fn checkout_target(id : String, requested : String) -> (String, String) raise {
+  match id {
+    "typescript" => {
+      assert_eq(requested, "c63de15a992d37f0d6cec03ac7631872838602cb")
+      ("commit", requested)
+    }
+    "chi" => {
+      assert_eq(requested, "71307f9b7e4e9527638bc951c42b782cd1560331")
+      ("commit", requested)
+    }
+    "itoa" => {
+      // The immutable 1.0.15 annotated tag and its independently pinned commit.
+      assert_eq(requested, "8ee97f64bf3cbfa42d357a2c39955fd062492e7d")
+      ("tag", "e2766b868e4ac1ae2bf5bea1ac43d4c0da23b899")
+    }
+    _ => fail("Unknown fixed corpus")
+  }
+}
+
+///|
 async fn checkout(h : Harness, repo : Repo) -> String {
   let work = h.work
   let root = work + "/reference/" + repo.id
@@ -344,22 +364,46 @@ async fn checkout(h : Harness, repo : Repo) -> String {
     root,
   )
   |> ignore
+  let (expected_type, expected_commit) = checkout_target(id, pin)
+  let object_type = command(
+      h,
+      id + "-object-type",
+      "git",
+      git_args() + ["cat-file", "-t", pin],
+      root,
+    )
+    .trim()
+    .to_owned()
+  assert_eq(object_type, expected_type)
+  let commit = command(
+      h,
+      id + "-peeled-commit",
+      "git",
+      git_args() + ["rev-parse", pin + "^{commit}"],
+      root,
+    )
+    .trim()
+    .to_owned()
+  assert_eq(commit, expected_commit)
   command(
     h,
     id + "-checkout",
     "git",
-    git_args() + ["checkout", "--detach", pin],
+    git_args() + ["checkout", "--detach", commit],
     root,
   )
   |> ignore
   assert_eq(
     command(h, id + "-head", "git", git_args() + ["rev-parse", "HEAD"], root).trim(),
-    pin,
+    expected_commit,
   )
   save(work + "/manifest/" + id + "-pin.json", {
     "url": Json(repo.url),
     "tag": Json(repo.revision),
-    "verified_head": Json(pin),
+    "requested_object": Json(pin),
+    "object_type": Json(object_type),
+    "peeled_commit": Json(commit),
+    "verified_head": Json(expected_commit),
   })
   root
 }
@@ -1395,6 +1439,31 @@ async fn verified_source(
 
 ///|
 fn identity_selftest() -> Unit raise {
+  assert_eq(
+    checkout_target("itoa", "8ee97f64bf3cbfa42d357a2c39955fd062492e7d"),
+    ("tag", "e2766b868e4ac1ae2bf5bea1ac43d4c0da23b899"),
+  )
+  for
+    (id, commit) in [
+      ("typescript", "c63de15a992d37f0d6cec03ac7631872838602cb"),
+      ("chi", "71307f9b7e4e9527638bc951c42b782cd1560331"),
+    ] {
+    assert_eq(checkout_target(id, commit), ("commit", commit))
+  }
+  for
+    (id, wrong_pin) in [
+      ("itoa", "e2766b868e4ac1ae2bf5bea1ac43d4c0da23b899"),
+      ("itoa", "8ee97f64bf3cbfa42d357a2c39955fd062492e7c"),
+      ("chi", "HEAD"),
+      ("typescript", "v5.9.3"),
+      ("unknown", "71307f9b7e4e9527638bc951c42b782cd1560331"),
+    ] {
+    try checkout_target(id, wrong_pin) catch {
+      _ => ()
+    } noraise {
+      _ => fail("Invalid checkout pin accepted")
+    }
+  }
   let revision = "0123456789abcdef0123456789abcdef01234567"
   let binary = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
   let identity = verified_identity(revision, binary)

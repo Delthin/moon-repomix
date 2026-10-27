@@ -197,9 +197,9 @@ Linux CI 复用已有 release CLI，运行同样六场景；macOS/Windows 功能
 | --- | --- | --- | ---: | ---: |
 | Microsoft TypeScript | v5.9.3 / `c63de15a992d37f0d6cec03ac7631872838602cb` | `src/**,LICENSE.txt` | 736 | 35,182,011 |
 | go-chi/chi | `71307f9b7e4e9527638bc951c42b782cd1560331` | 7 份根目录 Go 源码与 LICENSE | 8 | 50,684 |
-| dtolnay/itoa | `8ee97f64bf3cbfa42d357a2c39955fd062492e7d` | `src/**,LICENSE-MIT,LICENSE-APACHE` | 4 | 23,718 |
+| dtolnay/itoa | `e2766b868e4ac1ae2bf5bea1ac43d4c0da23b899` | `src/**,LICENSE-MIT,LICENSE-APACHE` | 4 | 23,718 |
 
-公开准备入口默认从三个公共 HTTPS Git URL 按上述固定 commit 稀疏检出，并验证 HEAD；TypeScript 还核对 v5.9.3 tag。本表使用的 Go/Rust 源副本逐一符合内置的 12 份源码/许可 SHA-256；原定的全部声明/导入锚点也内置在脚本中，在线和离线准备均核对相同常量。TypeScript 为 Apache-2.0，chi 为 MIT，itoa 为 MIT/Apache-2.0 双许可；许可文件随语料保留，语料只作开发输入。独立输入只含选定文件、空 `.git` 边界及安全 JSON 配置，不执行仓库代码、JS 配置或 processors。TypeScript 不是从大库挑出的性能小样本。
+公开准备入口默认从三个公共 HTTPS Git URL 按上述固定 commit 稀疏检出，并验证 HEAD；TypeScript 还核对 v5.9.3 tag。itoa 的固定获取对象 `8ee97f64bf3cbfa42d357a2c39955fd062492e7d` 是 1.0.15 的带注释标签，脚本分别验证对象类型、解引用后的 `e2766b8…` 提交和检出 HEAD；原有源码/许可 SHA 保持相同。本表使用的 Go/Rust 源副本逐一符合内置的 12 份源码/许可 SHA-256；原定的全部声明/导入锚点也内置在脚本中，在线和离线准备均核对相同常量。TypeScript 为 Apache-2.0，chi 为 MIT，itoa 为 MIT/Apache-2.0 双许可；许可文件随语料保留，语料只作开发输入。独立输入只含选定文件、空 `.git` 边界及安全 JSON 配置，不执行仓库代码、JS 配置或 processors。TypeScript 不是从大库挑出的性能小样本。
 
 每来源、模式、端点预热一次，接着交替先后顺序运行五个新进程：共 **60 次正式计时、12 次预热**。白名单环境中的独立 HOME/XDG/TMP/token cache 批内保留，普通线程池和安全扫描开启。这里的“新进程”不表示冷磁盘、冷 OS 页缓存或每轮清空 token cache。本表的压缩行是 Native **完整元数据压缩**（`--compress --full-metadata`）对照原版自身压缩，和前面六个小场景的 Native 默认轻量压缩不是同一工作。保留原有 72 份产物；18 份 Native 完整元数据压缩输出在计时外检查 ranges。
 
