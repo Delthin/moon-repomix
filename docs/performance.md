@@ -281,3 +281,32 @@ moon run --target native scripts/benchmark-resident.mbtx -- verify "$MCP_WORK" "
 每批自带 `manifest/`（固定来源、逐文件 SHA、配置及运行身份）、`logs/`（完整 argv、退出码、stdout/stderr/time）、`documents/` 和 `report/`。CLI `verify` 同时产出 `report/native-stderr-audit.json`；`audit-reports CLI_WORK` 可仅复核原生 stderr 报告。常驻各 session 保存真实工具 schema、NDJSON、pack/read 正文、固定 PID/PPID/RSS、退出码及全部五轮统计；`verify` 的末尾可选新收据路径，避免覆盖旧证据。关闭结果以 `exit.json` / `shutdown-result.json` 的实际状态为准，`/bin/kill` 返回 0 只证明信号发送成功。
 
 脚本不安装原版依赖、不清理用户缓存，已有目录拒绝覆盖；没有盲重试。可用 `--target-dir` 将编译产物放到独立目录。此组仅实测 macOS，未测 Linux/Windows、冷页缓存、付费模型；协议、内容与性能结果不能外推。
+
+### 当前源码的 Linux 大库复验入口
+
+`.github/workflows/benchmark-large.yml` 仅由 **workflow_dispatch** 手动运行，不随 push 自动测量。它检出 dispatch 所选 ref，以 `github.sha` 冻结源码身份，使用同一 MoonBit `0.10.15+943464bfa`、Node `25.9.0`，只构建 native release CLI；参考 Repomix `1.18.1` 在 runner 临时目录独立安装，禁止生命周期脚本并归档 package-lock。语料与上文相同，所有编译、安装和准备均在预热前完成。**此新增入口尚待 Linux 真实执行，没有新的 Linux 大库结果，也不保证 Native 更快。**
+
+也可在 Linux 的干净产品 Git 根目录直接复现；先准备指定工具链、Node、npm、Git 和 GNU `/usr/bin/time`，再使用各自尚不存在的绝对临时路径：
+
+```sh
+moon update
+moon run --target native scripts/check-toolchain.mbtx
+moon build --target native --release src/cmd/moon-repomix
+REFERENCE_INSTALL="${TMPDIR:-/tmp}/moon-repomix-large-reference-unique"
+CLI_WORK="${TMPDIR:-/tmp}/moon-repomix-large-workload-unique"
+mkdir "$REFERENCE_INSTALL"
+(cd "$REFERENCE_INSTALL" && npm install --ignore-scripts --no-audit --no-fund --save-exact repomix@1.18.1)
+REFERENCE_CLI="$REFERENCE_INSTALL/node_modules/repomix/bin/repomix.cjs"
+NATIVE_CLI="$PWD/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe"
+SOURCE_REVISION="$(git rev-parse HEAD)"
+NATIVE_SHA256="$(sha256sum "$NATIVE_CLI")"
+NATIVE_SHA256="${NATIVE_SHA256%% *}"
+moon run --target native scripts/benchmark-workloads.mbtx -- prepare "$CLI_WORK" "$REFERENCE_CLI"
+moon run --target native scripts/benchmark-workloads.mbtx -- run-verified "$CLI_WORK" \
+  "$NATIVE_CLI" "$PWD/assets/tokenizer-o200k_base.tiktoken" "$SOURCE_REVISION" "$NATIVE_SHA256"
+moon run --target native scripts/benchmark-workloads.mbtx -- verify "$CLI_WORK"
+```
+
+`run-verified WORKSPACE NATIVE VOCABULARY FULL_SOURCE_REVISION EXPECTED_BINARY_SHA256` 要求显式的 40/64 位小写十六进制身份，校验 binary 实际散列、Git HEAD 和干净状态（允许 ignored 构建产物）。预热前与全批后核对全部 tracked 源文件 SHA、源码身份、binary、词表/Unicode、配置、参考 CLI/package/原始与归档 lock；`manifest/verified-before.json`、`verified-after.json` 保存调用者期望、实际 revision、binary bytes/SHA 和各项散列，`run.json` 继续记录计时协议与运行散列。历史 `run/resume` 仍绑定 `67da22e7…`，身份要求不变；新 `run-verified` 不复用历史收据。纯参数/身份回归可运行 `moon run --target native scripts/benchmark-workloads.mbtx -- selftest-identity`，不调用产品或公网。
+
+仍为三源 × 两模式 × 两端 ×（一次预热 + 五轮），共 **72 次 workload / 72 份完整 JSON**；计时参数、顺序和正文/schema-1/API/ranges/fallback/stability 守卫不变，正常 Node workers 与预热后缓存保留。`verify` 离线复核已保存产物，不再启动产品；需恢复同一固定输入，不能仅凭 artifact 重验。workflow 无论测量成功或失败都尝试上传 `performance-large-linux-x64-*`：包含 `report/`、`logs/`、`manifest/`、配置、构建/安装日志及 **全部 documents/**（不只预热），保留 14 天；不上传语料、node_modules、Git 目录、HOME/TMP 或 token cache。所有慢样本保留，速度不决定退出码；执行或正确性失败仍使 job 失败，不伪装成性能落后或成功。

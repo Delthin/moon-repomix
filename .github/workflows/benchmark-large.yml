@@ -1,0 +1,82 @@
+name: Linux fixed large-source benchmark
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MOONBIT_INSTALL_VERSION: "0.10.15+943464bfa"
+      SOURCE_REVISION: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize isolated benchmark paths
+        shell: bash
+        run: |
+          BENCHMARK_ROOT="$RUNNER_TEMP/moon-repomix-large-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir "$BENCHMARK_ROOT"
+          mkdir "$BENCHMARK_ROOT/setup-logs" "$BENCHMARK_ROOT/reference-install"
+          printf 'BENCHMARK_ROOT=%s\n' "$BENCHMARK_ROOT" >> "$GITHUB_ENV"
+          printf 'BENCHMARK_WORKSPACE=%s/workload\n' "$BENCHMARK_ROOT" >> "$GITHUB_ENV"
+          printf 'REFERENCE_INSTALL=%s/reference-install\n' "$BENCHMARK_ROOT" >> "$GITHUB_ENV"
+          printf 'NATIVE_CLI=%s/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          printf 'VOCABULARY=%s/assets/tokenizer-o200k_base.tiktoken\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Install pinned MoonBit toolchain
+        shell: bash
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '25.9.0'
+          package-manager-cache: false
+      - run: moon version --all
+      - run: moon update
+      - name: Require the pinned compiler
+        run: moon run --target native scripts/check-toolchain.mbtx
+      - name: Build only the native release CLI
+        shell: bash
+        run: moon build --target native --release src/cmd/moon-repomix 2>&1 | tee "$BENCHMARK_ROOT/setup-logs/build.log"
+      - name: Install the isolated pinned reference (no lifecycle scripts)
+        shell: bash
+        working-directory: ${{ env.REFERENCE_INSTALL }}
+        run: npm install --ignore-scripts --no-audit --no-fund --save-exact repomix@1.18.1 2>&1 | tee "$BENCHMARK_ROOT/setup-logs/npm-install.log"
+      - name: Prepare the fixed public corpus and all harness dependencies
+        shell: bash
+        run: >-
+          moon run --target native scripts/benchmark-workloads.mbtx -- prepare
+          "$BENCHMARK_WORKSPACE" "$REFERENCE_INSTALL/node_modules/repomix/bin/repomix.cjs"
+      - name: Freeze the built native binary identity
+        shell: bash
+        run: |
+          NATIVE_SHA256=$(sha256sum "$NATIVE_CLI")
+          printf 'NATIVE_SHA256=%s\n' "${NATIVE_SHA256%% *}" >> "$GITHUB_ENV"
+      - name: Measure six cases (one warmup and five rounds per endpoint)
+        shell: bash
+        run: >-
+          moon run --target native scripts/benchmark-workloads.mbtx -- run-verified
+          "$BENCHMARK_WORKSPACE" "$NATIVE_CLI" "$VOCABULARY"
+          "$SOURCE_REVISION" "$NATIVE_SHA256"
+      - name: Offline verification of retained documents (no product reruns)
+        shell: bash
+        run: moon run --target native scripts/benchmark-workloads.mbtx -- verify "$BENCHMARK_WORKSPACE"
+      - name: Preserve every sample, including failures and slow rounds
+        if: always() && env.BENCHMARK_ROOT != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: performance-large-linux-x64-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 14
+          compression-level: 6
+          if-no-files-found: warn
+          path: |
+            ${{ env.BENCHMARK_ROOT }}/setup-logs/
+            ${{ env.BENCHMARK_WORKSPACE }}/report/
+            ${{ env.BENCHMARK_WORKSPACE }}/logs/
+            ${{ env.BENCHMARK_WORKSPACE }}/manifest/
+            ${{ env.BENCHMARK_WORKSPACE }}/documents/
+            ${{ env.BENCHMARK_WORKSPACE }}/native.config.json
+            ${{ env.BENCHMARK_WORKSPACE }}/node.config.json

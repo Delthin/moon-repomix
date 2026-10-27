@@ -1282,12 +1282,177 @@ fn stats(values : Array[Double]) -> Json {
 }
 
 ///|
+struct VerifiedIdentity {
+  source_revision : String
+  binary_sha256 : String
+} derive(ToJson)
+
+///|
+fn require_hex(value : String, length : Int32) -> Unit raise {
+  guard value.length() == length &&
+    value.iter().all(c => c is ('0'..<='9' | 'a'..<='f')) else {
+    fail("Identity must be exactly \{length} lowercase hexadecimal characters")
+  }
+}
+
+///|
+fn verified_identity(
+  revision : String,
+  binary_sha256 : String,
+) -> VerifiedIdentity raise {
+  require_hex(revision, 40)
+  require_hex(binary_sha256, 64)
+  { source_revision: revision, binary_sha256, }
+}
+
+///|
+fn expected_binary_sha256(verified_identity? : VerifiedIdentity) -> String {
+  match verified_identity {
+    Some(identity) => identity.binary_sha256
+    None => "67da22e745ca556a0e37bb9ea86d1813371d4951c7f504a431e016f3d07327b9"
+  }
+}
+
+///|
+fn check_source_claim(
+  root : String,
+  cwd : String,
+  revision : String,
+  status : String,
+  expected : String,
+) -> Unit raise {
+  guard root == cwd else {
+    fail("run-verified must run from the product Git root")
+  }
+  guard revision == expected else {
+    fail("Source HEAD differs from explicit revision")
+  }
+  guard status.is_empty() else {
+    fail(
+      "run-verified requires a clean source checkout (ignored build files allowed)",
+    )
+  }
+}
+
+///|
+async fn verified_source(
+  h : Harness,
+  phase : String,
+  identity : VerifiedIdentity,
+) -> Json {
+  let cwd = @fs.realpath(".")
+  let prefix = "verified-" + phase + "-"
+  let root = command(
+      h,
+      prefix + "root",
+      "git",
+      git_args() + ["rev-parse", "--show-toplevel"],
+      cwd,
+    )
+    .trim()
+    .to_owned()
+  let revision = command(
+      h,
+      prefix + "head",
+      "git",
+      git_args() + ["rev-parse", "HEAD"],
+      cwd,
+    )
+    .trim()
+    .to_owned()
+  let status = command(
+    h,
+    prefix + "status",
+    "git",
+    git_args() + ["status", "--porcelain=v1", "--untracked-files=all"],
+    cwd,
+  )
+  check_source_claim(root, cwd, revision, status, identity.source_revision)
+  let tracked = command(
+    h,
+    prefix + "files",
+    "git",
+    git_args() + ["ls-files", "-z"],
+    cwd,
+  )
+  let hashes : Map[String, String] = Map([])
+  for path in tracked.split("\u0000") {
+    if path.is_empty() {
+      continue
+    }
+    let path = path.to_owned()
+    guard @fs.kind(cwd + "/" + path, follow_symlink=false) == Regular else {
+      fail("Tracked source must be a regular file: " + path)
+    }
+    hashes[path] = digest(h, cwd + "/" + path)
+  }
+  {
+    "revision": Json(revision),
+    "status": Json(status),
+    "tracked_sha256": Json(hashes),
+  }
+}
+
+///|
+fn identity_selftest() -> Unit raise {
+  let revision = "0123456789abcdef0123456789abcdef01234567"
+  let binary = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+  let identity = verified_identity(revision, binary)
+  assert_eq(expected_binary_sha256(verified_identity=identity), binary)
+  assert_eq(
+    expected_binary_sha256(),
+    "67da22e745ca556a0e37bb9ea86d1813371d4951c7f504a431e016f3d07327b9",
+  )
+  for
+    (rev, sha) in [
+      ("HEAD", binary),
+      (revision[1:].to_owned(), binary),
+      ("A" + revision[1:].to_owned(), binary),
+      (revision + "0", binary),
+      (revision + "\n", binary),
+      ("g123456789abcdef0123456789abcdef01234567", binary),
+      (revision, ""),
+      (revision, binary[1:].to_owned()),
+      (revision, "A" + binary[1:].to_owned()),
+      (revision, binary + "0"),
+      (revision, "-" + binary[1:].to_owned()),
+    ] {
+    try verified_identity(rev, sha) catch {
+      _ => ()
+    } noraise {
+      _ => fail("Invalid identity accepted")
+    }
+  }
+  check_source_claim("/checkout", "/checkout", revision, "", revision)
+  for
+    (root, cwd, head, status) in [
+      ("/checkout", "/checkout/subdir", revision, ""),
+      ("/checkout", "/checkout", "fedcba9876543210fedcba9876543210fedcba98", ""),
+      ("/checkout", "/checkout", revision, " M moon.mod\n"),
+      ("/checkout", "/checkout", revision, "?? unexpected.txt\n"),
+    ] {
+    try check_source_claim(root, cwd, head, status, revision) catch {
+      _ => ()
+    } noraise {
+      _ => fail("Invalid source claim accepted")
+    }
+  }
+  println(
+    "Identity selftest passed (no filesystem, product process or network)",
+  )
+}
+
+///|
 async fn run(
   work : String,
   native : String,
   vocabulary : String,
   reuse_receipts~ : Bool = false,
+  verified_identity? : VerifiedIdentity,
 ) -> Unit {
+  guard !reuse_receipts || verified_identity is None else {
+    fail("Verified runs cannot reuse historical receipts")
+  }
   let work = @fs.realpath(work)
   if !reuse_receipts {
     @fs.mkdir(work + "/run")
@@ -1295,10 +1460,11 @@ async fn run(
   let h = harness(work)
   let native = @fs.realpath(native)
   let vocabulary = @fs.realpath(vocabulary)
-  assert_eq(
-    digest(h, native),
-    "67da22e745ca556a0e37bb9ea86d1813371d4951c7f504a431e016f3d07327b9",
-  )
+  assert_eq(digest(h, native), expected_binary_sha256(verified_identity?))
+  let source_before = match verified_identity {
+    Some(identity) => verified_source(h, "before", identity)
+    None => { "mode": "historical" }
+  }
   assert_eq(
     digest(h, vocabulary),
     "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
@@ -1334,6 +1500,22 @@ async fn run(
       work + "/node.config.json",
     ] {
     identities[path] = digest(h, path)
+  }
+  if verified_identity is Some(identity) {
+    let lock = dirname(dirname(dirname(dirname(node_cli)))) +
+      "/package-lock.json"
+    let archived_lock = work + "/manifest/reference-package-lock.json"
+    assert_eq(digest(h, lock), digest(h, archived_lock))
+    for path in [lock, archived_lock] {
+      identities[path] = digest(h, path)
+    }
+    save(work + "/manifest/verified-before.json", {
+      "caller_expected": ToJson::to_json(identity),
+      "actual_binary_sha256": Json(digest(h, native)),
+      "actual_binary_bytes": Json(@fs.read_file(native).binary().length()),
+      "source": source_before,
+      "identities_sha256": Json(identities),
+    })
   }
   if reuse_receipts {
     save(work + "/manifest/resume-" + @env.now().to_string() + ".json", {
@@ -1515,6 +1697,17 @@ async fn run(
   for path, sha in identities {
     assert_eq(digest(h, path), sha)
   }
+  if verified_identity is Some(identity) {
+    let source_after = verified_source(h, "after", identity)
+    save(work + "/manifest/verified-after.json", {
+      "caller_expected": ToJson::to_json(identity),
+      "actual_binary_sha256": Json(digest(h, native)),
+      "actual_binary_bytes": Json(@fs.read_file(native).binary().length()),
+      "source": source_after,
+      "identities_sha256": Json(identities),
+    })
+    assert_eq(source_after, source_before)
+  }
   save(work + "/report/rounds.json", Json(rows))
   save(work + "/report/summary.json", {
     "statistics": Json(summaries),
@@ -1573,6 +1766,11 @@ async fn main {
       prepare(work, [node_cli, upstream, hashes, anchor_manifest])
     ["fresh", work, prepared] => fresh(work, prepared)
     ["run", work, native, vocabulary] => run(work, native, vocabulary)
+    ["run-verified", work, native, vocabulary, revision, binary_sha256] => {
+      let identity = verified_identity(revision, binary_sha256)
+      run(work, native, vocabulary, verified_identity=identity)
+    }
+    ["selftest-identity"] => identity_selftest()
     ["resume", work, native, vocabulary] =>
       run(work, native, vocabulary, reuse_receipts=true)
     ["verify", work] => {
@@ -1602,7 +1800,7 @@ async fn main {
     }
     _ =>
       fail(
-        "Usage: benchmark-workloads.mbtx prepare NEW_WORKSPACE REFERENCE_CLI | local NEW_WORKSPACE REFERENCE_CLI SOURCE_ROOT | prepare NEW_WORKSPACE REFERENCE_CLI GO_RUST_ROOT HASH_MANIFEST ANCHOR_MANIFEST (legacy) | run WORKSPACE FROZEN_NATIVE VOCABULARY | verify WORKSPACE | audit-reports WORKSPACE | verify-prepared NEW_PREPARED PRIOR_PREPARED (offline; run from product checkout)",
+        "Usage: benchmark-workloads.mbtx prepare NEW_WORKSPACE REFERENCE_CLI | local NEW_WORKSPACE REFERENCE_CLI SOURCE_ROOT | prepare NEW_WORKSPACE REFERENCE_CLI GO_RUST_ROOT HASH_MANIFEST ANCHOR_MANIFEST (legacy) | run WORKSPACE FROZEN_NATIVE VOCABULARY | run-verified WORKSPACE NATIVE VOCABULARY FULL_SOURCE_REVISION EXPECTED_BINARY_SHA256 | selftest-identity | verify WORKSPACE | audit-reports WORKSPACE | verify-prepared NEW_PREPARED PRIOR_PREPARED (offline; run from product checkout)",
       )
   }
 }
