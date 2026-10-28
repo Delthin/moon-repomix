@@ -777,8 +777,8 @@ async fn aggregate(r : Run, s : Session, cli_index : Json,
   cli_volumes : Map[String, String], cli_explanation : Json) -> Unit {
   ignore(cacheable(rpc(s, "server/discover", {})))
   let tools = rows(prop(cacheable(rpc(s, "tools/list", {})), "tools"))
-  assert_eq(tools.length(), 3)
-  for name in ["pack_repository", "release_context", "explain_selection"] {
+  assert_eq(tools.length(), 5)
+  for name in ["pack_repository", "release_context", "explain_selection", "plan_task_context", "read_code_context"] {
     assert_true(tools.any(tool => prop(tool, "name") == Json::string(name)))
   }
   assert_eq(listing(s).length(), 0)
