@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-28
+
+### Added
+
+- SDK 与 MCP `read_code_context`：读取完整符号实现、精确行范围、全文或符号目录。JavaScript / TypeScript / TSX / Python 使用有界原生索引，歧义和解析失败明确返回；原文件安全扫描先于切片。
+- MCP 有界补读会话：最多三轮成功读取，完整 JSON（含审计）累计计入精确 token cap；失败或提交前取消保留旧资源，续读不能扩大原预算。用法见 [代码读取](docs/code-context.md)。
+- SDK 与 MCP `plan_task_context`：按必选路径和可选优先级惰性读取，在完整文档的精确 token 上限内选择全文或骨架；多个任务共享一份上下文，详细审计独立计数。
+- 任务规划沿用主机选择与扫描规则，限制候选、原始读取和整文尝试次数；MCP 成功原子替换 context/audit 资源，必选失败或提交前取消保留旧资源。用法及本地输入限制见 [任务上下文](docs/task-context.md)。
+
 ## [0.4.1] - 2026-10-27
 
 ### Changed
@@ -57,7 +66,8 @@
 - 对齐默认排除、ignore 开关、自定义 glob 与精确磁盘拼写行为，修正跨平台字面路径选择。
 - 优化精确 tokenizer 的初始化、分词计数、文件选择和安全命中定位，减少文件处理中的定时器分配。
 
-[Unreleased]: https://github.com/Delthin/moon-repomix/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Delthin/moon-repomix/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.5.0
 [0.4.1]: https://github.com/Delthin/moon-repomix/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.3.0

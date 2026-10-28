@@ -8,7 +8,7 @@ import {
 ///|
 async fn main {
   assert_eq(@process.run("moon", ["package"]), 0)
-  let archive = @fs.realpath("_build/publish/Delthin-moon_repomix-0.4.1.zip")
+  let archive = @fs.realpath("_build/publish/Delthin-moon_repomix-0.5.0.zip")
   let temp = @fs.tmpdir(prefix="moon-repomix-source-")
   defer @fs.rmdir(temp, recursive=true)
   assert_eq(@process.run("unzip", ["-q", archive, "-d", temp]), 0)
@@ -32,7 +32,11 @@ async fn main {
       "src/metrics/native_counter_ffi.c", "src/metrics/native_pretokenize.h", "src/metrics/count_session.mbt",
       "src/security/prefilter.c", "src/security/prefilter.h", "src/compression/worker_pool.c",
       "src/compression/worker_pool.h", "src/compression/worker_ffi.c", "src/compression/sc_atomic.h",
-      "src/compression/compression_predicates.h",
+      "src/compression/compression_predicates.h", "src/compression/definition_core.h",
+      "src/compression/definition_core.c", "src/compression/definition_ffi.c", "src/compression/definitions.mbt",
+      "src/code_context.mbt", "src/code_spec.mbt", "src/mcp/code_context.mbt", "docs/code-context.md",
+      "src/task_context.mbt", "src/task_spec.mbt", "src/task_budget.mbt", "docs/task-context.md",
+      "scripts/task-context-mcp-test.mbtx",
     ] {
     assert_true(@fs.exists(temp + "/" + path))
   }

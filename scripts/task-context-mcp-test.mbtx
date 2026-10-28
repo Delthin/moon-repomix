@@ -1,0 +1,801 @@
+///|
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/encoding/utf8",
+}
+
+///|
+// Real native stdio, modern and legacy protocol; never builds the product.
+// moon run --target native scripts/task-context-mcp-test.mbtx -- --prepare-only NEW_LOG_DIR
+// moon run --target native scripts/task-context-mcp-test.mbtx -- --ready BINARY VOCAB PREPARED_LOG_DIR
+// All paths must be absolute. Fixtures/transcripts stay in a new external log dir.
+struct Session {
+  modern : Bool
+  input : @process.WriteToProcess
+  output : @process.ReadFromProcess
+  log : String
+  root : String
+  mut next_id : Int32
+  mut pending : Bytes
+}
+
+///|
+fn prop(value : Json, key : String) -> Json raise {
+  guard value is Object(fields) && fields.get(key) is Some(found) else {
+    fail("missing protocol field: " + key)
+  }
+  found
+}
+
+///|
+fn rows(value : Json) -> Array[Json] raise {
+  guard value is Array(found) else { fail("expected protocol array") }
+  found
+}
+
+///|
+fn text(value : Json) -> String raise {
+  guard value is String(found) else { fail("expected protocol string") }
+  found
+}
+
+///|
+fn object(value : Json) -> Map[String, Json] raise {
+  guard value is Object(found) else { fail("expected protocol object") }
+  found
+}
+
+///|
+async fn put(path : String, body : String) -> Unit {
+  @fs.write_file(path, body, create_mode=CreateNew)
+}
+
+///|
+fn bodies() -> Map[String, String] {
+  {
+    "src/alpha.txt": "TASK_ALPHA_SENTINEL\r\ncomplete alpha body 42\r\n",
+    "src/中文.txt": "TASK_UNICODE_SENTINEL\n完整正文 73\n",
+  }
+}
+
+///|
+async fn prepare(log : String) -> Unit {
+  @fs.mkdir(log, permission=0o700)
+  @fs.mkdir(log + "/fixture")
+  @fs.mkdir(log + "/fixture/src")
+  for path, body in bodies() {
+    put(log + "/fixture/" + path, body)
+  }
+  // Few tokens, but a context larger than the host's 64KiB output allowance.
+  put(log + "/fixture/src/large.txt", " ".repeat(70000))
+  put(log + "/fixture/src/ignored.txt", "TASK_IGNORED_SENTINEL\n")
+  put(log + "/fixture/src/code.js", "const LIMIT = 17;\nfunction helper() { return LIMIT; }\nfunction answer() { return helper(); }\n" + "// unrelated implementation padding\n".repeat(150))
+  put(log + "/fixture/src/secret.js", "const key = '" + "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" + "';\nfunction harmless() { return 1; }\n")
+  put(log + "/fixture/.repomixignore", "src/ignored.txt\n")
+  put(log + "/fixture/README.md", "TASK_OUTSIDE_INCLUDE_SENTINEL\n")
+  put(log + "/outside.txt", "TASK_OUTSIDE_ROOT_SENTINEL\n")
+  put(
+    log + "/prepared.json",
+    ({ "state": "prepared", "serverProcesses": 0 } : Json).stringify() + "\n",
+  )
+  println("prepared; product invocations=0")
+}
+
+///|
+async fn send(s : Session, message : Json) -> Unit {
+  send_batch(s, [message])
+}
+
+///|
+async fn send_batch(s : Session, messages : Array[Json]) -> Unit {
+  let line = messages.map(message => message.stringify() + "\n").join("")
+  @fs.write_file(
+    s.log + "/stdin.ndjson",
+    line,
+    append=true,
+    create_mode=OpenExisting,
+  )
+  s.input.write(line)
+}
+
+///|
+async fn request(s : Session, method_ : String, params : Json) -> Json {
+  s.next_id += 1
+  let id = s.next_id
+  let fields = object(params).copy()
+  if s.modern {
+    fields["_meta"] = {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {},
+    }
+  }
+  send(s, {
+    "jsonrpc": "2.0",
+    "id": id,
+    "method": method_,
+    "params": Json::object(fields),
+  })
+  @async.with_timeout(70000, () => {
+    for ;; {
+      let line = for ;; {
+        if s.pending.find(b"\n") is Some(end) {
+          let line = @utf8.decode(s.pending[:end + 1])
+          s.pending = s.pending[end + 1:].to_owned()
+          break line
+        }
+        guard s.output.read_some() is Some(chunk) else {
+          fail("server EOF before expected newline-terminated response")
+        }
+        @fs.write_file(
+          s.log + "/stdout.ndjson",
+          chunk,
+          append=true,
+          create_mode=OpenExisting,
+        )
+        s.pending = s.pending + chunk
+        assert_true(s.pending.length() <= 1048576)
+      }
+      let value = @json.parse(line)
+      assert_eq(prop(value, "jsonrpc"), Json::string("2.0"))
+      if value is { "id": got, .. } {
+        assert_eq(got, Json::number(id.to_double()))
+        break value
+      }
+      assert_eq(
+        prop(value, "method"),
+        Json::string("notifications/resources/list_changed"),
+      )
+    }
+  })
+}
+
+///|
+fn success(s : Session, envelope : Json) -> Json raise {
+  assert_false(object(envelope).contains("error"))
+  let result = prop(envelope, "result")
+  if s.modern {
+    assert_eq(prop(result, "resultType"), Json::string("complete"))
+  } else {
+    assert_false(object(result).contains("resultType"))
+  }
+  result
+}
+
+///|
+fn safe(s : Session, value : Json) -> Unit raise {
+  let encoded = value.stringify()
+  for
+    forbidden in [
+      s.root,
+      "/Volumes/",
+      "/Users/",
+      "TASK_ALPHA_SENTINEL",
+      "TASK_OUTSIDE_ROOT_SENTINEL",
+      "TASK_INVALID_SENTINEL",
+    ] {
+    assert_false(encoded.contains(forbidden))
+  }
+}
+
+///|
+async fn call(s : Session, arguments : Json) -> Json {
+  request(s, "tools/call", {
+    "name": "plan_task_context",
+    "arguments": arguments,
+  })
+}
+
+///|
+async fn listing(s : Session) -> Set[String] {
+  let result = success(s, request(s, "resources/list", {}))
+  let found : Set[String] = Set([])
+  for row in rows(prop(result, "resources")) {
+    let uri = text(prop(row, "uri"))
+    assert_true(uri.has_prefix("moon-repomix://context/"))
+    assert_false(found.contains(uri))
+    found.add(uri)
+  }
+  found
+}
+
+///|
+async fn read_resource(s : Session, uri : String) -> String {
+  let result = success(s, request(s, "resources/read", { "uri": uri }))
+  if s.modern {
+    assert_eq(prop(result, "ttlMs"), Json::number(0))
+    assert_eq(prop(result, "cacheScope"), Json::string("private"))
+  }
+  let contents = rows(prop(result, "contents"))
+  assert_eq(contents.length(), 1)
+  assert_eq(prop(contents[0], "uri"), Json::string(uri))
+  text(prop(contents[0], "text"))
+}
+
+///|
+async fn retained(s : Session, originals : Map[String, String]) -> Unit {
+  let live = listing(s)
+  assert_eq(live.length(), originals.length())
+  for uri, body in originals {
+    assert_true(live.contains(uri))
+    assert_eq(read_resource(s, uri), body)
+  }
+}
+
+///|
+fn valid_spec() -> Json {
+  {
+    "maxTokens": 2048,
+    "tasks": [
+      {
+        "id": "first",
+        "required": [{ "path": "src/alpha.txt", "mode": "full" }],
+        "optional": [{ "path": "src/alpha.txt", "mode": "full" }],
+      },
+      {
+        "id": "second",
+        "required": [
+          { "path": "src/alpha.txt", "mode": "full" },
+          { "path": "src/中文.txt", "mode": "full" },
+        ],
+      },
+    ],
+  }
+}
+
+///|
+async fn aggregate(s : Session, tiny : Bool) -> Unit {
+  if s.modern {
+    ignore(success(s, request(s, "server/discover", {})))
+  } else {
+    let initialized = success(
+      s,
+      request(s, "initialize", {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {},
+        "clientInfo": { "name": "task-context-acceptance", "version": "1" },
+      }),
+    )
+    assert_eq(prop(initialized, "protocolVersion"), Json::string("2025-11-25"))
+    send(s, {
+      "jsonrpc": "2.0",
+      "method": "notifications/initialized",
+      "params": {},
+    })
+  }
+  let tools = rows(prop(success(s, request(s, "tools/list", {})), "tools"))
+  let advertised = tools.filter(tool => {
+    prop(tool, "name") == Json::string("plan_task_context")
+  })
+  assert_eq(advertised.length(), 1)
+  let schema = prop(advertised[0], "inputSchema")
+  assert_eq(prop(schema, "required"), (["maxTokens", "tasks"] : Json))
+  assert_eq(prop(schema, "additionalProperties"), Json::boolean(false))
+  let task_schema = prop(prop(prop(schema, "properties"), "tasks"), "items")
+  let optional_schema = prop(prop(prop(task_schema, "properties"), "optional"), "items")
+  assert_eq(prop(optional_schema, "required"), (["path", "mode"] : Json))
+  assert_eq(prop(prop(prop(optional_schema, "properties"), "priority"), "default"), Json::number(0))
+  assert_eq(listing(s).length(), 0)
+  if tiny {
+    for
+      spec in [
+        valid_spec(),
+        (
+          {
+            "maxTokens": 2048,
+            "tasks": [
+              {
+                "id": "missing",
+                "required": [{ "path": "src/missing.txt", "mode": "full" }],
+              },
+            ],
+          } : Json),
+      ] {
+      let result = success(s, call(s, spec))
+      assert_eq(prop(result, "isError"), Json::boolean(true))
+      assert_eq(
+        prop(prop(prop(result, "structuredContent"), "error"), "category"),
+        Json::string("ResourceLimit"),
+      )
+      safe(s, result)
+      assert_eq(listing(s).length(), 0)
+    }
+    return
+  }
+  let planned = success(s, call(s, valid_spec()))
+  assert_eq(prop(planned, "isError"), Json::boolean(false))
+  let summary = prop(planned, "structuredContent")
+  assert_eq(prop(summary, "status"), Json::string("complete"))
+  assert_false(object(summary).contains("audit"))
+  assert_false(planned.stringify().contains("TASK_ALPHA_SENTINEL"))
+  let descriptions = rows(prop(summary, "resources"))
+  assert_eq(descriptions.length(), 2)
+  let originals : Map[String, String] = Map([])
+  let mut total_bytes = 0
+  let mut saw_context = false
+  let mut saw_audit = false
+  for description in descriptions {
+    let uri = text(prop(description, "uri"))
+    let body = read_resource(s, uri)
+    let bytes = @utf8.encode(body).length()
+    assert_true(bytes <= 4194304)
+    total_bytes += bytes
+    assert_eq(prop(description, "bytes"), Json::string(bytes.to_string()))
+    assert_false(originals.contains(uri))
+    originals[uri] = body
+    let doc = @json.parse(body)
+    match text(prop(description, "name")) {
+      "context.json" => {
+        assert_false(saw_context)
+        saw_context = true
+        let files = object(prop(doc, "files"))
+        assert_eq(files.length(), bodies().length())
+        for path, original in bodies() {
+          assert_eq(files.get(path), Some(Json::string(original)))
+        }
+        assert_eq(prop(summary, "bytes"), Json::string(bytes.to_string()))
+        assert_eq(prop(description, "tokens"), prop(summary, "tokens"))
+      }
+      "audit.json" => {
+        assert_false(saw_audit)
+        saw_audit = true
+        ignore(object(doc))
+        assert_eq(body, doc.stringify())
+        assert_eq(prop(summary, "auditBytes"), Json::string(bytes.to_string()))
+        assert_eq(prop(description, "tokens"), prop(summary, "auditTokens"))
+        safe(s, doc)
+      }
+      _ => fail("unexpected task resource name")
+    }
+  }
+  assert_true(saw_context && saw_audit)
+  assert_true(total_bytes <= 65536)
+  assert_eq(prop(summary, "totalBytes"), Json::string(total_bytes.to_string()))
+  retained(s, originals)
+  // Submit call + cancellation in one pipe write, before any request can finish
+  // its asynchronous file reads. The following list/read requests are barriers:
+  // a reply to the cancelled id or a replacement cache must fail the test.
+  s.next_id += 1
+  let cancelled_id = s.next_id
+  let fields : Map[String, Json] = {
+    "name": Json::string("plan_task_context"),
+    "arguments": valid_spec(),
+  }
+  if s.modern {
+    fields["_meta"] = {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {},
+    }
+  }
+  send_batch(s, [
+    {
+      "jsonrpc": "2.0",
+      "id": cancelled_id,
+      "method": "tools/call",
+      "params": Json::object(fields),
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "notifications/cancelled",
+      "params": { "requestId": cancelled_id },
+    },
+  ])
+  retained(s, originals)
+  // A token-feasible plan exceeding the host output bytes also keeps old URIs.
+  let too_large = success(
+    s,
+    call(s, {
+      "maxTokens": 2048,
+      "tasks": [
+        {
+          "id": "large",
+          "required": [{ "path": "src/large.txt", "mode": "full" }],
+        },
+      ],
+    }),
+  )
+  assert_eq(prop(too_large, "isError"), Json::boolean(true))
+  assert_eq(
+    prop(prop(prop(too_large, "structuredContent"), "error"), "category"),
+    Json::string("ResourceLimit"),
+  )
+  safe(s, too_large)
+  retained(s, originals)
+  // Required failures expose only safe audit and preserve exact old URI contents.
+  for
+    (path, cap, status) in [
+      ("src/missing.txt", 2048, "required_unavailable"),
+      ("src/ignored.txt", 2048, "required_unavailable"),
+      ("README.md", 2048, "required_unavailable"),
+      ("src/alpha.txt", 1, "required_over_budget"),
+    ] {
+    let result = success(
+      s,
+      call(s, {
+        "maxTokens": cap,
+        "tasks": [
+          { "id": "failure", "required": [{ "path": path, "mode": "full" }] },
+        ],
+      }),
+    )
+    assert_eq(prop(result, "isError"), Json::boolean(true))
+    let summary = prop(result, "structuredContent")
+    assert_eq(prop(summary, "status"), Json::string(status))
+    ignore(object(prop(summary, "audit")))
+    assert_false(object(summary).contains("resources"))
+    assert_false(object(summary).contains("text"))
+    safe(s, result)
+    retained(s, originals)
+  }
+  let invalid : Array[Json] = [
+    {},
+    { "tasks": [{ "id": "missing-cap" }] },
+    { "maxTokens": 4097, "tasks": [{ "id": "over-host" }] },
+    { "maxTokens": 0, "tasks": [{ "id": "zero" }] },
+    { "maxTokens": 1.5, "tasks": [{ "id": "fraction" }] },
+    { "maxTokens": 2048, "tasks": [] },
+    {
+      "maxTokens": 2048,
+      "tasks": [{ "id": "duplicate" }, { "id": "duplicate" }],
+    },
+    { "maxTokens": 2048, "tasks": [{ "id": "" }] },
+    { "maxTokens": 2048, "tasks": [{ "id": "界".repeat(22) }] },
+    {
+      "maxTokens": 2048,
+      "tasks": [
+        {
+          "id": "traversal",
+          "required": [{ "path": "../outside.txt", "mode": "full" }],
+        },
+      ],
+    },
+    {
+      "maxTokens": 2048,
+      "tasks": [
+        {
+          "id": "bad-mode",
+          "required": [{ "path": "src/alpha.txt", "mode": "either" }],
+        },
+      ],
+    },
+    {
+      "maxTokens": 2048,
+      "tasks": [
+        {
+          "id": "bad-priority",
+          "optional": [
+            { "path": "src/alpha.txt", "mode": "either", "priority": 101 },
+          ],
+        },
+      ],
+    },
+    {
+      "maxTokens": 2048,
+      "tasks": [{ "id": "extra", "root": "TASK_INVALID_SENTINEL" }],
+    },
+    {
+      "maxTokens": 2048,
+      "tasks": [
+        {
+          "id": "extra-path",
+          "required": [
+            { "path": "src/alpha.txt", "mode": "full", "extra": true },
+          ],
+        },
+      ],
+    },
+    {
+      "maxTokens": 2048,
+      "tasks": [{ "id": "limit" }],
+      "maxReadBytes": 16777217,
+    },
+    { "maxTokens": 2048, "tasks": [{ "id": "limit" }], "maxAttempts": 1 },
+  ]
+  for
+    key in [
+      "root", "style", "compress", "securityCheck", "remote", "maxOutputBytes", "filePaths",
+    ] {
+    let fields = object(valid_spec()).copy()
+    fields[key] = Json::string("TASK_INVALID_SENTINEL")
+    invalid.push(Json::object(fields))
+  }
+  for spec in invalid {
+    let envelope = call(s, spec)
+    let error = prop(envelope, "error")
+    assert_eq(prop(error, "code"), Json::number(-32602))
+    assert_eq(prop(error, "message"), Json::string("Invalid params"))
+    safe(s, error)
+    retained(s, originals)
+  }
+  // Shared run counter: successful ordinary pack then task plan use distinct URIs.
+  let packed = success(
+    s,
+    request(s, "tools/call", {
+      "name": "pack_repository",
+      "arguments": { "filePaths": ["src/alpha.txt"], "maxTokens": 2048 },
+    }),
+  )
+  assert_eq(prop(packed, "isError"), Json::boolean(false))
+  let pack_run = prop(prop(packed, "structuredContent"), "runId")
+  assert_false(pack_run == prop(summary, "runId"))
+  let replacement = success(s, call(s, valid_spec()))
+  assert_eq(prop(replacement, "isError"), Json::boolean(false))
+  let final_summary = prop(replacement, "structuredContent")
+  assert_false(prop(final_summary, "runId") == pack_run)
+  assert_false(prop(final_summary, "runId") == prop(summary, "runId"))
+  let live = listing(s)
+  assert_eq(live.length(), 2)
+  for uri in live {
+    assert_false(originals.contains(uri))
+  }
+  let released = success(
+    s,
+    request(s, "tools/call", { "name": "release_context", "arguments": {} }),
+  )
+  assert_eq(prop(released, "isError"), Json::boolean(false))
+  assert_eq(listing(s).length(), 0)
+  for uri in live {
+    let envelope = request(s, "resources/read", { "uri": uri })
+    let error = prop(envelope, "error")
+    assert_eq(
+      prop(error, "code"),
+      Json::number(if s.modern { -32602 } else { -32002 }),
+    )
+    safe(s, error)
+  }
+}
+
+///|
+async fn code_call(s : Session, args : Json) -> Json {
+  request(s, "tools/call", { "name": "read_code_context", "arguments": args })
+}
+
+///|
+fn integer(value : Json) -> Int raise {
+  guard value is Number(n, ..) else { fail("expected integer") }
+  assert_eq(n.to_int().to_double(), n)
+  n.to_int()
+}
+
+///|
+async fn code_workflow(s : Session, tiny : Bool) -> Unit {
+  let requests : Json = [{ "path": "src/code.js", "symbols": ["answer"] }]
+  let first = success(s, code_call(s, { "maxTokens": 4096, "requests": requests }))
+  if tiny {
+    assert_eq(prop(first, "isError"), Json::boolean(true))
+    assert_eq(prop(prop(prop(first, "structuredContent"), "error"), "category"), Json::string("ResourceLimit"))
+    assert_eq(listing(s).length(), 0)
+    return
+  }
+  assert_eq(prop(first, "isError"), Json::boolean(false))
+  let summary = prop(first, "structuredContent")
+  let first_id = text(prop(summary, "runId"))
+  let uri = text(prop(rows(prop(summary, "resources"))[0], "uri"))
+  let body = read_resource(s, uri)
+  assert_true(body.contains("return helper()"))
+  assert_false(body.contains("return LIMIT"))
+  assert_false(body.contains("unrelated implementation padding"))
+  let saved : Map[String, String] = Map([])
+  saved[uri] = body
+  s.next_id += 1
+  let cancelled_id = s.next_id
+  let cancel_fields : Map[String, Json] = {
+    "name": Json::string("read_code_context"),
+    "arguments": { "continueFrom": first_id, "requests": requests },
+  }
+  if s.modern {
+    cancel_fields["_meta"] = {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {},
+    }
+  }
+  send_batch(s, [
+    { "jsonrpc": "2.0", "id": cancelled_id, "method": "tools/call", "params": Json::object(cancel_fields) },
+    { "jsonrpc": "2.0", "method": "notifications/cancelled", "params": { "requestId": cancelled_id } },
+  ])
+  retained(s, saved)
+  for args in [
+    ({ "continueFrom": first_id, "requests": [{ "path": "src/code.js", "symbols": ["absent"] }] } : Json),
+    { "maxTokens": 1, "requests": requests },
+    { "requests": [{ "path": "src/secret.js", "symbols": ["harmless"] }] },
+    { "requests": [{ "path": "src/ignored.txt", "full": true }] },
+  ] {
+    let rejected = success(s, code_call(s, args))
+    assert_eq(prop(rejected, "isError"), Json::boolean(true))
+    assert_false(rejected.stringify().contains("return helper()"))
+    assert_false(rejected.stringify().contains("A1b2C3d4"))
+    safe(s, rejected)
+    retained(s, saved)
+  }
+  for args in [
+    ({ "continueFrom": first_id, "maxTokens": 4096, "requests": requests } : Json),
+    { "maxTokens": 4097, "requests": requests },
+    { "root": "/tmp", "requests": requests },
+    { "requests": [{ "path": "../outside.txt", "full": true }] },
+    { "requests": [{ "path": "src/code.js", "symbols": ["answer"], "outline": true }] },
+  ] {
+    let invalid = code_call(s, args)
+    assert_eq(prop(prop(invalid, "error"), "code"), Json::number(-32602))
+    retained(s, saved)
+  }
+  let second = success(s, code_call(s, { "continueFrom": first_id, "requests": [{ "path": "src/code.js", "symbols": ["helper"], "includeDependencies": true }] }))
+  assert_eq(prop(second, "isError"), Json::boolean(false))
+  let second_summary = prop(second, "structuredContent")
+  let second_id = text(prop(second_summary, "runId"))
+  let second_uri = text(prop(rows(prop(second_summary, "resources"))[0], "uri"))
+  let second_body = read_resource(s, second_uri)
+  assert_true(second_body.contains("LIMIT = 17"))
+  assert_true(second_body.contains("return LIMIT"))
+  assert_eq(integer(prop(second_summary, "round")), 2)
+  assert_true(integer(prop(second_summary, "sessionTokens")) > integer(prop(summary, "sessionTokens")))
+  assert_eq(integer(prop(second_summary, "sessionTokens")) + integer(prop(second_summary, "remainingTokens")), 4096)
+  let stale = success(s, code_call(s, { "continueFrom": first_id, "requests": requests }))
+  assert_eq(prop(prop(prop(stale, "structuredContent"), "error"), "category"), Json::string("StaleCodeSession"))
+  let third = success(s, code_call(s, { "continueFrom": second_id, "requests": [{ "path": "src/code.js", "outline": true }] }))
+  assert_eq(prop(third, "isError"), Json::boolean(false))
+  let third_id = text(prop(prop(third, "structuredContent"), "runId"))
+  let limited = success(s, code_call(s, { "continueFrom": third_id, "requests": requests }))
+  assert_eq(prop(prop(prop(limited, "structuredContent"), "error"), "category"), Json::string("CodeRoundLimit"))
+  let exact_tokens = integer(prop(summary, "sessionTokens"))
+  let exact = success(s, code_call(s, { "maxTokens": exact_tokens, "requests": requests }))
+  assert_eq(prop(exact, "isError"), Json::boolean(false))
+  assert_eq(integer(prop(prop(exact, "structuredContent"), "remainingTokens")), 0)
+  let exact_id = text(prop(prop(exact, "structuredContent"), "runId"))
+  let exhausted = success(s, code_call(s, { "continueFrom": exact_id, "requests": requests }))
+  assert_eq(prop(prop(prop(exhausted, "structuredContent"), "error"), "category"), Json::string("CodeBudgetExhausted"))
+  let renewed = success(s, code_call(s, { "maxTokens": 4096, "requests": requests }))
+  let renewed_id = text(prop(prop(renewed, "structuredContent"), "runId"))
+  let task = success(s, call(s, valid_spec()))
+  assert_eq(prop(task, "isError"), Json::boolean(false))
+  let replaced = success(s, code_call(s, { "continueFrom": renewed_id, "requests": requests }))
+  assert_eq(prop(prop(prop(replaced, "structuredContent"), "error"), "category"), Json::string("StaleCodeSession"))
+  let released = success(s, request(s, "tools/call", { "name": "release_context", "arguments": {} }))
+  assert_eq(prop(released, "isError"), Json::boolean(false))
+  assert_eq(listing(s).length(), 0)
+}
+
+///|
+async fn run_session(
+  binary : String,
+  vocab : String,
+  log : String,
+  modern : Bool,
+  tiny : Bool,
+) -> Unit {
+  let mode = if tiny {
+    "tiny-output"
+  } else if modern {
+    "modern"
+  } else {
+    "legacy"
+  }
+  let directory = log + "/" + mode
+  @fs.mkdir(directory)
+  put(directory + "/stdin.ndjson", "")
+  put(directory + "/stdout.ndjson", "")
+  let (stdin, input) = @process.write_to_process()
+  let (output, stdout) = @process.read_from_process()
+  let (errors, stderr) = @process.read_from_process()
+  defer input.close()
+  defer output.close()
+  defer errors.close()
+  let root = log + "/fixture"
+  let s : Session = {
+    modern,
+    input,
+    output,
+    log: directory,
+    root,
+    next_id: 0,
+    pending: b"",
+  }
+  let argv = [
+    root,
+    "--mcp",
+    "--style",
+    "json",
+    "--mcp-max-tokens",
+    "4096",
+    "--mcp-max-output-bytes",
+    if tiny {
+      "1"
+    } else {
+      "65536"
+    },
+    // Isolate synthetic fixtures from inherited Git ignores (e.g. logs under _build).
+    "--no-gitignore",
+    "--include",
+    "src/**",
+    "--tokenizer-path",
+    vocab,
+  ]
+  put(
+    directory + "/argv.json",
+    Json::array(argv.map(Json::string)).stringify() + "\n",
+  )
+  @async.with_task_group(group => {
+    let child = @process.spawn(
+      group,
+      binary,
+      argv,
+      stdin~,
+      stdout~,
+      stderr~,
+      cwd=root,
+    )
+    let diagnostics = group.spawn(() => {
+      put(directory + "/stderr.bin", "")
+      let mut bytes = b""
+      while errors.read_some() is Some(chunk) {
+        @fs.write_file(
+          directory + "/stderr.bin",
+          chunk,
+          append=true,
+          create_mode=OpenExisting,
+        )
+        bytes = bytes + chunk
+        assert_true(bytes.length() <= 1048576)
+      }
+      safe(s, Json::string(@utf8.decode(bytes)))
+    })
+    aggregate(s, tiny)
+    code_workflow(s, tiny)
+    input.close()
+    let trailing = @async.with_timeout(5000, () => output.read_all().binary())
+    assert_true(trailing.is_empty() && s.pending.is_empty())
+    let code = @async.with_timeout(5000, () => child.wait())
+    put(
+      directory + "/exit.json",
+      ({ "exitCode": code } : Json).stringify() + "\n",
+    )
+    assert_eq(code, 0)
+    diagnostics.wait()
+  })
+  put(
+    directory + "/result.json",
+    ({ "state": "passed", "requests": s.next_id } : Json).stringify() + "\n",
+  )
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  if args.length() == 3 && args[1] == "--prepare-only" {
+    prepare(args[2])
+    return
+  }
+  guard args.length() == 5 && args[1] == "--ready" else {
+    fail(
+      "expected --prepare-only NEW_LOG_DIR or --ready BINARY VOCAB PREPARED_LOG_DIR",
+    )
+  }
+  let binary = args[2]
+  let vocab = args[3]
+  let log = args[4]
+  assert_true(@fs.exists(log + "/prepared.json"))
+  run_session(binary, vocab, log, true, false)
+  run_session(binary, vocab, log, false, false)
+  run_session(binary, vocab, log, true, true)
+  for path, body in bodies() {
+    assert_eq(@fs.read_file(log + "/fixture/" + path).text(), body)
+  }
+  put(
+    log + "/result.json",
+    (
+      {
+        "state": "passed",
+        "serverProcesses": 3,
+        "protocols": ["2026-07-28", "2025-11-25"],
+        "independentTokenRecount": false,
+        "uncovered": "late commit-point cancellation, busy races, per-resource 4MiB boundary, non-JSON host styles",
+        "progressiveCodeContext": true,
+      } : Json).stringify() +
+    "\n",
+  )
+  println(
+    "task and progressive code context MCP passed; modern, legacy and tiny output sessions; raw protocols archived",
+  )
+}

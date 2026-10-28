@@ -134,6 +134,70 @@ scanning is the caller's responsibility **before** compression. There is no
 shared parser/cache or retained source pointer: each call owns its parser, tree
 and byte mask, and frees them before returning a MoonBit-managed byte plan.
 
+## Complete-definition symbol index
+
+`index_definitions(path : String, text : String) -> DefinitionIndex` is a
+synchronous, I/O-free index for **JS/JSX, TS/TSX and Python only**, using the
+same extension detection and vendored parsers. `DefinitionIndex` contains
+`definitions : Array[Definition]` and `reason : String?`. Each `Definition`
+contains `name`, `qualified_name`, 1-based inclusive `start_line`/`end_line`,
+and `references : Array[String]`. Success has `reason = None`, including an
+empty file. Duplicate names/qualified names remain distinct and source ordered.
+
+Ranges cover **complete original definitions**, never compressed signatures:
+assignment functions include `res.render = function ...;`, exports include their
+wrapper, and Python/TS decorators are included. Named top-level functions, class
+methods, top-level JS/TS `const` bindings (including destructuring), callable
+variable bindings, and simple top-level Python assignments are indexed. Local
+variables/nested functions are not global entries. A multi-variable declaration
+produces an entry per binding with the **same complete declaration/export range**
+and conservative references from that entire range; consumers must deduplicate
+overlapping source selections. Dynamic computed names are not invented.
+
+References are deduplicated UTF-8 identifier spellings in first-use order,
+including **property/attribute field names** (`client.fetch` contributes `client`
+and `fetch`), decorators and type identifiers. Syntactic declaration/parameter
+names are excluded; local/parameter *uses* remain lexical candidates. This is
+not semantic resolution: property keys, shadowing and whole multi-binding
+initializers can overapproximate dependencies. Qualified definition names retain
+member/class prefixes; references themselves are unqualified names. Unicode,
+CRLF and exclusive end-column-zero line accounting are preserved.
+
+Hard limits (`definition_core.h`): 8 MiB UTF-8 input; 500,000 visible AST nodes
+including anonymous tokens; 1,000,000 combined traversal/name-processing visits;
+4,096 definitions; 256 distinct references per definition and 65,536 total;
+256 traversal/recursion depth; 4,096 UTF-8 bytes per identifier/qualified name;
+16 MiB result wire; **200,000 microseconds parser timeout**. Decorator sibling
+runs are also capped at 256. The timeout bounds parsing, not total indexing;
+post-parse work is bounded by the explicit traversal/output quotas.
+
+Any error discards **all** definitions. Reasons are `unsupported-language`,
+`parse-error`, `timeout`, `resource-limit` (any quota or index-owned allocation
+failure), or `parser-unavailable`. Native input is borrowed only during the
+bridge call; output is copied into managed bytes and every parser/tree/cursor
+and index-owned allocation is released on success and recoverable failure.
+There is no global allocator replacement or retained native/source pointer.
+**Remaining platform limitation:** the vendored Tree-sitter allocator and managed
+MoonBit allocator can abort on actual system OOM; their failures cannot safely
+be converted to a reason by this local component. Explicit quota/allocation
+failure recovery does not claim recovery from those allocator aborts.
+
+`definitions_test.mbt` checks complete wrappers, duplicates, shared multi-binding
+ranges, property-reference candidates, Unicode/CRLF, all four grammars, syntax
+errors and limits. The standalone C harness additionally checks exact
+input/definition/reference quotas, node/visit/depth/name/wire limits, deterministic
+parser timeout, exclusive column-zero bounds and every wire-growth allocation
+failure, asserting zero live native owners. Run its vendored-runtime ASan/UBSan
+build without installing dependencies or modifying shared toolchain objects:
+
+```
+moon run src/compression/tests/definition-sanitizers.mbtx --target native --frozen
+```
+
+It instruments the C core/runtime/grammars, not the managed bridge. macOS disables
+unsupported LeakSanitizer; native owner counters supplement ASan/UBSan. The
+script writes diagnostic artifacts only under `_build/definition-sanitizers`.
+
 ## Reusable asynchronous planner
 
 ```moonbit

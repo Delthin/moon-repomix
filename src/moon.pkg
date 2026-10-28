@@ -12,6 +12,7 @@ import {
   "Delthin/moon_repomix/platform",
   "moonbitlang/async",
   "moonbitlang/core/env",
+  "moonbitlang/core/json",
   "moonbitlang/core/encoding/utf8",
 }
 

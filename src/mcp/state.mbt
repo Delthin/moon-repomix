@@ -19,6 +19,7 @@ priv struct State {
   resources : Map[String, Resource]
   mut next_run : Int32
   mut busy : Bool
+  mut code_session : CodeSession?
 }
 
 ///|

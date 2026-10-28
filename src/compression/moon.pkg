@@ -23,6 +23,8 @@ options(
     "rust_scanner.c",
     "java_parser.c",
     "compression_core.c",
+    "definition_core.c",
+    "definition_ffi.c",
     "ffi.c",
     "worker_pool.c",
     "worker_ffi.c",

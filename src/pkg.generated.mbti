@@ -19,9 +19,17 @@ pub async fn pack(@config.Options, Runtime) -> PackResult
 
 pub async fn pack_volumes(@config.Options, Runtime, max_tokens~ : Int) -> VolumePackResult
 
+pub async fn plan_task_context(@config.Options, Runtime, TaskContextSpec) -> TaskContextPlan
+
+pub async fn read_code_context(@config.Options, Runtime, CodeContextSpec) -> CodeContextPlan
+
 pub fn version() -> String
 
 // Errors
+pub(all) suberror CodeContextError {
+  InvalidCodeSpec
+}
+
 pub(all) suberror PackError {
   ConfigurationError
   ContextTextError(String)
@@ -34,12 +42,32 @@ pub(all) suberror PackError {
   RemoteError
 }
 
+pub(all) suberror TaskContextError {
+  InvalidTaskSpec
+}
+
 // Types and methods
 pub(all) enum BudgetStatus {
   NotSet
   Within(Int)
   Exceeded(Int)
 }
+
+pub struct CodeContextPlan {
+  status : String
+  text : String?
+  tokens : Int
+  bytes : Int
+  required_tokens : Int?
+  audit : Json
+  security : SecurityStatus
+}
+
+pub struct CodeContextSpec {
+  max_tokens : Int
+  // private fields
+}
+pub fn CodeContextSpec::from_json(Json) -> Self raise CodeContextError
 
 pub(all) struct FileStats {
   path : String
@@ -93,6 +121,24 @@ pub struct SelectionReport {
   max_total_size : Int64
 }
 pub fn SelectionReport::to_json(Self) -> Json
+
+pub struct TaskContextPlan {
+  status : String
+  text : String?
+  tokens : Int
+  bytes : Int
+  audit : Json
+  audit_text : String
+  audit_tokens : Int
+  audit_bytes : Int
+  security : SecurityStatus
+}
+
+pub struct TaskContextSpec {
+  max_tokens : Int
+  // private fields
+}
+pub fn TaskContextSpec::from_json(Json) -> Self raise TaskContextError
 
 pub struct VolumePackResult {
   partition : @partition.Partition

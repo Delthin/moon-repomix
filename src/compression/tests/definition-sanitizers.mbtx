@@ -1,0 +1,54 @@
+///|
+import {
+  "moonbitlang/async@0.19.2",
+  "moonbitlang/async@0.19.2/fs",
+  "moonbitlang/async@0.19.2/process",
+}
+
+// Run from the repository root with the already selected product toolchain:
+// moon run src/compression/tests/definition-sanitizers.mbtx --target native --frozen
+// Uses only vendored sources and the host Clang. Does not install dependencies,
+// change the shared MoonBit runtime, or link managed runtime objects.
+
+///|
+async fn main {
+  let build = "_build/definition-sanitizers"
+  if !@fs.exists(build) {
+    @fs.mkdir(build, recursive=true)
+  }
+  let sources = [
+    "src/compression/tests/definition_test.c", "src/compression/runtime.c", "src/compression/javascript_parser.c",
+    "src/compression/javascript_scanner.c", "src/compression/typescript_parser.c",
+    "src/compression/typescript_scanner.c", "src/compression/tsx_parser.c", "src/compression/tsx_scanner.c",
+    "src/compression/python_parser.c", "src/compression/python_scanner.c",
+  ]
+  let args = [
+    "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-g", "-O1", "-fsanitize=address,undefined",
+    "-fno-omit-frame-pointer", "-Wall", "-Wextra",
+  ]
+  args.push_iter(sources.iter())
+  args.push_iter(["-o", build + "/definition-test"].iter())
+  let (code, stdout, stderr) = @process.collect_output("clang", args)
+  if !stdout.text().is_empty() {
+    println(stdout.text())
+  }
+  if !stderr.text().is_empty() {
+    println(stderr.text())
+  }
+  guard code == 0 else { fail("Clang failed: \{code}") }
+  let (code, stdout, stderr) = @process.collect_output(
+    build + "/definition-test",
+    [],
+    extra_env={
+      // LeakSanitizer is unavailable on macOS; allocation/cursor/parser/tree
+      // counters independently assert ownership on every successful/failing call.
+      "ASAN_OPTIONS": "detect_leaks=0:halt_on_error=1",
+      "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1",
+    },
+  )
+  println(stdout.text())
+  if !stderr.text().is_empty() {
+    println(stderr.text())
+  }
+  guard code == 0 else { fail("Sanitizer test failed: \{code}") }
+}

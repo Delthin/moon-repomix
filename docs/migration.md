@@ -1,4 +1,14 @@
-# 升级到 v0.4.1
+# 版本升级
+
+## 升级到 v0.5.0
+
+升级 CLI 时下载 [v0.5.0 安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.5.0)，使用 SDK 时将 `moon.mod` 中的 `Delthin/moon_repomix` 依赖更新到 `0.5.0`，再运行 `moon update`。
+
+从 v0.4.1 升级时，原有 CLI、配置及 SDK 调用保持兼容；新增 `CodeContextSpec` / `read_code_context` 和 `TaskContextSpec` / `plan_task_context`。详细参数见 [代码读取](code-context.md) 与 [任务预算](task-context.md)。
+
+MCP 新增同名工具。`read_code_context.maxTokens` 是整个补读会话的累计正文 cap，`plan_task_context.maxTokens` 是共享文档 cap；`pack_repository.maxTokens` 仍是每卷 cap。客户端应按工具区分计量口径，并在续读前取得当前资源，因为下次成功会替换旧 URI。
+
+## 升级到 v0.4.1
 
 升级 CLI 时下载 [v0.4.1 安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.4.1)，使用 SDK 时将 `moon.mod` 中的 `Delthin/moon_repomix` 依赖更新到 `0.4.1`，再运行 `moon update`。
 

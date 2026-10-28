@@ -8,6 +8,8 @@ import {
 // Values
 pub fn compress(String, String) -> Outcome
 
+pub fn index_definitions(String, String) -> DefinitionIndex
+
 // Errors
 pub(all) suberror PlannerError {
   InvalidWorkers
@@ -24,6 +26,25 @@ type BatchTicket
 pub async fn BatchTicket::collect(Self) -> PlannedBatch
 pub async fn BatchTicket::finish(Self) -> Array[Outcome]
 pub fn BatchTicket::is_ready(Self) -> Bool
+
+pub(all) struct Definition {
+  name : String
+  qualified_name : String
+  start_line : Int
+  end_line : Int
+  references : Array[String]
+} derive(Eq, @debug.Debug)
+pub fn Definition::equal(Self, Self) -> Bool
+pub fn Definition::not_equal(Self, Self) -> Bool
+pub fn Definition::to_repr(Self) -> @debug.Repr
+
+pub(all) struct DefinitionIndex {
+  definitions : Array[Definition]
+  reason : String?
+} derive(Eq, @debug.Debug)
+pub fn DefinitionIndex::equal(Self, Self) -> Bool
+pub fn DefinitionIndex::not_equal(Self, Self) -> Bool
+pub fn DefinitionIndex::to_repr(Self) -> @debug.Repr
 
 pub(all) struct LineRange {
   start_line : Int

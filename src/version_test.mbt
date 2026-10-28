@@ -1,4 +1,4 @@
 ///|
 test "library version" {
-  assert_eq(@moon_repomix.version(), "0.4.1")
+  assert_eq(@moon_repomix.version(), "0.5.0")
 }

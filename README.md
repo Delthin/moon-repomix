@@ -2,11 +2,11 @@
 
 把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。使用 MoonBit native 实现，提供 CLI、SDK 和本地浏览器工作台；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
 
-当前版本 **v0.4.1**，提供 [三平台安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.4.1) 和 [Mooncakes SDK](https://mooncakes.io/docs/Delthin/moon_repomix@0.4.1)。本版优化精确计数、扫描和原生 AST 流水线；工作台、混合全文/骨架、精确分卷及只读 MCP 的用法保持一致。完整变化见 [Changelog](CHANGELOG.md)，升级步骤见 [迁移指南](docs/migration.md)。
+当前版本 **v0.5.0**，提供 [三平台安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.5.0) 和 [Mooncakes SDK](https://mooncakes.io/docs/Delthin/moon_repomix@0.5.0)。本版新增完整实现读取、累计预算补读和任务上下文规划；原有 CLI、工作台、混合全文/骨架及精确分卷用法保持一致。完整变化见 [Changelog](CHANGELOG.md)，升级步骤见 [迁移指南](docs/migration.md)。
 
 ## 安装与第一次运行
 
-从 [v0.4.1 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.4.1) 下载平台归档，用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 的相对位置，在解压目录运行：
+从 [v0.5.0 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.5.0) 下载平台归档，用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 的相对位置，在解压目录运行：
 
 ```sh
 ./bin/moon-repomix /path/to/project
@@ -67,7 +67,7 @@ moon-repomix ./project --compress --split 12000 -f md -o review-parts
 
 ![编辑器工作台：选择目录、生成上下文、切换原文与结构输出、检查预算](assets/demo/webui.gif)
 
-安装 v0.4.1 后，在要处理的项目目录运行：
+安装 v0.5.0 后，在要处理的项目目录运行：
 
 ```sh
 moon-repomix --webui
@@ -86,11 +86,11 @@ moon-repomix --webui
 - 默认扫描压缩前原文，命中时排除整个文件、Git 补丁或提交；模板命中则停止整个打包。扫描是启发式检测，分享前仍应审阅结果，详见 [安全边界](SECURITY.md) 和 [检测规则](docs/security.md)。
 - 对完整渲染字符串精确计算 `o200k_base` tokens，包含格式包装、模板与显示装饰。文件排名和目录统计不能代替最终预算；分卷的独立索引开销见 [分卷](docs/partition.md)。
 
-打包与计数在内存中完成，token 预算不是内存配额。当前源码在固定 35 MB TypeScript 大库的五轮 CLI 对照中，macOS 原文/完整元数据压缩的耗时中位数为 1.05 / 1.43 秒，原版为 1.37 / 1.62 秒；Linux 分别为 1.82 / 2.40 秒，原版为 2.62 / 3.59 秒。平台、内存代价、Linux 原文回退、全部样本及常驻 MCP 结果见 [性能测量](docs/performance.md)。
+打包与计数在内存中完成，token 预算不是内存配额。v0.4.1 在固定 35 MB TypeScript 大库的五轮 CLI 对照中，macOS 原文/完整元数据压缩的耗时中位数为 1.05 / 1.43 秒，原版为 1.37 / 1.62 秒；Linux 分别为 1.82 / 2.40 秒，原版为 2.62 / 3.59 秒。平台、内存代价、Linux 原文回退、全部样本及常驻 MCP 结果见 [性能测量](docs/performance.md)。
 
 ## SDK
 
-SDK 模块为 [`Delthin/moon_repomix@0.4.1`](https://mooncakes.io/docs/Delthin/moon_repomix@0.4.1)。在调用项目的 `moon.mod` 中声明依赖，在 `moon.pkg` 导入：
+SDK 模块为 [`Delthin/moon_repomix@0.5.0`](https://mooncakes.io/docs/Delthin/moon_repomix@0.5.0)。在调用项目的 `moon.mod` 中声明依赖，在 `moon.pkg` 导入：
 
 ```moonbit
 import {
@@ -109,6 +109,12 @@ let result = @repomix.pack(options, runtime)
 ```
 
 词表同目录须有 `tokenizer-unicode-16.0.0.txt`，加载时校验两份资源的 SHA-256。`Runtime` 可复用于多次顺序打包；SDK 返回结果，不写输出文件。`pack_volumes`、`explain_selection`、选项与结构字段见 [迁移](docs/migration.md) 和 [生成接口](src/pkg.generated.mbti)。
+
+v0.5.0 新增两种 SDK / MCP 读取方式：
+
+- [按实现读取与补读](docs/code-context.md)：读取完整函数、指定行或符号目录，按需补充依赖；MCP 在累计预算内允许最多三轮成功读取。
+- [任务上下文预算](docs/task-context.md)：按必选文件与候选优先级选择全文或骨架，生成多任务共享文档及独立审计。
+
 
 ## 文档与贡献
 
