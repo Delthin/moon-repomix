@@ -16,11 +16,11 @@ pub fn ResourceError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
 type CountSession
-pub fn CountSession::count(Self, String) -> Int
+pub fn CountSession::count(Self, String) -> Int32
 
 type Encoder
-pub fn Encoder::count(Self, String) -> Int
-pub fn Encoder::encode(Self, String) -> Array[Int]
+pub fn Encoder::count(Self, String) -> Int32
+pub fn Encoder::encode(Self, String) -> Array[Int32]
 pub async fn Encoder::load(String) -> Self
 pub fn Encoder::session(Self) -> CountSession
 

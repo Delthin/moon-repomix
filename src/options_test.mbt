@@ -1,6 +1,27 @@
 ///|
-test "library options select formats and their matching output filenames" {
-  assert_eq(@moon_repomix.options(".").style, @moon_repomix.Style::Xml)
+test "library release version and default output options" {
+  assert_eq(@moon_repomix.version(), "0.5.1")
+  let defaults = @moon_repomix.options(".")
+  assert_eq(defaults.style, @moon_repomix.Style::Xml)
+  assert_true(defaults.security_check)
+  assert_eq(defaults.max_files, 20000)
+  assert_eq(defaults.max_total_size, 209715200L)
+  assert_false(defaults.full_metadata)
+  assert_true(
+    defaults.file_summary &&
+    defaults.directory_structure &&
+    defaults.include_files,
+  )
+  assert_true(defaults.git_sections && defaults.metadata)
+  assert_false(defaults.show_line_numbers)
+  assert_eq(
+    defaults.output_file_path_style,
+    @moon_repomix.PathStyle::TargetRelative,
+  )
+  assert_eq(defaults.file_paths, None)
+  assert_eq(defaults.keep_full_patterns, [])
+  assert_eq(defaults.header_text, "")
+  assert_eq(defaults.instruction_file_path, None)
   for
     (style, suffix) in [
       (@moon_repomix.Style::Xml, "xml"),
@@ -11,25 +32,6 @@ test "library options select formats and their matching output filenames" {
     let options = @moon_repomix.options(".", style~)
     assert_eq(options.style, style)
     assert_eq(options.output, "repomix-output." + suffix)
-    assert_true(options.security_check)
-    assert_eq(options.max_files, 20000)
-    assert_eq(options.max_total_size, 209715200L)
-    assert_false(options.full_metadata)
-    assert_true(
-      options.file_summary &&
-      options.directory_structure &&
-      options.include_files,
-    )
-    assert_true(options.git_sections && options.metadata)
-    assert_false(options.show_line_numbers)
-    assert_eq(
-      options.output_file_path_style,
-      @moon_repomix.PathStyle::TargetRelative,
-    )
-    assert_eq(options.file_paths, None)
-    assert_eq(options.keep_full_patterns, [])
-    assert_eq(options.header_text, "")
-    assert_eq(options.instruction_file_path, None)
   }
   let displayed = @moon_repomix.options(
     ".",

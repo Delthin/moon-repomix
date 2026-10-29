@@ -34,9 +34,9 @@ async fn check_webui(prefix : String) -> Unit {
 ///|
 async fn main {
   let args = @env.args()
-  guard args.length() == 2 else {
+  guard args.length() == 2 || args.length() == 3 else {
     fail(
-      "Usage: moon run --target native scripts/distribution-test.mbtx PLATFORM",
+      "Usage: moon run --target native scripts/distribution-test.mbtx PLATFORM [ARCHIVE_DIR]",
     )
   }
   let platform = args[1]
@@ -70,7 +70,8 @@ async fn main {
     @fs.symlink(target=moved + "/bin/moon-repomix", link)
     smoke(link, fixture)
   }
-  let distribution = temp + "/dist"
+  // CI uploads this verified archive rather than packaging a second copy.
+  let distribution = if args.length() == 3 { args[2] } else { temp + "/dist" }
   let packed = @process.run("moon", [
     "run", "--target", "native", "scripts/package.mbtx", distribution, platform,
   ])

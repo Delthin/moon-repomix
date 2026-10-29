@@ -13,11 +13,11 @@ import {
 // Values
 pub async fn explain_selection(@config.Options, Array[String]) -> SelectionReport
 
-pub fn options(String, style? : @config.Style, split_output? : @config.SplitOutput, compress? : Bool, keep_full_patterns? : Array[String], header_text? : String, instruction_file_path? : String?, full_metadata? : Bool, file_summary? : Bool, directory_structure? : Bool, include_files? : Bool, git_sections? : Bool, metadata? : Bool, show_line_numbers? : Bool, output_file_path_style? : @config.PathStyle, file_paths? : Array[String]?, include_diffs? : Bool, include_logs? : Bool, include_logs_count? : Int, remote? : String?, remote_branch? : String?, max_files? : Int, max_total_size? : Int64) -> @config.Options raise
+pub fn options(String, style? : @config.Style, split_output? : @config.SplitOutput, compress? : Bool, keep_full_patterns? : Array[String], header_text? : String, instruction_file_path? : String?, full_metadata? : Bool, file_summary? : Bool, directory_structure? : Bool, include_files? : Bool, git_sections? : Bool, metadata? : Bool, show_line_numbers? : Bool, output_file_path_style? : @config.PathStyle, file_paths? : Array[String]?, include_diffs? : Bool, include_logs? : Bool, include_logs_count? : Int32, remote? : String?, remote_branch? : String?, max_files? : Int32, max_total_size? : Int64) -> @config.Options raise
 
 pub async fn pack(@config.Options, Runtime) -> PackResult
 
-pub async fn pack_volumes(@config.Options, Runtime, max_tokens~ : Int) -> VolumePackResult
+pub async fn pack_volumes(@config.Options, Runtime, max_tokens~ : Int32) -> VolumePackResult
 
 pub async fn plan_task_context(@config.Options, Runtime, TaskContextSpec) -> TaskContextPlan
 
@@ -49,38 +49,38 @@ pub(all) suberror TaskContextError {
 // Types and methods
 pub(all) enum BudgetStatus {
   NotSet
-  Within(Int)
-  Exceeded(Int)
+  Within(Int32)
+  Exceeded(Int32)
 }
 
 pub struct CodeContextPlan {
   status : String
   text : String?
-  tokens : Int
-  bytes : Int
-  required_tokens : Int?
+  tokens : Int32
+  bytes : Int32
+  required_tokens : Int32?
   audit : Json
   security : SecurityStatus
 }
 
 pub struct CodeContextSpec {
-  max_tokens : Int
+  max_tokens : Int32
   // private fields
 }
 pub fn CodeContextSpec::from_json(Json) -> Self raise CodeContextError
 
 pub(all) struct FileStats {
   path : String
-  disk_bytes : Int
-  tokens : Int
-  original_tokens : Int
+  disk_bytes : Int32
+  tokens : Int32
+  original_tokens : Int32
 }
 
 pub struct PackResult {
   document : @document.Document
   text : String
-  bytes : Int
-  tokens : Int
+  bytes : Int32
+  tokens : Int32
   files : Array[FileStats]
   skipped : Array[@selection.Skipped]
   findings : Array[@security.Finding]
@@ -95,7 +95,7 @@ pub struct PathExplanation {
   stage : String
   reason : String
   origin : @selection.RuleOrigin?
-  finding_count : Int
+  finding_count : Int32
   finding_rules : Array[String]
 }
 
@@ -114,10 +114,10 @@ pub struct SelectionReport {
   paths : Array[PathExplanation]
   security : SecurityStatus
   style : @config.Style
-  candidate_count : Int
-  accepted_count : Int
+  candidate_count : Int32
+  accepted_count : Int32
   read_bytes : Int64
-  max_files : Int
+  max_files : Int32
   max_total_size : Int64
 }
 pub fn SelectionReport::to_json(Self) -> Json
@@ -125,17 +125,17 @@ pub fn SelectionReport::to_json(Self) -> Json
 pub struct TaskContextPlan {
   status : String
   text : String?
-  tokens : Int
-  bytes : Int
+  tokens : Int32
+  bytes : Int32
   audit : Json
   audit_text : String
-  audit_tokens : Int
-  audit_bytes : Int
+  audit_tokens : Int32
+  audit_bytes : Int32
   security : SecurityStatus
 }
 
 pub struct TaskContextSpec {
-  max_tokens : Int
+  max_tokens : Int32
   // private fields
 }
 pub fn TaskContextSpec::from_json(Json) -> Self raise TaskContextError

@@ -7,7 +7,7 @@ import {
 }
 
 // Values
-pub async fn serve(@config.Options, @moon_repomix.Runtime, max_tokens? : Int, max_output_bytes? : Int, max_volumes? : Int) -> Unit
+pub async fn serve(@config.Options, @moon_repomix.Runtime, max_tokens? : Int32, max_output_bytes? : Int32, max_volumes? : Int32) -> Unit
 
 // Errors
 

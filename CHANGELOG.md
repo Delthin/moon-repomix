@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-29
+
+### Changed
+
+- 源码构建、CI 和 SDK 消费固定使用 MoonBit `0.10.17+d971670cd`；CLI、配置及 SDK 接口保持兼容。
+- 精简单元与集成测试的重复检查；性能比较改为按需运行，常规 CI 复用已解压验证的发行归档。
+
 ## [0.5.0] - 2026-10-28
 
 ### Added
@@ -66,7 +73,8 @@
 - 对齐默认排除、ignore 开关、自定义 glob 与精确磁盘拼写行为，修正跨平台字面路径选择。
 - 优化精确 tokenizer 的初始化、分词计数、文件选择和安全命中定位，减少文件处理中的定时器分配。
 
-[Unreleased]: https://github.com/Delthin/moon-repomix/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Delthin/moon-repomix/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Delthin/moon-repomix/releases/tag/v0.5.1
 [0.5.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.5.0
 [0.4.1]: https://github.com/Delthin/moon-repomix/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.4.0

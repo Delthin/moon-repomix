@@ -4,7 +4,7 @@
 
 ## 本地准备
 
-项目使用 MoonBit native，清单为 `moon.mod` / `moon.pkg`，脚本为 `.mbtx`。固定工具链为 **0.10.15+943464bfa**，需要平台 C 工具链；安装和构建方法见 [工具链](docs/toolchain.md)。首次准备依赖与检查工具链：
+项目使用 MoonBit native，清单为 `moon.mod` / `moon.pkg`，脚本为 `.mbtx`。固定工具链为 **0.10.17+d971670cd**，需要平台 C 工具链；安装和构建方法见 [工具链](docs/toolchain.md)。首次准备依赖与检查工具链：
 
 ```sh
 moon run --target native scripts/check-toolchain.mbtx
@@ -22,7 +22,7 @@ moon test src/selection --target native
 moon check src/selection --target native
 ```
 
-回归用例应独立表达输入、预期行为和失败条件。涉及取消、输出提交或输入限额时，检查相应错误路径，不用修改快照或放宽断言掩盖失败。
+回归用例应独立表达输入、预期行为和失败条件。优先保留能发现实际错误的断言：选错文件、泄露内容、预算超限、协议不兼容、失败后损坏旧输出。相同行为已有更完整的覆盖时合并或删除重复用例；工具总数、版本字面量和源码文件清单不代替行为验证。涉及取消、输出提交或输入限额时，检查相应错误路径，不用修改快照或放宽断言掩盖失败。
 
 涉及 CLI 或跨模块契约时，选择对应脚本，避免为局部改动运行所有套件：
 
@@ -35,6 +35,7 @@ moon check src/selection --target native
 | 章节、行号和路径显示 | `scripts/display-controls-test.mbtx` |
 | 分卷预算、目录发布与机器 JSON 报告 | `scripts/volume-cli-test.mbtx` |
 | MCP 协议与缓存 | `scripts/mcp-test.mbtx` |
+| 任务预算、完整代码补读与累计上限 | `scripts/task-context-mcp-test.mbtx` |
 
 脚本需要当前 CLI、词表及各自参数；运行前阅读对应脚本的用法或 CI 中的调用，日志写入新的临时目录。只有相关行为需要时才运行跨模块、安装、分发或性能检查；文档改动核对 diff、链接与真实字段即可。
 
@@ -45,7 +46,9 @@ moon fmt src/selection
 moon info src/selection --target native
 ```
 
-复核生成接口是否正是预期变更；不要手改生成的 `.mbti`。对改动路径可再运行 `moon fmt src/selection --check`。完整跨平台检查入口见 [CI](.github/workflows/ci.yml)，本地只报告实际执行的命令、结果和未覆盖项。
+复核生成接口是否正是预期变更；不要手改生成的 `.mbti`。对改动路径可再运行 `moon fmt src/selection --check`。完整跨平台检查入口见 [CI](.github/workflows/ci.yml)。单元测试、文件系统与配置、分卷提交、真实 MCP/HTTP 和安装归档在三个平台运行；格式、统计、显示和真实 MoonBit 自打包的集成检查集中在 Linux。归档只打包一次，解压验证通过后上传同一个文件。演示在源码包解包后执行，不再单独重复运行。性能比较按需手动执行，不占常规 CI。
+
+本地只报告实际执行的命令、结果和未覆盖项。
 
 ## 资源、依赖与许可
 

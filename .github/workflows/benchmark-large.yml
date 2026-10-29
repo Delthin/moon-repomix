@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      MOONBIT_INSTALL_VERSION: "0.10.15+943464bfa"
+      MOONBIT_INSTALL_VERSION: "0.10.17+d971670cd"
       SOURCE_REVISION: ${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

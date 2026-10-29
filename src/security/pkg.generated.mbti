@@ -7,7 +7,7 @@ import {
 }
 
 // Values
-pub fn scan(String, String, Int) -> Array[Finding] raise ScanError
+pub fn scan(String, String, Int32) -> Array[Finding] raise ScanError
 
 pub fn scan_validated(String, @validated_text.Text) -> Array[Finding] raise ScanError
 
@@ -26,9 +26,9 @@ pub fn ScanError::to_repr(Self) -> @debug.Repr
 pub(all) struct Finding {
   rule : String
   path : String
-  start : Int
-  end : Int
-  line : Int
+  start : Int32
+  end : Int32
+  line : Int32
 } derive(Eq, @debug.Debug)
 pub fn Finding::equal(Self, Self) -> Bool
 pub fn Finding::not_equal(Self, Self) -> Bool

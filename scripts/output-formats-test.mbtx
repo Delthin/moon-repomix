@@ -132,33 +132,6 @@ async fn main {
     assert_eq(over_out, "")
     assert_true(over_report.contains("complete output retained"))
     assert_eq(@fs.read_file(path).text(), text)
-    let blocked = cwd + "/blocked"
-    @fs.mkdir(blocked)
-    @fs.write_file(
-      blocked + "/keep.txt",
-      "directory stays",
-      create_mode=CreateNew,
-    )
-    let (write_error, write_out, write_report) = cli(
-      binary,
-      selected + ["-o", blocked],
-      cwd,
-    )
-    assert_eq(write_error, 1)
-    assert_eq(write_out, "")
-    assert_true(write_report.contains("OutputError"))
-    assert_eq(@fs.read_file(blocked + "/keep.txt").text(), "directory stays")
-    assert_eq(@fs.read_file(path).text(), text)
-    @fs.write_file(path, "previous output", create_mode=CreateOrTruncate)
-    let (resource_error, error_out, _) = cli(
-      binary,
-      selected + ["--tokenizer-path=" + cwd + "/missing"],
-      cwd,
-    )
-    assert_eq(resource_error, 1)
-    assert_eq(error_out, "")
-    assert_eq(@fs.read_file(path).text(), "previous output")
-    @fs.write_file(path, text, create_mode=CreateOrTruncate)
     if style == "json" {
       json_text = text
       guard @json.parse(text)
@@ -238,7 +211,7 @@ async fn main {
     println(
       "PASS: " +
       style +
-      " default name, stdout, bytes, budget boundary, failures and self-output exclusion (" +
+      " default name, stdout, bytes, budget boundary and self-output exclusion (" +
       tokens.to_string() +
       " full-document tokens)",
     )

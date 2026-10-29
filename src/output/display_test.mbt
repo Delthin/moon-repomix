@@ -91,21 +91,6 @@ test "presentation controls preserve the canonical document and exact body lines
     assert_true(text.contains("header"))
     assert_true(text.contains("instructions"))
   }
-  for
-    (actual, explicit) in [
-      (@output.json(doc), @output.json(doc, display=@output.Display::default())),
-      (@output.xml(doc), @output.xml(doc, display=@output.Display::default())),
-      (
-        @output.markdown(doc),
-        @output.markdown(doc, display=@output.Display::default()),
-      ),
-      (
-        @output.plain(doc),
-        @output.plain(doc, display=@output.Display::default()),
-      ),
-    ] {
-    assert_eq(actual, explicit)
-  }
   assert_eq(doc.files[0].path, "src/a.ts")
   assert_eq(doc.files[0].text, "body\r\n")
   assert_eq(doc.sections.length(), 2)

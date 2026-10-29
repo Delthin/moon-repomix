@@ -2,19 +2,19 @@
 package "Delthin/moon_repomix/selection"
 
 // Values
-pub async fn explain(String, SelectionOptions, Array[String], file_paths? : Array[String]?, max_files? : Int) -> SelectionExplanation
+pub async fn explain(String, SelectionOptions, Array[String], file_paths? : Array[String]?, max_files? : Int32) -> SelectionExplanation
 
 pub fn file_matcher(Array[String]) -> FileMatcher raise SelectionError
 
 pub async fn path_filter(String, SelectionOptions, file_paths? : Array[String]?) -> PathFilter
 
-pub async fn select(String, SelectionOptions, file_paths? : Array[String]?, max_files? : Int) -> Selection
+pub async fn select(String, SelectionOptions, file_paths? : Array[String]?, max_files? : Int32) -> Selection
 
 // Errors
 pub(all) suberror SelectionError {
   InvalidRoot(String)
-  FileLimitExceeded(limit~ : Int)
-  InvalidPattern(source~ : String, line~ : Int, pattern~ : String, detail~ : String)
+  FileLimitExceeded(limit~ : Int32)
+  InvalidPattern(source~ : String, line~ : Int32, pattern~ : String, detail~ : String)
   InvalidRuleFile(String)
   InvalidGitMetadata(String)
   InvalidOutput(String)
@@ -42,8 +42,8 @@ pub async fn PathFilter::allows(Self, String) -> Bool
 pub(all) struct RuleOrigin {
   kind : String
   source : String?
-  line : Int?
-  index : Int?
+  line : Int32?
+  index : Int32?
 }
 
 pub(all) struct Selection {

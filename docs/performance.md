@@ -196,7 +196,7 @@ moon run --target native scripts/benchmark.mbtx local "$WORKSPACE" \
 moon run --target native scripts/benchmark.mbtx verify "$WORKSPACE"
 ```
 
-Linux CI 复用已有 release CLI，运行同样六场景；macOS/Windows 功能测试不增加性能矩阵。`performance-linux-x64` artifact 在成功或失败时都尝试上传，包含 `report/`、`logs/`、`manifest/`，并保留两端每场景的预热输出及计时外源映射输出，方便直接检查正文；其余计时输出以散列证明与预热一致。不包含语料 checkout、node_modules、cache 或完整环境。离线 `verify` 仍需恢复固定源文件，不能仅靠 artifact 重跑。三 OS 另外上传 `moonbit-self-pack-*`，范围仅为 `dist/self-pack/moonbit-*` 的真实 MoonBit 自打包证据。
+常规 CI 不运行性能比较，也不安装 Node 或下载对照语料。需要复测这组六场景时，手动执行上面的 `prepare/run/verify`；大源码工作负载另有文末的手动 workflow。历史 `performance-linux-x64` artifact 保存代表文档、样本和散列，但离线 `verify` 仍需恢复固定源文件。常规 CI 只在 Linux 执行一次真实 MoonBit 自打包，保留原文/骨架的接受集合、签名、接口和源行范围检查，上传 `moonbit-self-pack-linux-x64`。
 
 ### 开发依赖与数据许可
 
@@ -307,7 +307,7 @@ moon run --target native scripts/benchmark-resident.mbtx -- verify "$MCP_WORK" "
 
 ### 当前源码的 Linux 大库复验入口
 
-`.github/workflows/benchmark-large.yml` 仅由 **workflow_dispatch** 手动运行，不随 push 自动测量。它检出 dispatch 所选 ref，以 `github.sha` 冻结源码身份，使用同一 MoonBit `0.10.15+943464bfa`、Node `25.9.0`，只构建 native release CLI；参考 Repomix `1.18.1` 在 runner 临时目录独立安装，禁止生命周期脚本并归档 package-lock。语料与上文相同，所有编译、安装和准备均在预热前完成。此入口已完成上节 Linux 五轮实测；未来运行仍保留有利与不利结果，速度不作为通过条件。
+`.github/workflows/benchmark-large.yml` 仅由 **workflow_dispatch** 手动运行，不随 push 自动测量。它检出 dispatch 所选 ref，以 `github.sha` 冻结源码身份，使用 [moon-toolchain](../moon-toolchain) 固定的 MoonBit（当前 `0.10.17+d971670cd`）和 Node `25.9.0`，只构建 native release CLI；上方历史样本仍对应各自记录的旧工具链，未来运行单独记录源码与编译器身份；参考 Repomix `1.18.1` 在 runner 临时目录独立安装，禁止生命周期脚本并归档 package-lock。语料与上文相同，所有编译、安装和准备均在预热前完成。此入口已完成上节 Linux 五轮实测；未来运行仍保留有利与不利结果，速度不作为通过条件。
 
 也可在 Linux 的干净产品 Git 根目录直接复现；先准备指定工具链、Node、npm、Git 和 GNU `/usr/bin/time`，再使用各自尚不存在的绝对临时路径：
 

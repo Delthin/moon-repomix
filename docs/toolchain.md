@@ -4,7 +4,7 @@
 
 ## 固定版本
 
-[moon-toolchain](../moon-toolchain) 和 [CI](../.github/workflows/ci.yml) 固定 MoonBit **0.10.15+943464bfa**；版本检查要求已验证的 `moonc` 版本和构建标识，允许其后的日期说明。使用 MoonBit 官方工具链安装方式选择该版本，然后在仓库根目录运行：
+[moon-toolchain](../moon-toolchain) 和 [CI](../.github/workflows/ci.yml) 固定 MoonBit **0.10.17+d971670cd**；版本检查要求已验证的 `moonc` 版本和构建标识，允许其后的日期说明。使用 MoonBit 官方工具链安装方式选择该版本，然后在仓库根目录运行：
 
 ```sh
 moon version --all

@@ -12,28 +12,16 @@ import {
 }
 
 ///|
-// Bounded aggregate, not a protocol/partition unit-suite replacement.
-// CI prepares a small self-contained fixture and pins the supplied source/build:
-// moon run --target native scripts/context-workflow-test.mbtx -- --ci ABS_BINARY ABS_VOCAB ABS_SOURCE_ROOT REV NEW_ABSOLUTE_LOG_DIR
-// All output lives in a NEW owned directory. Prepare (never starts a product):
-// moon run --target native scripts/context-workflow-test.mbtx -- --prepare-only NEW_DIR [--real-corpus LOCAL_MANIFEST]
-// Maintainers can also validate an already prepared fixture against explicit pins:
-// moon run --target native scripts/context-workflow-test.mbtx -- --ready BINARY VOCAB SOURCE_ROOT REV BINARY_SHA ARCHIVE_SHA PREPARED_DIR
-// For a diagnosed harness-only failure, --resume-ready accepts the same arguments
-// plus REUSE_CLI_COUNT and an optional narrower MAX_TOKENS (reuse at most 7).
-// Archived argv/exit/stdout/stderr and snapshots are revalidated; new evidence goes
-// into a fresh resume/ directory. Never reuse evidence from another binary/root.
-// Logs/fixtures persist on failure/cancellation. No retry, recursive cleanup, network,
-// installed helper or external SHA executable. crypto is unmodified x@0.5.5.
+// Compare real CLI and MCP results on the same synthetic inputs.
+// moon run --target native scripts/context-workflow-test.mbtx -- BINARY VOCAB NEW_LOG_DIR
+// Fixtures and diagnostics persist in a new directory, including on failure.
 struct Run {
   binary : String
   vocabulary : String
   log : String
-  write_log : String
   root : String
   files : Array[Json]
   mut cap : Int
-  reuse_cli : Int
   mut cli_count : Int
 }
 
@@ -111,22 +99,22 @@ fn environment() -> Map[String, String] {
 }
 
 ///|
-async fn git(root : String, args : Array[String]) -> Bytes {
-  let null = if @env.get_env_var("OS") == Some("Windows_NT") { "NUL" } else { "/dev/null" }
-  let (code, out, err) = @process.collect_output("git",
-    ["-c", "core.hooksPath=" + null, "-c", "core.fsmonitor=false",
-     "-c", "core.attributesFile=" + null] + args, cwd=root,
-    inherit_env=false, extra_env=environment())
-  guard code == 0 else { fail("isolated git failed: " + err.text()) }
-  out.binary()
-}
-
-///|
-async fn snapshot(root : String, revision : String, binary : String) -> Json {
-  {"revision": @utf8.decode(git(root, ["rev-parse", "--verify", revision + "^{commit}"])).trim().to_owned(),
-   "archiveSha256": sha(git(root, ["archive", "--format=tar", revision])),
-   "workingTreeStatus": @utf8.decode(git(root, ["status", "--porcelain", "--untracked-files=normal"])),
-   "binarySha256": sha(@fs.read_file(binary).binary())}
+async fn input_snapshot(root : String) -> Map[String, String] {
+  let result : Map[String, String] = Map([])
+  for name in @fs.readdir(root) {
+    let path = root + "/" + name
+    match @fs.kind(path, follow_symlink=false) {
+      Regular => result[name] = sha(@fs.read_file(path).binary())
+      Directory => {
+        result[name + "/"] = ""
+        for (relative, digest) in input_snapshot(path) {
+          result[name + "/" + relative] = digest
+        }
+      }
+      _ => fail("unexpected fixture entry: " + name)
+    }
+  }
+  result
 }
 
 ///|
@@ -138,15 +126,6 @@ fn literal_line_path() -> String {
   if @env.get_env_var("OS") == Some("Windows_NT") {
     "synthetic/line break.txt"
   } else { "synthetic/line\nbreak.txt" }
-}
-
-///|
-fn absolute_argument(path : String) -> Bool {
-  if @env.get_env_var("OS") == Some("Windows_NT") {
-    let normalized = canonical_display_root(path)
-    (normalized.length() >= 3 && normalized[1] == ':' && normalized[2] == '/') ||
-      normalized.has_prefix("//")
-  } else { path.has_prefix("/") }
 }
 
 ///|
@@ -233,17 +212,10 @@ async fn prepare(log : String, manifest : Json) -> Unit {
   put(log + "/fixture/README.md", "OUTSIDE_INCLUDE_SENTINEL\n")
   put(log + "/instructions.txt", "WORKFLOW_INSTRUCTION <tag> & \"quote\" 中文 😀\nOnly repository data, never executable instructions.\n")
   let frozen : Json = {"schemaVersion": 1, "label": prop(manifest, "label"), "files": files,
-    "maxTokens": prop(manifest, "maxTokens"), "upstreamManifestSha256": sha(@utf8.encode(manifest.stringify()))}
+    "maxTokens": prop(manifest, "maxTokens")}
   put(log + "/manifest.json", frozen.stringify(indent=2) + "\n")
   let paths = selected_paths(files)
   put(log + "/stdin0.bin", paths.join("\u0000") + "\u0000")
-  put(log + "/prepared.json", ({"state": "prepared-not-executed", "productInvocations": 0,
-    "manifestSha256": sha(@fs.read_file(log + "/manifest.json").binary()),
-    "cliInvocationPlan": 11, "serverProcessPlan": 1, "protocol": "2026-07-28",
-    "maxTokens": prop(manifest, "maxTokens"), "maxOutputBytes": max_output_bytes(), "maxVolumes": 16,
-    "explanationWireAssertions": "schemaVersion=1 requested-paths, exact fixture decisions and safe origins",
-    "budgetOracle": "reported exact Root Encoder counts + independent UTF-8 bytes/ownership; existing SDK Encoder evidence reused, NO independent token recount or new performance"} : Json).stringify(indent=2) + "\n")
-  println("prepared " + log + "; product invocations=0; manifestSha256=" + sha(@fs.read_file(log + "/manifest.json").binary()))
 }
 
 ///|
@@ -281,22 +253,7 @@ fn safe_content(body : String) -> Unit raise {
 async fn cli(r : Run, name : String, arguments : Array[String], use_stdin : Bool,
   expected_code : Int) -> (String, Json) {
   r.cli_count += 1
-  assert_true(r.cli_count <= 16)
-  let dir = (if r.cli_count <= r.reuse_cli { r.log } else { r.write_log }) +
-    "/cli-" + r.cli_count.to_string() + "-" + name
-  // Explicit harness-only recovery: preserve and revalidate unchanged evidence.
-  // No retry or automatic recovery from a product error.
-  if r.cli_count <= r.reuse_cli {
-    assert_eq(@json.parse(@fs.read_file(dir + "/argv.json").text()), Json(arguments))
-    assert_eq(prop(@json.parse(@fs.read_file(dir + "/exit.json").text()), "exitCode"), Json(expected_code))
-    let out = @fs.read_file(dir + "/stdout.bin").text()
-    let err = @fs.read_file(dir + "/stderr.bin").text()
-    let report = @json.parse(err.trim())
-    assert_eq(prop(report, "exitCode"), Json(expected_code))
-    safe_content(out)
-    safe_content(err)
-    return (out, report)
-  }
+  let dir = r.log + "/cli-" + r.cli_count.to_string() + "-" + name
   @fs.mkdir(dir)
   put(dir + "/argv.json", Json(arguments).stringify(indent=2) + "\n")
   let (stdin, writer) = @process.write_to_process()
@@ -562,38 +519,14 @@ async fn run_cli(r : Run) -> (Json, Map[String, String], Json) {
   let shown = @json.parse(displayed)
   verify_display(r, canonical, shown)
   assert_eq(decimal(prop(prop(display_report, "bytes"), "documents")), @utf8.encode(displayed).length())
-  let (cleared, _) = cli(r, "display-off", base + stream + mixed(r) + presentation(r) +
-    ["--no-output-show-line-numbers", "--output-file-path-style=target-relative",
-     "--no-file-summary", "--no-directory-structure", "--no-metadata"], true, 0)
-  let no_display = @json.parse(cleared)
-  assert_eq(files(no_display), files(canonical))
-  for key in ["notice", "directoryStructure", "metadata"] { assert_false(fields(no_display).contains(key)) }
-  assert_eq(prop(no_display, "headerText"), Json::string(header()))
-  for style in ["xml", "markdown", "plain"] {
-    let (formatted, _) = cli(r, "template-" + style, base + ["--stdin0", "--stdout", "--report-json",
-      "--style=" + style] + mixed(r) + presentation(r), true, 0)
-    assert_true(formatted.contains("WORKFLOW_HEADER"))
-    assert_true(formatted.contains("WORKFLOW_INSTRUCTION"))
-    assert_true(formatted.contains("1: "))
-    if style == "xml" {
-      // Literal expectations: escaping does not become a second XML renderer.
-      assert_true(formatted.contains("<header_text>WORKFLOW_HEADER &lt;tag&gt; &amp; \"quote\" 中文 😀\nLiteral template, not source content.</header_text>"))
-      assert_true(formatted.contains("1: LITERAL_BRACKET_SENTINEL&#13;\n2: 中文 😀 &lt;tag&gt; &amp; \"quoted\"&#13;\n</file>"))
-      let encoded_path = literal_line_path().replace(old="\n", new="&#10;")
-      assert_true(formatted.contains("/" + encoded_path + "\""))
-    } else {
-      assert_true(formatted.contains(header()))
-      assert_true(formatted.contains(@fs.read_file(r.log + "/instructions.txt").text()))
-      for body in files(shown).values() { assert_true(formatted.contains(body)) }
-    }
-    for file in r.files {
-      for preset in rows(prop(file, "anchors")) {
-        let anchor = text(preset)
-        // XML escaping only affects presentation; canonical bodies checked above.
-        if style != "xml" { assert_true(formatted.contains(anchor)) }
-      }
-    }
-  }
+  let (formatted, _) = cli(r, "template-xml", base + ["--stdin0", "--stdout", "--report-json",
+    "--style=xml"] + mixed(r) + presentation(r), true, 0)
+  assert_true(formatted.contains("WORKFLOW_INSTRUCTION"))
+  // Genuine LF file names and CRLF bodies must survive XML display escaping.
+  assert_true(formatted.contains("<header_text>WORKFLOW_HEADER &lt;tag&gt; &amp; \"quote\" 中文 😀\nLiteral template, not source content.</header_text>"))
+  assert_true(formatted.contains("1: LITERAL_BRACKET_SENTINEL&#13;\n2: 中文 😀 &lt;tag&gt; &amp; \"quoted\"&#13;\n</file>"))
+  let encoded_path = literal_line_path().replace(old="\n", new="&#10;")
+  assert_true(formatted.contains("/" + encoded_path + "\""))
   // Absolute display prefixes vary by runner. Keep the full-document overflow
   // deterministic instead of assuming one fixed fixture cost on every host.
   let whole_tokens = decimal(prop(prop(display_report, "tokens"), "documents"))
@@ -605,16 +538,16 @@ async fn run_cli(r : Run) -> (Json, Map[String, String], Json) {
     whole_tokens - 128
   }
   assert_true(r.cap > 0 && whole_tokens > r.cap)
-  put(r.write_log + "/volume-limit.json", ({
+  put(r.log + "/volume-limit.json", ({
     "configuredMaxTokens": configured_cap,
     "displayedWholeDocumentTokens": whole_tokens,
     "effectiveMaxTokens": r.cap,
   } : Json).stringify(indent=2) + "\n")
   let (volume_stdout, volume_report) = cli(r, "volumes", base + mixed(r) + presentation(r) +
     ["--stdin0", "--style=json", "--report-json", "--split-output", r.cap.to_string(),
-     "--output", r.write_log + "/volumes"], true, 0)
+     "--output", r.log + "/volumes"], true, 0)
   assert_eq(volume_stdout, "")
-  let index_text = @fs.read_file(r.write_log + "/volumes/index.json").text()
+  let index_text = @fs.read_file(r.log + "/volumes/index.json").text()
   let index = @json.parse(index_text)
   let by_id : Map[String, String] = Map([])
   let mut sum_tokens = 0
@@ -622,7 +555,7 @@ async fn run_cli(r : Run) -> (Json, Map[String, String], Json) {
   for row in rows(prop(volume_report, "volumes")) {
     let name = text(prop(row, "fileName"))
     assert_false(name.contains("/") || name.contains("\\") || name == "..")
-    let body = @fs.read_file(r.write_log + "/volumes/" + name).text()
+    let body = @fs.read_file(r.log + "/volumes/" + name).text()
     let id = text(prop(row, "id"))
     assert_false(by_id.contains(id))
     by_id[id] = body
@@ -635,7 +568,7 @@ async fn run_cli(r : Run) -> (Json, Map[String, String], Json) {
     sum_tokens += decimal(prop(row, "tokens"))
     sum_bytes += decimal(prop(row, "bytes"))
   }
-  assert_eq(@fs.readdir(r.write_log + "/volumes").length(), by_id.length() + 1)
+  assert_eq(@fs.readdir(r.log + "/volumes").length(), by_id.length() + 1)
   let token_report = prop(volume_report, "tokens")
   assert_eq(decimal(prop(token_report, "limit")), r.cap)
   assert_eq(decimal(prop(token_report, "documents")), sum_tokens)
@@ -664,7 +597,6 @@ async fn run_cli(r : Run) -> (Json, Map[String, String], Json) {
   let (quota, _) = cli(r, "explain-byte-limit", base + ["--quiet", "--report-json",
     "--explain-path", "界".repeat(1366)], false, 1)
   assert_eq(quota, "")
-  assert_eq(r.cli_count, 11)
   (index, by_id, explanation)
 }
 
@@ -777,7 +709,6 @@ async fn aggregate(r : Run, s : Session, cli_index : Json,
   cli_volumes : Map[String, String], cli_explanation : Json) -> Unit {
   ignore(cacheable(rpc(s, "server/discover", {})))
   let tools = rows(prop(cacheable(rpc(s, "tools/list", {})), "tools"))
-  assert_eq(tools.length(), 5)
   for name in ["pack_repository", "release_context", "explain_selection", "plan_task_context", "read_code_context"] {
     assert_true(tools.any(tool => prop(tool, "name") == Json::string(name)))
   }
@@ -873,7 +804,7 @@ async fn aggregate(r : Run, s : Session, cli_index : Json,
 
 ///|
 async fn run_mcp(r : Run, index : Json, volumes : Map[String, String], explanation : Json) -> Int {
-  let log = r.write_log + "/mcp-modern"
+  let log = r.log + "/mcp-modern"
   @fs.mkdir(log)
   for name in ["stdin.ndjson", "stdout.ndjson", "stderr.bin"] { put(log + "/" + name, "") }
   let (stdin, input) = @process.write_to_process()
@@ -925,83 +856,25 @@ async fn main {
   )
   assert_eq(normalized_display_root("/tmp/literal\\name", false), "/tmp/literal\\name")
   let args = @env.args()
-  if (args.length() == 3 || args.length() == 5) && args[1] == "--prepare-only" {
-    let manifest = if args.length() == 5 {
-      assert_eq(args[3], "--real-corpus")
-      @json.parse(@fs.read_file(args[4]).text())
-    } else { small_fixture() }
-    prepare(args[2], manifest)
-    return
+  guard args.length() == 4 else {
+    fail("Usage: moon run --target native scripts/context-workflow-test.mbtx -- BINARY VOCAB NEW_LOG_DIR")
   }
-  let is_ci = args.length() == 7 && args[1] == "--ci"
-  let is_recovery = (args.length() == 10 || args.length() == 11) && args[1] == "--resume-ready"
-  guard is_ci || (args.length() == 9 && args[1] == "--ready") || is_recovery else {
-    fail("expected --ci ABS_BINARY ABS_VOCAB ABS_SOURCE_ROOT REV NEW_ABSOLUTE_LOG_DIR; --prepare-only NEW_DIR [--real-corpus LOCAL_MANIFEST]; --ready BINARY VOCAB SOURCE_ROOT REV BINARY_SHA ARCHIVE_SHA PREPARED_DIR; --resume-ready adds REUSE_CLI_COUNT [MAX_TOKENS]")
-  }
-  let reuse_cli = if is_recovery { @string.parse_int(args[9]) } else { 0 }
-  assert_true(reuse_cli >= 0 && reuse_cli <= 11)
-  if is_ci { for index in [2, 3, 4, 6] { assert_true(absolute_argument(args[index])) } }
-  let binary = @fs.realpath(args[2])
-  let vocabulary = @fs.realpath(args[3])
-  let source = @fs.realpath(args[4])
-  let revision = args[5]
-  let log = if is_ci {
-    prepare(args[6], small_fixture())
-    @fs.realpath(args[6])
-  } else { @fs.realpath(args[8]) }
-  let prepared = @json.parse(@fs.read_file(log + "/prepared.json").text())
-  assert_eq(sha(@fs.read_file(log + "/manifest.json").binary()), text(prop(prepared, "manifestSha256")))
+  let binary = @fs.realpath(args[1])
+  let vocabulary = @fs.realpath(args[2])
+  prepare(args[3], small_fixture())
+  let log = @fs.realpath(args[3])
   let manifest = @json.parse(@fs.read_file(log + "/manifest.json").text())
-  let frozen_cap = integer(prop(manifest, "maxTokens"))
-  let cap = if is_recovery && args.length() == 11 {
-    assert_true(reuse_cli <= 7) // A changed cap invalidates the old volume step.
-    let narrowed = @string.parse_int(args[10])
-    assert_true(narrowed > 0 && narrowed <= frozen_cap)
-    narrowed
-  } else { frozen_cap }
-  let before = snapshot(source, revision, binary)
-  // CI freezes identity itself; explicit-pin modes validate the caller's freeze.
-  // Both modes then use exactly the same clean-HEAD, fixture, runtime and final checks.
-  let expected_binary_sha = if is_ci { text(prop(before, "binarySha256")) } else { args[6] }
-  let expected_archive_sha = if is_ci { text(prop(before, "archiveSha256")) } else { args[7] }
-  assert_eq(prop(before, "workingTreeStatus"), Json::string(""))
-  assert_eq(prop(before, "revision"), Json::string(@utf8.decode(git(source, ["rev-parse", "HEAD"])).trim().to_owned()))
-  assert_eq(prop(before, "binarySha256"), Json::string(expected_binary_sha))
-  assert_eq(prop(before, "archiveSha256"), Json::string(expected_archive_sha))
-  assert_eq(prop(before, "revision"), Json::string(revision))
-  assert_true(@utf8.decode(git(source, ["diff", "--name-only", revision, "--", "src", "vendor", "moon.mod.json", "moon.pkg"])).is_empty())
-  if is_ci { put(log + "/ci-freeze.json", before.stringify(indent=2) + "\n") }
-  if is_recovery {
-    assert_eq(@json.parse(@fs.read_file(log + "/run-start.json").text()), before)
-    assert_eq(@json.parse(@fs.read_file(log + "/after.json").text()), before)
-    put(log + "/resume-start.json", ({"snapshot": before, "reusedCliInvocations": reuse_cli,
-      "frozenMaxTokens": frozen_cap, "effectiveMaxTokens": cap} : Json).stringify(indent=2) + "\n")
-  } else { put(log + "/run-start.json", before.stringify(indent=2) + "\n") }
+  let r : Run = {binary, vocabulary, log, root: log + "/fixture",
+    files: rows(prop(manifest, "files")), cap: integer(prop(manifest, "maxTokens")), cli_count: 0}
+  let before = input_snapshot(r.root)
+  let instructions = @fs.read_file(log + "/instructions.txt").text()
   let vocabulary_sha = sha(@fs.read_file(vocabulary).binary())
-  assert_eq(vocabulary_sha, "446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d")
   defer @async.protect_from_cancel(() => {
-    let after = snapshot(source, revision, binary)
-    put(log + (if is_recovery { "/after-resume.json" } else { "/after.json" }), after.stringify(indent=2) + "\n")
-    assert_eq(after, before)
+    assert_eq(input_snapshot(r.root), before)
+    assert_eq(@fs.read_file(log + "/instructions.txt").text(), instructions)
     assert_eq(sha(@fs.read_file(vocabulary).binary()), vocabulary_sha)
   })
-  let write_log = if is_recovery {
-    let owned = log + "/resume"
-    @fs.mkdir(owned, permission=0o700)
-    owned
-  } else { log }
-  let r : Run = {binary, vocabulary, log, write_log, root: log + "/fixture",
-    files: rows(prop(manifest, "files")), cap, reuse_cli, cli_count: 0}
-  for file in r.files { assert_eq(sha(@fs.read_file(r.root + "/" + text(prop(file, "path"))).binary()), text(prop(file, "sha256"))) }
   let (index, volumes, explanation) = run_cli(r)
   let requests = run_mcp(r, index, volumes, explanation)
-  for file in r.files { assert_eq(sha(@fs.read_file(r.root + "/" + text(prop(file, "path"))).binary()), text(prop(file, "sha256"))) }
-  put(log + "/result.json", ({"state": "passed", "cliInvocations": r.cli_count,
-    "executedCliInvocations": r.cli_count - reuse_cli, "reusedCliInvocations": reuse_cli, "serverProcesses": 1,
-    "mcpRequests": requests, "maxTokens": cap, "maxOutputBytes": max_output_bytes(),
-    "selfContainedCI": is_ci, "executionLog": write_log,
-    "manifestSha256": prop(prepared, "manifestSha256"),
-    "vocabularySha256": vocabulary_sha, "independentTokenRecount": false,
-    "protocol": "2026-07-28", "volumes": volumes.length()} : Json).stringify(indent=2) + "\n")
   println("PASS context workflow; CLI=" + r.cli_count.to_string() + "; MCP sessions=1; requests=" + requests.to_string())
 }

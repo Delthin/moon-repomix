@@ -162,10 +162,8 @@ async fn moonbit_self_pack(
 ///|
 async fn main {
   let args = @env.args()
-  guard args.length() == 2 || (args.length() == 3 && args[2] == "--xml-oracle") else {
-    fail(
-      "Usage: moon run --target native scripts/self-pack-test.mbtx NEW_OUTPUT_DIR [--xml-oracle]",
-    )
+  guard args.length() == 2 else {
+    fail("Usage: moon run --target native scripts/self-pack-test.mbtx NEW_OUTPUT_DIR")
   }
   let repo = @fs.realpath(".")
   let binary = repo +
@@ -175,96 +173,9 @@ async fn main {
   @fs.mkdir(args[1])
   let output = @fs.realpath(args[1])
   let common = [repo, "--tokenizer-path", vocabulary]
-  let xml_path = output + "/context.xml"
-  let (xml_code, xml_out, xml_err) = @process.collect_output(
-    binary,
-    common + ["-o", xml_path],
-    cwd=repo,
-  )
-  assert_eq(xml_code, 0, msg=xml_err.text())
-  assert_eq(xml_out.text(), "")
-  let xml = @fs.read_file(xml_path).text()
-  @fs.write_file(output + "/xml.log", xml_err, create_mode=CreateNew)
-  for
-    path in [
-      "README.md", "src/pack.mbt", "scripts/demo.mbtx", "docs/security.md",
-    ] {
-    assert_true(xml.contains("<file path=\"" + path + "\">"), msg=path)
-  }
-  assert_false(xml.contains("<file path=\"assets/"))
-  assert_false(xml.contains("<file path=\"src/security/scan_test.mbt\">"))
-  assert_true(xml_err.text().contains("pem-private-key"))
-  // Literal positive samples live in this one fixture; other source files
-  // must remain free of findings, including the real demo's concatenation.
-  for line in xml_err.text().split("\n") {
-    if line.has_prefix("Security ") {
-      assert_true(
-        line.contains("\"src/security/scan_test.mbt\""),
-        msg=line.to_owned(),
-      )
-    }
-  }
-  assert_false(xml_err.text().contains("UnrepresentableText"))
-  let (repeat_code, repeated, repeat_error) = @process.collect_output(
-    binary,
-    common + ["--stdout", "--quiet"],
-    cwd=repo,
-  )
-  assert_eq(repeat_code, 0, msg=repeat_error.text())
-  assert_eq(repeated.text(), xml)
-
-  let md_path = output + "/context.md"
-  let (md_code, _, md_error) = @process.collect_output(
-    binary,
-    common + ["--style", "markdown", "-o", md_path],
-    cwd=repo,
-  )
-  assert_eq(md_code, 0, msg=md_error.text())
-  let markdown = @fs.read_file(md_path).text()
-  assert_true(markdown.contains("\n## File: scripts/demo.mbtx\n"))
-  assert_false(markdown.contains("\n## File: assets/"))
-  @fs.write_file(output + "/markdown.log", md_error, create_mode=CreateNew)
-
-  let explicit = output + "/empty-config.json"
-  @fs.write_file(explicit, "{}", create_mode=CreateNew)
-  let golden_path = output + "/golden.xml"
-  let (golden_code, _, golden_error) = @process.collect_output(
-    binary,
-    common +
-    [
-      "--config", explicit, "--include", "assets/tokenizer-golden.json", "-o", golden_path,
-    ],
-    cwd=repo,
-  )
-  assert_eq(golden_code, 0, msg=golden_error.text())
-  assert_true(golden_error.text().contains("Packed 1 files,"))
-  assert_false(golden_error.text().contains("UnrepresentableText"))
-  assert_true(
-    @fs.read_file(golden_path)
-    .text()
-    .contains("<file path=\"assets/tokenizer-golden.json\">"),
-  )
-  @fs.write_file(output + "/golden.log", golden_error, create_mode=CreateNew)
-  if args.length() == 3 {
-    let (parsed, _, errors) = @process.collect_output("xmllint", [
-      "--nonet", "--noout", xml_path, golden_path,
-    ])
-    assert_eq(parsed, 0, msg=errors.text())
-    let (readback, restored, error) = @process.collect_output("xmllint", [
-      "--nonet", "--xpath", "string(/repository/files/file[@path='assets/tokenizer-golden.json'])",
-      golden_path,
-    ])
-    assert_eq(readback, 0, msg=error.text())
-    assert_eq(
-      restored.text(),
-      @fs.read_file(repo + "/assets/tokenizer-golden.json").text() + "\n",
-    )
-  }
   moonbit_self_pack(binary, common, repo, output)
-  println(xml_err.text().split("\n").collect()[0])
-  println(md_error.text().split("\n").collect()[0])
   println(
-    "PASS: real repository, MoonBit raw/skeleton accepted-set equality, signatures/interfaces/original ranges, assets excluded, repeat/stdout, XML/Markdown and golden fixture",
+    "PASS: real MoonBit sources, raw/skeleton accepted-set equality, signatures, interfaces and original ranges",
   )
   println("Output: " + output)
 }

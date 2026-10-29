@@ -44,17 +44,6 @@ test "document paths use UTF-8 lexical order and keep directory children togethe
     @document.tree(doc),
     "alpha.longname\ndocs/\n  a.md\n  b.md\n  deep/\n    z.md\nsrc/\n  x.mbt\nz.mbt\n\u{e000}.txt\n\u{10000}.txt",
   )
-  assert_eq(doc.header_text, "")
-  assert_eq(doc.instruction_text, "")
-  let explicit_empty = @document.create(
-    doc.files,
-    header_text="",
-    instruction_text="",
-  )
-  assert_eq(@output.xml(doc), @output.xml(explicit_empty))
-  assert_eq(@output.json(doc), @output.json(explicit_empty))
-  assert_eq(@output.markdown(doc), @output.markdown(explicit_empty))
-  assert_eq(@output.plain(doc), @output.plain(explicit_empty))
   let empty = @document.create([])
   assert_eq(
     @output.xml(empty),

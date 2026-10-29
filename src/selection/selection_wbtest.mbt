@@ -148,7 +148,6 @@ test "literal components and reused matching rows preserve Unicode, stars and pa
       let pattern = compile_pattern(raw, "test", 1, custom)
       let parts = path.split("/").map(p => p.to_owned()).collect()
       assert_eq(pattern.matches(path, is_dir), expected, msg=raw + ":" + path)
-      assert_eq(pattern.matches_parts(parts[:], is_dir), expected)
       assert_false(pattern.matches("not/a/match", false))
       assert_eq(pattern.matches_parts(parts[:], is_dir), expected)
     }

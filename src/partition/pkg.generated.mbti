@@ -7,15 +7,15 @@ import {
 }
 
 // Values
-pub fn partition(@document.Document, Int, render~ : (@document.Document) -> String raise, count~ : (String) -> Int raise, project_metadata~ : (Array[Int], Array[Int]) -> Json raise) -> Partition raise
+pub fn partition(@document.Document, Int32, render~ : (@document.Document) -> String raise, count~ : (String) -> Int32 raise, project_metadata~ : (Array[Int32], Array[Int32]) -> Json raise) -> Partition raise
 
 // Errors
 pub(all) suberror PartitionError {
-  InvalidCap(Int)
+  InvalidCap(Int32)
   DuplicatePath(String)
-  TemplateTooLarge(Int)
-  UnitTooLarge(UnitIdentity, Int)
-  InvalidCount(Int)
+  TemplateTooLarge(Int32)
+  UnitTooLarge(UnitIdentity, Int32)
+  InvalidCount(Int32)
   Overflow(String)
   InvalidTextEncoding
 } derive(Eq, @debug.Debug)
@@ -28,14 +28,14 @@ pub struct Partition {
   volumes : Array[Volume]
   index : Json
   index_text : String
-  index_tokens : Int
+  index_tokens : Int32
   total_tokens : Int64
 }
-pub fn Partition::with_index(Self, Json, count~ : (String) -> Int raise) -> Self raise
+pub fn Partition::with_index(Self, Json, count~ : (String) -> Int32 raise) -> Self raise
 
 pub(all) enum UnitIdentity {
   FilePath(String)
-  SectionIndex(Int)
+  SectionIndex(Int32)
 } derive(Eq, @debug.Debug)
 pub fn UnitIdentity::equal(Self, Self) -> Bool
 pub fn UnitIdentity::not_equal(Self, Self) -> Bool
@@ -45,10 +45,10 @@ pub struct Volume {
   id : String
   document : @document.Document
   text : String
-  tokens : Int
-  bytes : Int
-  file_indices : Array[Int]
-  section_indices : Array[Int]
+  tokens : Int32
+  bytes : Int32
+  file_indices : Array[Int32]
+  section_indices : Array[Int32]
 }
 
 // Type aliases

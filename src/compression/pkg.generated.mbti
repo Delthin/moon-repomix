@@ -30,8 +30,8 @@ pub fn BatchTicket::is_ready(Self) -> Bool
 pub(all) struct Definition {
   name : String
   qualified_name : String
-  start_line : Int
-  end_line : Int
+  start_line : Int32
+  end_line : Int32
   references : Array[String]
 } derive(Eq, @debug.Debug)
 pub fn Definition::equal(Self, Self) -> Bool
@@ -47,8 +47,8 @@ pub fn DefinitionIndex::not_equal(Self, Self) -> Bool
 pub fn DefinitionIndex::to_repr(Self) -> @debug.Repr
 
 pub(all) struct LineRange {
-  start_line : Int
-  end_line : Int
+  start_line : Int32
+  end_line : Int32
 } derive(Eq, @debug.Debug)
 pub fn LineRange::equal(Self, Self) -> Bool
 pub fn LineRange::not_equal(Self, Self) -> Bool
@@ -71,7 +71,7 @@ pub fn PlannedBatch::materialize(Self) -> Array[Outcome]
 type Planner
 pub async fn Planner::close(Self) -> Unit
 pub async fn Planner::compress(Self, Array[Source]) -> Array[Outcome]
-pub fn Planner::new(workers? : Int) -> Self raise PlannerError
+pub fn Planner::new(workers? : Int32) -> Self raise PlannerError
 pub fn Planner::submit(Self, Array[Source]) -> BatchTicket raise PlannerError
 
 pub(all) struct Source {

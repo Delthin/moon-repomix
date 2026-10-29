@@ -2,17 +2,17 @@
 package "Delthin/moon_repomix/git"
 
 // Values
-pub async fn checkout(String, revision? : String, history? : Int) -> Checkout
+pub async fn checkout(String, revision? : String, history? : Int32) -> Checkout
 
 pub async fn cleanup(Checkout) -> Unit
 
-pub async fn collect(String, diffs? : Bool, logs? : Int, max_bytes? : Int, accept_diff? : async (Array[String]) -> Bool) -> Snapshot
+pub async fn collect(String, diffs? : Bool, logs? : Int32, max_bytes? : Int32, accept_diff? : async (Array[String]) -> Bool) -> Snapshot
 
 // Errors
 pub(all) suberror GitError {
   InvalidInput(String)
   NotRepository
-  CommandFailed(String, Int)
+  CommandFailed(String, Int32)
   InvalidOutput
   OutputLimit
 }

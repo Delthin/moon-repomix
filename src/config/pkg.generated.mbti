@@ -50,10 +50,10 @@ pub(all) struct Cli {
   report_json : Bool
   mcp : Bool
   webui : Bool
-  webui_port : Int
-  mcp_max_tokens : Int
-  mcp_max_output_bytes : Int
-  mcp_max_volumes : Int
+  webui_port : Int32
+  mcp_max_tokens : Int32
+  mcp_max_output_bytes : Int32
+  mcp_max_volumes : Int32
   quiet : Bool
   verbose : Bool
   patch : Patch
@@ -80,10 +80,10 @@ pub(all) struct Options {
   output_file_path_style : PathStyle
   include_diffs : Bool
   include_logs : Bool
-  include_logs_count : Int
+  include_logs_count : Int32
   remote : String?
   remote_branch : String?
-  max_git_bytes : Int
+  max_git_bytes : Int32
   include_patterns : Array[String]
   file_paths : Array[String]?
   ignore : Array[String]
@@ -92,11 +92,11 @@ pub(all) struct Options {
   use_default_patterns : Bool
   security_check : Bool
   encoding : String
-  token_budget : Int?
-  top_files_length : Int
+  token_budget : Int32?
+  top_files_length : Int32
   token_count_tree : TokenCountTree
-  max_file_size : Int
-  max_files : Int
+  max_file_size : Int32
+  max_files : Int32
   max_total_size : Int64
   tokenizer_path : String?
   quiet : Bool
@@ -122,10 +122,10 @@ pub(all) struct Patch {
   mut output_file_path_style : PathStyle?
   mut include_diffs : Bool?
   mut include_logs : Bool?
-  mut include_logs_count : Int?
+  mut include_logs_count : Int32?
   mut remote : String?
   mut remote_branch : String?
-  mut max_git_bytes : Int?
+  mut max_git_bytes : Int32?
   mut include_patterns : Array[String]
   mut ignore : Array[String]
   mut use_gitignore : Bool?
@@ -133,11 +133,11 @@ pub(all) struct Patch {
   mut use_default_patterns : Bool?
   mut security_check : Bool?
   mut encoding : String?
-  mut token_budget : Int?
-  mut top_files_length : Int?
+  mut token_budget : Int32?
+  mut top_files_length : Int32?
   mut token_count_tree : TokenCountTree?
-  mut max_file_size : Int?
-  mut max_files : Int?
+  mut max_file_size : Int32?
+  mut max_files : Int32?
   mut max_total_size : Int64?
   mut tokenizer_path : String?
 } derive(@debug.Debug)
@@ -155,7 +155,7 @@ pub fn PathStyle::to_repr(Self) -> @debug.Repr
 
 pub(all) enum SplitOutput {
   Disabled
-  Enabled(Int)
+  Enabled(Int32)
 } derive(Eq, @debug.Debug)
 pub fn SplitOutput::equal(Self, Self) -> Bool
 pub fn SplitOutput::not_equal(Self, Self) -> Bool
@@ -182,7 +182,7 @@ pub fn Style::to_repr(Self) -> @debug.Repr
 
 pub(all) enum TokenCountTree {
   Disabled
-  Enabled(Int)
+  Enabled(Int32)
 } derive(Eq, @debug.Debug)
 pub fn TokenCountTree::equal(Self, Self) -> Bool
 pub fn TokenCountTree::not_equal(Self, Self) -> Bool

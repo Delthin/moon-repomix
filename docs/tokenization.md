@@ -137,4 +137,4 @@ moon info src/metrics --target native
 
 缓存名是公开词表 URL 的 SHA-1；资源完整性由 tiktoken 和本库分别检查 SHA-256。工具准备完成后，缓存使黄金数据生成可离线执行。从其他工作目录启动测试时，将 `TOKENIZER_ASSETS` 设为夹具目录的绝对路径；运行时加载只需要词表绝对路径。
 
-夹具对应 `moonc v0.10.15+943464bfa`。独立 `.mbtx` 脚本自行解析依赖，产品测试使用 `moon.mod` 中的固定依赖；native CI 还验证安装和归档解包后从其他工作目录加载资源。
+夹具最初在 `moonc v0.10.15+943464bfa` 下验证；当前固定工具链为 `moonc v0.10.17+d971670cd`，期望 token ID 与资源 SHA-256 保持不变。独立 `.mbtx` 脚本自行解析依赖，产品测试使用 `moon.mod` 中的固定依赖；native CI 还验证安装和归档解包后从其他工作目录加载资源。

@@ -7,7 +7,7 @@ import {
 }
 
 // Values
-pub async fn serve(@config.Options, @moon_repomix.Runtime, String, port? : Int) -> Unit
+pub async fn serve(@config.Options, @moon_repomix.Runtime, String, port? : Int32) -> Unit
 
 // Errors
 

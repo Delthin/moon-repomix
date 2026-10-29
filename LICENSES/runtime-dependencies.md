@@ -4,8 +4,8 @@
 
 | 组件 | 版本与来源 | 许可 |
 | --- | --- | --- |
-| MoonBit core | `0.10.15+943464bfa`，[moonbitlang/core](https://github.com/moonbitlang/core) | Apache-2.0 |
-| MoonBit native runtime | 随工具链 `0.10.15+943464bfa` 提供 | Apache-2.0 |
+| MoonBit core | `0.10.17+d971670cd`，[moonbitlang/core](https://github.com/moonbitlang/core) | Apache-2.0 |
+| MoonBit native runtime | 随工具链 `0.10.17+d971670cd` 提供 | Apache-2.0 |
 | moonbitlang/async | `0.19.2`，[源码](https://github.com/moonbitlang/async) | Apache-2.0 |
 | moonbitlang/x | `0.5.5`，[源码](https://github.com/moonbitlang/x)；用于路径处理与 SHA-256 | Apache-2.0 |
 | Tree-sitter runtime | `0.25.3` | MIT，`tree-sitter-runtime-MIT.txt` |

@@ -6,11 +6,11 @@ import {
 }
 
 // Values
-pub async fn read(String, Int) -> ReadResult
+pub async fn read(String, Int32) -> ReadResult
 
-pub async fn read_metered(String, Int, Int64) -> MeteredRead
+pub async fn read_metered(String, Int32, Int64) -> MeteredRead
 
-pub async fn read_validated_metered(String, Int, Int64) -> ValidatedMeteredRead
+pub async fn read_validated_metered(String, Int32, Int64) -> ValidatedMeteredRead
 
 // Errors
 pub(all) suberror TotalSizeLimitExceeded
@@ -28,8 +28,8 @@ pub(all) enum ReadResult {
 
 pub(all) struct Snapshot {
   text : String
-  disk_bytes : Int
-  bom_bytes : Int
+  disk_bytes : Int32
+  bom_bytes : Int32
 }
 
 pub(all) struct ValidatedMeteredRead {

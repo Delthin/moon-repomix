@@ -6,7 +6,7 @@ pub async fn serve(Info, handler~ : async (String, Json) -> Json, limits? : Limi
 
 // Errors
 pub(all) suberror RpcError {
-  Protocol(code~ : Int, message~ : String, data~ : Json)
+  Protocol(code~ : Int32, message~ : String, data~ : Json)
 }
 
 // Types and methods
@@ -18,9 +18,9 @@ pub(all) struct Info {
 }
 
 pub(all) struct Limits {
-  max_line_bytes : Int
-  max_in_flight : Int
-  timeout_ms : Int
+  max_line_bytes : Int32
+  max_in_flight : Int32
+  timeout_ms : Int32
 }
 pub fn Limits::default() -> Self
 

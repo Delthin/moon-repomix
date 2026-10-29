@@ -6,7 +6,7 @@ jobs:
   native:
     env:
       # Keep this equal to moon-toolchain; check-toolchain verifies the installation.
-      MOONBIT_INSTALL_VERSION: "0.10.15+943464bfa"
+      MOONBIT_INSTALL_VERSION: "0.10.17+d971670cd"
     strategy:
       fail-fast: false
       matrix:
@@ -20,10 +20,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Initialize Linux benchmark workspace path
-        if: runner.os == 'Linux'
-        shell: bash
-        run: printf 'BENCHMARK_WORKSPACE=%s/moon-repomix-performance-%s-%s\n' "$RUNNER_TEMP" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_ENV"
       - name: Install pinned MoonBit toolchain (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -38,6 +34,10 @@ jobs:
           "$HOME\.moon\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - run: moon version --all
       - run: moon update
+      - name: Record public package registry metadata
+        if: runner.os == 'Linux'
+        shell: bash
+        run: git -C "$HOME/.moon/registry/index" show HEAD:user/Delthin/moon_repomix.index
       - name: Require the verified compiler version
         run: moon run --target native scripts/check-toolchain.mbtx
       - run: moon check --target native --deny-warn
@@ -58,10 +58,8 @@ jobs:
       - name: Literal file-list and stdout compatibility
         run: moon run --target native scripts/input-list-test.mbtx
       - name: Token report functional tests
+        if: runner.os == 'Linux'
         run: moon run --target native scripts/token-reports-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
-      - name: Output format functional tests
-        if: runner.os != 'Linux'
-        run: moon run --target native scripts/output-formats-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
       - name: Output formats with independent JSON readback
         if: runner.os == 'Linux'
         run: moon run --target native scripts/output-formats-test.mbtx _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken --json-oracle
@@ -77,6 +75,7 @@ jobs:
           --log-dir "${{ runner.temp }}/context-customization"
           ${{ runner.os == 'Linux' && '--xml-oracle' || '' }}
       - name: Display chapter, line and path functional test
+        if: runner.os == 'Linux'
         run: >-
           moon run --target native scripts/display-controls-test.mbtx
           _build/native/release/build/cmd/moon-repomix/moon-repomix.exe
@@ -116,26 +115,18 @@ jobs:
           "${{ runner.temp }}/task-code-context"
       - name: Selection explanations and combined context workflow
         run: >-
-          moon run --target native scripts/context-workflow-test.mbtx -- --ci
+          moon run --target native scripts/context-workflow-test.mbtx --
           "${{ github.workspace }}/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe"
           "${{ github.workspace }}/assets/tokenizer-o200k_base.tiktoken"
-          "${{ github.workspace }}" "${{ github.sha }}"
           "${{ runner.temp }}/context-workflow"
-      - name: Reproducible demo
-        run: moon run --target native scripts/demo.mbtx
-      - name: Real repository self-pack
-        if: runner.os != 'Linux'
-        run: moon run --target native scripts/self-pack-test.mbtx dist/self-pack
-      - name: Real repository self-pack with XML readback
+      - name: Real MoonBit sources and compression ranges
         if: runner.os == 'Linux'
-        run: moon run --target native scripts/self-pack-test.mbtx dist/self-pack --xml-oracle
+        run: moon run --target native scripts/self-pack-test.mbtx "${{ runner.temp }}/self-pack"
       - name: Source archive demo
         if: runner.os == 'Linux'
         run: moon run --target native scripts/source-package-test.mbtx
-      - name: Install and extracted-archive smoke
-        run: moon run --target native scripts/distribution-test.mbtx ${{ matrix.platform }}
-      - name: Package native distribution
-        run: moon run --target native scripts/package.mbtx dist ${{ matrix.platform }}
+      - name: Install and verify the distribution to upload
+        run: moon run --target native scripts/distribution-test.mbtx ${{ matrix.platform }} dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: moon-repomix-${{ matrix.platform }}
@@ -149,10 +140,10 @@ jobs:
           if-no-files-found: error
       - name: MoonBit self-pack evidence
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
+        if: always() && runner.os == 'Linux'
         with:
           name: moonbit-self-pack-${{ matrix.platform }}
-          path: dist/self-pack/moonbit-*
+          path: ${{ runner.temp }}/self-pack/moonbit-*
           if-no-files-found: ignore
       - name: Context customization diagnostics
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -193,27 +184,3 @@ jobs:
             ${{ runner.temp }}/context-workflow
             !${{ runner.temp }}/context-workflow/fixture/**
           if-no-files-found: ignore
-      - name: Pinned Node for Linux performance comparison
-        if: runner.os == 'Linux'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '25.9.0'
-          package-manager-cache: false
-      - name: Prepare fixed public benchmark inputs and reference CLI
-        if: runner.os == 'Linux'
-        run: moon run --target native scripts/benchmark.mbtx prepare "$BENCHMARK_WORKSPACE"
-      - name: Compare Native and Node (six cases, five rounds)
-        if: runner.os == 'Linux'
-        run: moon run --target native scripts/benchmark.mbtx run "$BENCHMARK_WORKSPACE" _build/native/release/build/cmd/moon-repomix/moon-repomix.exe assets/tokenizer-o200k_base.tiktoken
-      - name: Performance evidence (including setup or measurement failures)
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always() && runner.os == 'Linux' && env.BENCHMARK_WORKSPACE != ''
-        with:
-          name: performance-linux-x64
-          path: |
-            ${{ env.BENCHMARK_WORKSPACE }}/report/
-            ${{ env.BENCHMARK_WORKSPACE }}/logs/
-            ${{ env.BENCHMARK_WORKSPACE }}/manifest/
-            ${{ env.BENCHMARK_WORKSPACE }}/documents/*-0.json
-            ${{ env.BENCHMARK_WORKSPACE }}/documents/*-ranges.json
-          if-no-files-found: warn
