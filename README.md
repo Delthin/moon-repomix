@@ -2,11 +2,11 @@
 
 把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。使用 MoonBit native 实现，提供 CLI、SDK 和本地浏览器工作台；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
 
-当前版本 **v0.5.1**，提供 [三平台安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.5.1) 和 [Mooncakes SDK](https://mooncakes.io/docs/Delthin/moon_repomix@0.5.1)。本版新增完整实现读取、累计预算补读和任务上下文规划；原有 CLI、工作台、混合全文/骨架及精确分卷用法保持一致。完整变化见 [Changelog](CHANGELOG.md)，升级步骤见 [迁移指南](docs/migration.md)。
+当前源码为 **v0.5.1 发行候选**，已使用 MoonBit `0.10.17+d971670cd` 通过三平台 CI；Mooncakes 上传与真实 SDK 消费尚待完成，正式安装包以 [Releases](https://github.com/Delthin/moon-repomix/releases) 为准。v0.5 系列新增完整实现读取、累计预算补读和任务上下文规划；原有 CLI、工作台、混合全文/骨架及精确分卷用法保持一致。完整变化见 [Changelog](CHANGELOG.md)，升级步骤见 [迁移指南](docs/migration.md)。
 
 ## 安装与第一次运行
 
-从 [v0.5.1 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.5.1) 下载平台归档，用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 的相对位置，在解压目录运行：
+发行确认后，从 [v0.5.1 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.5.1) 下载平台归档，用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 的相对位置，在解压目录运行：
 
 ```sh
 ./bin/moon-repomix /path/to/project
@@ -90,7 +90,7 @@ moon-repomix --webui
 
 ## SDK
 
-SDK 模块为 [`Delthin/moon_repomix@0.5.1`](https://mooncakes.io/docs/Delthin/moon_repomix@0.5.1)。在调用项目的 `moon.mod` 中声明依赖，在 `moon.pkg` 导入：
+本候选对应 SDK 版本为 `Delthin/moon_repomix@0.5.1`，目前尚未确认入库；请在 [Mooncakes](https://mooncakes.io/docs/Delthin/moon_repomix) 确认发行版本后，再在调用项目的 `moon.mod` 中声明依赖、在 `moon.pkg` 导入：
 
 ```moonbit
 import {

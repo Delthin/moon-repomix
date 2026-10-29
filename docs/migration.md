@@ -2,6 +2,8 @@
 
 ## 升级到 v0.5.1
 
+v0.5.1 当前为发行候选；请在 GitHub 和 Mooncakes 均确认该版本可用后，按下列步骤升级。源码构建可先使用本页固定的工具链。
+
 升级 CLI 时下载 [v0.5.1 安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.5.1)，使用 SDK 时将 `moon.mod` 中的 `Delthin/moon_repomix` 依赖更新到 `0.5.1`，再运行 `moon update`。
 
 从 v0.5.0 升级时，CLI、配置和 SDK 接口保持兼容。源码构建与 SDK 消费使用固定的 MoonBit **0.10.17+d971670cd**；安装包包含原生程序与运行资源，无须另装编译器。测试整理保留核心行为检查，并集中运行重复的平台无关集成场景。
