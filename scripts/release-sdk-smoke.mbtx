@@ -1,0 +1,582 @@
+----
+import {
+  "Delthin/moon_repomix@0.5.1" @repomix,
+  "moonbitlang/async@0.19.2",
+  "moonbitlang/async@0.19.2/fs",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+}
+----
+
+// Registry-only v0.5.1 consumer. Run from an independent directory after resolving
+// the published package and checking its ZIP and bundled tokenizer resources.
+
+///|
+let evidence_root : String = {
+  let args = @env.args()
+  guard args.length() == 2 && args[1].has_prefix("/") else {
+    abort("Expected one absolute owned evidence directory")
+  }
+  args[1]
+}
+
+///|
+let header : String = "Registry SDK v0.5.1: inspect public declarations and preserved implementation."
+
+///|
+let inventory_signature : String = "pub fn inventory_total(values : Array[Int], offset~ : Int = 1) -> Int"
+
+///|
+let inventory_source : String = "///| Inventory totals retain their public signature.\n" +
+  inventory_signature +
+  " {\n" +
+  "  let mut total = offset\n" +
+  "  for value in values {\n" +
+  "    total += value\n" +
+  "    total += 0\n".repeat(70) +
+  "  }\n  total\n}\n"
+
+///|
+let preserved_signature : String = "pub fn preserved_total(values : Array[Int], multiplier~ : Int = 2) -> Int"
+
+///|
+let preserved_source : String = "///| This complete implementation is explicitly preserved.\n" +
+  preserved_signature +
+  " {\n" +
+  "  let mut total = 0\n" +
+  "  for value in values {\n" +
+  "    total += value * multiplier\n" +
+  "    total += 3\n".repeat(90) +
+  "  }\n  total\n}\n"
+
+///|
+let answer_source : String = "export function answer(value) {\n" +
+  "  const doubled = value * 2;\n" +
+  "  if (doubled > 40) return doubled;\n" +
+  "  return 42;\n}\n"
+
+///|
+let answer_padding : String = "// CONTEXT_PADDING_SENTINEL: unrelated repository background.\n".repeat(
+  400,
+)
+
+///|
+let answer_file : String = answer_padding + answer_source + answer_padding
+
+///|
+fn field(value : Json, key : String) -> Json {
+  guard value is Object(fields) else { abort("expected JSON object: \{key}") }
+  guard fields.get(key) is Some(found) else {
+    abort("missing JSON field: \{key}")
+  }
+  found
+}
+
+///|
+fn items(value : Json) -> Array[Json] {
+  guard value is Array(found) else { abort("expected JSON array") }
+  found
+}
+
+///|
+fn text(value : Json) -> String {
+  guard value is String(found) else { abort("expected JSON string") }
+  found
+}
+
+///|
+fn object_size(value : Json) -> Int32 {
+  guard value is Object(fields) else { abort("expected JSON object") }
+  fields.length()
+}
+
+///|
+fn numbered(source : String) -> String {
+  let lines = source.split("\n").collect()
+  let mut output = ""
+  for i, line in lines {
+    if i == lines.length() - 1 && line.is_empty() {
+      continue
+    }
+    output += "\{i + 1}: \{line}"
+    if i < lines.length() - 1 {
+      output += "\n"
+    }
+  }
+  output
+}
+
+///|
+fn verify_render(
+  rendered : String,
+  tokens : Int32,
+  bytes : Int32,
+  document : @repomix.Document,
+  runtime : @repomix.Runtime,
+) -> Unit raise {
+  assert_eq(tokens, runtime.encoder.count(rendered))
+  assert_eq(tokens, runtime.encoder.encode(rendered).length())
+  assert_eq(bytes, @utf8.encode(rendered).length())
+  assert_true(tokens > 0)
+  assert_eq(document.header_text, header)
+  assert_eq(document.sections.length(), 0)
+  let json = @json.parse(rendered)
+  assert_eq(text(field(json, "headerText")), header)
+  let files = field(json, "files")
+  assert_eq(object_size(files), document.files.length())
+  for file in document.files {
+    assert_eq(text(field(files, file.path)), numbered(file.text))
+  }
+  assert_false(rendered.contains("not-listed.txt"))
+  assert_false(rendered.contains("UNLISTED_BODY_SENTINEL"))
+}
+
+///|
+async fn save(name : String, content : String) -> Unit {
+  @fs.write_file(
+    "\{evidence_root}/\{name}",
+    content,
+    create_mode=@fs.CreateMode::CreateNew,
+  )
+}
+
+///|
+async fn verify_progressive_context(
+  fixture : String,
+  runtime : @repomix.Runtime,
+) -> Json {
+  // Separate host options: the original pack allowlist and assertions stay intact.
+  let options = @repomix.options(
+    fixture,
+    style=@repomix.Style::Json,
+    header_text=header,
+    file_paths=Some(["answer.js"]),
+  )
+  assert_true(options.security_check)
+  let requests : Array[Json] = [{ "path": "answer.js", "symbols": ["answer"] }]
+  let spec = @repomix.CodeContextSpec::from_json({
+    "maxTokens": 100000,
+    "requests": requests,
+  })
+  assert_eq(spec.max_tokens, 100000)
+  let code = @repomix.read_code_context(options, runtime, spec)
+  save("code-context-audit.json", code.audit.stringify(indent=2) + "\n")
+  if code.text is Some(body) {
+    save("code-context.json", body)
+  }
+  assert_eq(code.status, "complete")
+  assert_true(code.security is @repomix.SecurityStatus::Passed)
+  assert_eq(code.required_tokens, None)
+  guard code.text is Some(code_text) else { abort("missing code context body") }
+  assert_true(code.tokens > 1)
+  assert_eq(runtime.encoder.count(code_text), code.tokens)
+  assert_eq(runtime.encoder.encode(code_text).length(), code.tokens)
+  assert_eq(@utf8.encode(code_text).length(), code.bytes)
+  let payload = @json.parse(code_text)
+  assert_eq(field(payload, "schemaVersion"), (1).to_json())
+  assert_eq(text(field(payload, "headerText")), header)
+  assert_eq(field(payload, "audit"), code.audit)
+  let files = items(field(payload, "files"))
+  assert_eq(files.length(), 1)
+  assert_eq(text(field(files[0], "path")), "answer.js")
+  assert_eq(text(field(files[0], "mode")), "ranges")
+  let fragments = items(field(files[0], "fragments"))
+  assert_eq(fragments.length(), 1)
+  // Independent expected fixture coordinates and the COMPLETE original function.
+  assert_eq(field(fragments[0], "startLine"), (401).to_json())
+  assert_eq(field(fragments[0], "endLine"), (405).to_json())
+  assert_eq(text(field(fragments[0], "text")), answer_source)
+  assert_false(code_text.contains("CONTEXT_PADDING_SENTINEL"))
+
+  let exact = @repomix.read_code_context(
+    options,
+    runtime,
+    @repomix.CodeContextSpec::from_json({
+      "maxTokens": code.tokens,
+      "requests": requests,
+    }),
+  )
+  save("code-context-exact-audit.json", exact.audit.stringify(indent=2) + "\n")
+  if exact.text is Some(body) {
+    save("code-context-exact.json", body)
+  }
+  assert_eq(exact.status, "complete")
+  assert_true(exact.security is @repomix.SecurityStatus::Passed)
+  assert_eq(exact.text, Some(code_text))
+  assert_eq(exact.required_tokens, None)
+  assert_eq(exact.tokens, code.tokens)
+  assert_eq(exact.bytes, code.bytes)
+  assert_eq(runtime.encoder.count(exact.text.unwrap()), exact.tokens)
+  assert_eq(runtime.encoder.encode(exact.text.unwrap()).length(), exact.tokens)
+  assert_eq(@utf8.encode(exact.text.unwrap()).length(), exact.bytes)
+
+  let short = @repomix.read_code_context(
+    options,
+    runtime,
+    @repomix.CodeContextSpec::from_json({
+      "maxTokens": code.tokens - 1,
+      "requests": requests,
+    }),
+  )
+  save(
+    "code-context-over-budget.json",
+    (
+      {
+        "status": short.status,
+        "text": short.text,
+        "tokens": short.tokens,
+        "bytes": short.bytes,
+        "requiredTokens": short.required_tokens,
+        "audit": short.audit,
+      } : Json).stringify(indent=2) +
+    "\n",
+  )
+  assert_eq(short.status, "over_budget")
+  assert_true(short.security is @repomix.SecurityStatus::Passed)
+  assert_eq(short.text, None)
+  assert_eq(short.tokens, 0)
+  assert_eq(short.bytes, 0)
+  assert_eq(short.required_tokens, Some(code.tokens))
+  assert_eq(short.audit, code.audit)
+  println(
+    "read_code_context: complete answer, no padding; tokens=\{code.tokens}; exact cap passed; cap-1 over_budget",
+  )
+
+  let task_spec = @repomix.TaskContextSpec::from_json({
+    "maxTokens": 100000,
+    "tasks": [
+      {
+        "id": "review-answer",
+        "required": [{ "path": "answer.js", "mode": "full" }],
+      },
+    ],
+  })
+  assert_eq(task_spec.max_tokens, 100000)
+  let task = @repomix.plan_task_context(options, runtime, task_spec)
+  save("task-context-audit.json", task.audit_text)
+  if task.text is Some(body) {
+    save("task-context.json", body)
+  }
+  assert_eq(task.status, "complete")
+  assert_true(task.security is @repomix.SecurityStatus::Passed)
+  guard task.text is Some(task_text) else { abort("missing task context body") }
+  assert_true(task.tokens > 0 && task.tokens <= task_spec.max_tokens)
+  assert_eq(runtime.encoder.count(task_text), task.tokens)
+  assert_eq(runtime.encoder.encode(task_text).length(), task.tokens)
+  assert_eq(@utf8.encode(task_text).length(), task.bytes)
+  assert_eq(runtime.encoder.count(task.audit_text), task.audit_tokens)
+  assert_eq(runtime.encoder.encode(task.audit_text).length(), task.audit_tokens)
+  assert_eq(@utf8.encode(task.audit_text).length(), task.audit_bytes)
+  assert_eq(@json.parse(task.audit_text), task.audit)
+  let task_payload = @json.parse(task_text)
+  assert_eq(text(field(task_payload, "headerText")), header)
+  let task_files = field(task_payload, "files")
+  assert_eq(object_size(task_files), 1)
+  // Full means exact file, including padding; code context above must omit it.
+  assert_eq(text(field(task_files, "answer.js")), answer_file)
+  println(
+    "plan_task_context: required answer.js full; tokens=\{task.tokens}; auditTokens=\{task.audit_tokens}; independent counts passed",
+  )
+  {
+    "file": "answer.js",
+    "code": {
+      "status": code.status,
+      "tokens": code.tokens,
+      "bytes": code.bytes,
+      "exactCap": exact.tokens,
+      "smallerCap": code.tokens - 1,
+      "smallerCapStatus": short.status,
+      "requiredTokens": short.required_tokens,
+    },
+    "task": {
+      "status": task.status,
+      "mode": "full",
+      "tokens": task.tokens,
+      "bytes": task.bytes,
+      "auditTokens": task.audit_tokens,
+      "auditBytes": task.audit_bytes,
+    },
+  }
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 2 && args[1] == evidence_root else {
+    abort("pass exactly the authorized absolute registry-smoke evidence root")
+  }
+  guard @fs.exists(evidence_root) else { abort("evidence root missing") }
+  let ranks = "\{evidence_root}/resources/assets/tokenizer-o200k_base.tiktoken"
+  guard @fs.exists(ranks) &&
+    @fs.exists("\{evidence_root}/resources/assets/tokenizer-unicode-16.0.0.txt") else {
+    abort("stage verified tokenizer assets before running")
+  }
+  let fixture = "\{evidence_root}/work/fixture"
+  guard !@fs.exists(fixture) else {
+    abort(
+      "fixture already exists; preserve previous evidence rather than overwrite",
+    )
+  }
+  @fs.mkdir(fixture, recursive=true)
+  @fs.write_file(
+    "\{fixture}/inventory.mbt",
+    inventory_source,
+    create_mode=@fs.CreateMode::CreateNew,
+  )
+  @fs.write_file(
+    "\{fixture}/preserved.mbt",
+    preserved_source,
+    create_mode=@fs.CreateMode::CreateNew,
+  )
+  @fs.write_file(
+    "\{fixture}/not-listed.txt",
+    "UNLISTED_BODY_SENTINEL\n",
+    create_mode=@fs.CreateMode::CreateNew,
+  )
+
+  @fs.write_file(
+    "\{fixture}/answer.js",
+    answer_file,
+    create_mode=@fs.CreateMode::CreateNew,
+  )
+
+  let selected = ["inventory.mbt", "preserved.mbt"]
+  let options = @repomix.options(
+    fixture,
+    style=@repomix.Style::Json,
+    compress=true,
+    keep_full_patterns=["preserved.mbt"],
+    header_text=header,
+    show_line_numbers=true,
+    file_paths=Some(selected),
+  )
+  assert_true(options.security_check)
+  let runtime = @repomix.Runtime::load(ranks)
+  assert_eq(@repomix.version(), "0.5.1")
+  println("version: \{@repomix.version()}")
+  let result = @repomix.pack(options, runtime)
+  // Save actual responses before assertions, retaining diagnostics on failure.
+  save("pack.json", result.text)
+  save(
+    "pack-metadata.json",
+    result.document.metadata.stringify(indent=2) + "\n",
+  )
+  assert_true(result.security is @repomix.SecurityStatus::Passed)
+  assert_eq(result.findings.length(), 0)
+  assert_eq(result.files.map(file => file.path), selected)
+  assert_eq(result.document.files.map(file => file.path), selected)
+  assert_eq(result.document.files[1].text, preserved_source)
+  assert_true(result.document.files[0].text.contains(inventory_signature))
+  assert_true(result.document.files[1].text.contains(preserved_signature))
+  assert_false(result.document.files[0].text.contains("total += 0"))
+  assert_false(result.document.files[0].text.contains("total += value"))
+  assert_true(result.files[0].original_tokens > result.files[0].tokens)
+  assert_eq(result.files[1].original_tokens, result.files[1].tokens)
+  assert_eq(result.files[0].disk_bytes, @utf8.encode(inventory_source).length())
+  assert_eq(result.files[1].disk_bytes, @utf8.encode(preserved_source).length())
+  verify_render(
+    result.text,
+    result.tokens,
+    result.bytes,
+    result.document,
+    runtime,
+  )
+  let compression = items(field(result.document.metadata, "compression"))
+  assert_eq(compression.length(), 2)
+  let entries = Map::from_array(
+    compression.map(entry => (text(field(entry, "path")), entry)),
+  )
+  let compressed = entries["inventory.mbt"]
+  assert_true(field(compressed, "applied") is True)
+  assert_eq(text(field(compressed, "language")), "moonbit")
+  assert_true(items(field(compressed, "ranges")).length() > 0)
+  let kept = entries["preserved.mbt"]
+  assert_true(field(kept, "applied") is False)
+  assert_eq(text(field(kept, "reason")), "kept-full")
+  assert_true(field(kept, "language") is Null)
+  assert_eq(items(field(kept, "ranges")).length(), 0)
+  let overview = field(
+    field(@json.parse(result.text), "metadata"),
+    "compression",
+  )
+  assert_eq(field(overview, "keptFull"), (1).to_json())
+  println(
+    "pack: tokens=\{result.tokens} bytes=\{result.bytes}; kept-full + AST compression passed",
+  )
+
+  let explanation = @repomix.explain_selection(options, [
+    "inventory.mbt", "preserved.mbt", "not-listed.txt",
+  ])
+  save(
+    "explain-selection.json",
+    explanation.to_json().stringify(indent=2) + "\n",
+  )
+  assert_true(explanation.security is @repomix.SecurityStatus::Passed)
+  assert_eq(explanation.paths.length(), 3)
+  assert_eq(explanation.candidate_count, 2)
+  assert_eq(explanation.accepted_count, 2)
+  assert_eq(
+    explanation.read_bytes,
+    (@utf8.encode(inventory_source).length() +
+    @utf8.encode(preserved_source).length()).to_int64(),
+  )
+  let decisions = Map::from_array(
+    explanation.paths.map(path => (path.path, path)),
+  )
+  for path in selected {
+    let decision = decisions[path]
+    assert_true(decision.eligible)
+    assert_eq(decision.status, "accepted")
+    assert_eq(decision.stage, "complete")
+    assert_eq(decision.reason, "Accepted")
+    assert_eq(decision.finding_count, 0)
+  }
+  let unlisted = decisions["not-listed.txt"]
+  assert_false(unlisted.eligible)
+  assert_eq(unlisted.status, "excluded")
+  assert_eq(unlisted.stage, "selection")
+  assert_eq(unlisted.reason, "NotListed")
+  assert_eq(unlisted.finding_count, 0)
+  println("explain_selection: accepted=2; hostNotListed=1; scan=Passed")
+
+  // Derive a cap ONLY from separately rendered complete single-file packs.
+  // FileStats body tokens are never summed to predict whole-document tokens.
+  let single_counts : Array[Int32] = []
+  for path in selected {
+    let single = @repomix.pack(
+      { ..options, file_paths: Some([path]), },
+      runtime,
+    )
+    save("single-\{path}.json", single.text)
+    assert_eq(single.files.map(file => file.path), [path])
+    assert_true(single.security is @repomix.SecurityStatus::Passed)
+    verify_render(
+      single.text,
+      single.tokens,
+      single.bytes,
+      single.document,
+      runtime,
+    )
+    single_counts.push(runtime.encoder.count(single.text))
+  }
+  let largest_single = if single_counts[0] > single_counts[1] {
+    single_counts[0]
+  } else {
+    single_counts[1]
+  }
+  assert_true(largest_single < result.tokens)
+  let cap = largest_single + (result.tokens - largest_single) / 2
+  assert_true(cap >= largest_single && cap < result.tokens)
+  println(
+    "single whole-document counts=\{single_counts[0]},\{single_counts[1]}; combined=\{result.tokens}; cap=\{cap}",
+  )
+  let volumes = @repomix.pack_volumes(options, runtime, max_tokens=cap)
+  let partition = volumes.partition
+  save("index.json", partition.index_text)
+  assert_true(volumes.security is @repomix.SecurityStatus::Passed)
+  assert_eq(volumes.findings.length(), 0)
+  assert_eq(volumes.files.map(file => file.path), selected)
+  assert_eq(partition.volumes.length(), 2)
+  assert_eq(volumes.file_names.length(), 2)
+  assert_eq(@json.parse(partition.index_text), partition.index)
+  assert_true(partition.index_text.has_suffix("\n"))
+  assert_eq(field(partition.index, "schemaVersion"), (1).to_json())
+  assert_eq(field(partition.index, "metadata"), result.document.metadata)
+  assert_eq(object_size(field(partition.index, "files")), 2)
+  assert_eq(object_size(field(partition.index, "sections")), 0)
+  let index_volumes = items(field(partition.index, "volumes"))
+  assert_eq(index_volumes.length(), 2)
+  let seen : Map[String, String] = Map([])
+  let summaries : Array[Json] = []
+  let mut total = runtime.encoder.count(partition.index_text).to_int64()
+  assert_eq(partition.index_tokens, runtime.encoder.count(partition.index_text))
+  assert_eq(
+    partition.index_tokens,
+    runtime.encoder.encode(partition.index_text).length(),
+  )
+  for i, volume in partition.volumes {
+    let expected_id = if i == 0 { "part-0001" } else { "part-0002" }
+    assert_eq(volume.id, expected_id)
+    let name = "\{expected_id}.json"
+    assert_eq(volumes.file_names[volume.id], name)
+    save(name, volume.text)
+    verify_render(
+      volume.text,
+      volume.tokens,
+      volume.bytes,
+      volume.document,
+      runtime,
+    )
+    assert_true(volume.tokens <= cap)
+    assert_eq(volume.file_indices.length(), 1)
+    assert_eq(volume.section_indices.length(), 0)
+    assert_eq(volume.document.files.length(), 1)
+    let original_index = volume.file_indices[0]
+    assert_true(original_index >= 0 && original_index < selected.length())
+    let original = result.document.files[original_index]
+    let file = volume.document.files[0]
+    assert_eq(file.path, original.path)
+    assert_eq(file.text, original.text)
+    assert_false(seen.contains(file.path))
+    seen[file.path] = volume.id
+    assert_eq(
+      text(field(field(partition.index, "files"), file.path)),
+      volume.id,
+    )
+    let summary = index_volumes[i]
+    assert_eq(text(field(summary, "id")), volume.id)
+    assert_eq(text(field(summary, "fileName")), name)
+    assert_eq(field(summary, "tokens"), volume.tokens.to_json())
+    assert_eq(field(summary, "bytes"), volume.bytes.to_json())
+    assert_eq(field(summary, "fileIndices"), volume.file_indices.to_json())
+    assert_eq(
+      field(summary, "sectionIndices"),
+      volume.section_indices.to_json(),
+    )
+    total += runtime.encoder.count(volume.text).to_int64()
+    summaries.push({
+      "id": volume.id,
+      "fileName": name,
+      "tokens": volume.tokens,
+      "bytes": volume.bytes,
+      "path": file.path,
+    })
+    println(
+      "volume \{volume.id}: tokens=\{volume.tokens} bytes=\{volume.bytes} file=\{file.path}",
+    )
+  }
+  assert_eq(seen.length(), 2)
+  for path in selected {
+    assert_true(seen.contains(path))
+  }
+  assert_eq(partition.total_tokens, total)
+  let progressive_context = verify_progressive_context(fixture, runtime)
+  let manifest : Json = {
+    "version": @repomix.version(),
+    "dependencyMode": "registry-only script imports; no workspace or local replacements",
+    "security": "Passed",
+    "selectedFiles": selected,
+    "hostNotListed": 1,
+    "pack": { "tokens": result.tokens, "bytes": result.bytes },
+    "singleWholeDocumentTokens": single_counts,
+    "maxTokens": cap,
+    "volumes": summaries,
+    "indexTokens": partition.index_tokens,
+    "indexBytes": @utf8.encode(partition.index_text).length(),
+    "totalTokens": partition.total_tokens.to_string(),
+    "progressiveContext": progressive_context,
+    "checks": [
+      "exact allowlist", "MoonBit declaration and default retained", "keep-full exact source",
+      "AST body omitted", "header and numbered JSON", "security enabled", "explain hostNotListed",
+      "full volume and independent index encoder counts", "UTF-8 bytes", "hard cap",
+      "one-volume-per-file", "code context complete answer without padding", "code context exact cap and cap-minus-one",
+      "task context required full source", "independent code, task and task-audit encoder counts",
+    ],
+  }
+  save("manifest.json", manifest.stringify(indent=2) + "\n")
+  println(
+    "index: tokens=\{partition.index_tokens} bytes=\{@utf8.encode(partition.index_text).length()}; total=\{total}",
+  )
+  println("registry SDK consumer smoke passed")
+}

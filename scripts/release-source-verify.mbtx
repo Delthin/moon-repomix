@@ -1,0 +1,147 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/encoding/hex",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/json",
+  "moonbitlang/x@0.5.5/crypto",
+}
+----
+
+///|
+/// Compare a canonical registry ZIP with the source package built from this checkout.
+/// Entry content is streamed; archive paths are never extracted onto the filesystem.
+
+///|
+fn hash(bytes : BytesView) -> String {
+  @hex.encode(Bytes::from_array(@crypto.sha256(bytes)[:]))
+}
+
+///|
+fn safe_entry(path : String) -> Bool {
+  if path.is_empty() || path.has_prefix("/") || path.has_suffix("/") {
+    return false
+  }
+  for c in path {
+    if c < ' ' ||
+      c == '\u007f' ||
+      c == '\\' ||
+      c == ':' ||
+      c == '*' ||
+      c == '?' ||
+      c == '[' ||
+      c == ']' {
+      return false
+    }
+  }
+  for part in path.split("/") {
+    if part.is_empty() || part == "." || part == ".." {
+      return false
+    }
+  }
+  true
+}
+
+///|
+async fn unzip(args : Array[String]) -> Bytes {
+  let (code, out, err) = @process.collect_output("unzip", args)
+  guard code == 0 else { fail("ZIP read failed: " + err.text()) }
+  out.binary()
+}
+
+///|
+async fn entries(zip : String) -> Array[String] {
+  let listing = @utf8.decode(unzip(["-Z1", zip]))
+  let paths : Array[String] = []
+  let seen : Set[String] = Set([])
+  for line in listing.split("\n") {
+    let path = line.to_owned()
+    if path.is_empty() {
+      continue
+    }
+    if path.has_suffix("/") {
+      let directory = path[:path.length() - 1].to_owned()
+      guard safe_entry(directory) else { fail("Unsafe directory entry") }
+      continue
+    }
+    guard safe_entry(path) && !seen.contains(path) else {
+      fail("Unsafe or duplicate ZIP file entry")
+    }
+    seen.add(path)
+    paths.push(path)
+    guard paths.length() <= 10000 else { fail("Too many source entries") }
+  }
+  paths.sort()
+  guard !paths.is_empty() else { fail("Empty source ZIP") }
+  paths
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  if args.length() == 2 && args[1] == "selftest" {
+    for path in ["moon.mod", "src/a.mbt", "LICENSES/MIT.txt"] {
+      assert_true(safe_entry(path))
+    }
+    for
+      path in [
+        "", "/a", "../a", "a/../b", "a//b", "a/./b", "a/", "a\\b", "C:a", "a\nb",
+        "a*", "a[0]",
+      ] {
+      assert_false(safe_entry(path))
+    }
+    println("PASS release ZIP path validation")
+    return
+  }
+  guard args.length() == 5 else {
+    fail("REGISTRY_ZIP EXPECTED_SOURCE_ZIP INDEX_SHA256 NEW_ABSOLUTE_REPORT")
+  }
+  let actual = args[1]
+  let expected = args[2]
+  let checksum = args[3]
+  let report = args[4]
+  guard actual.has_prefix("/") &&
+    expected.has_prefix("/") &&
+    report.has_prefix("/") &&
+    !@fs.exists(report) else {
+    fail("Expected absolute inputs and a fresh report path")
+  }
+  guard checksum.length() == 64 else { fail("Invalid checksum length") }
+  for c in checksum {
+    guard (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') else {
+      fail("Invalid checksum spelling")
+    }
+  }
+  let actual_sha = hash(@fs.read_file(actual).binary())
+  assert_eq(actual_sha, checksum)
+  let expected_sha = hash(@fs.read_file(expected).binary())
+  let actual_paths = entries(actual)
+  let expected_paths = entries(expected)
+  assert_eq(actual_paths, expected_paths)
+  let files : Map[String, Json] = Map([])
+  let mut bytes = 0L
+  for path in actual_paths {
+    let a = unzip(["-p", actual, path])
+    let b = unzip(["-p", expected, path])
+    assert_eq(a, b)
+    bytes += a.length().to_int64()
+    files[path] = { "sha256": Json(hash(a)), "bytes": Json(a.length()) }
+  }
+  let receipt : Json = {
+    "registryZipSha256": Json(actual_sha),
+    "expectedZipSha256": Json(expected_sha),
+    "entryCount": Json(actual_paths.length()),
+    "uncompressedBytes": Json(bytes.to_string()),
+    "sourceEntriesEqual": true,
+    "files": Json(files),
+  }
+  @fs.write_file(
+    report,
+    receipt.stringify(indent=2) + "\n",
+    create_mode=CreateNew,
+  )
+  println("PASS canonical registry source equals checkout source package")
+}
