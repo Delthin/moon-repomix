@@ -31,6 +31,8 @@ jobs:
         run: |
           EVIDENCE="$RUNNER_TEMP/mooncakes-release-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir "$EVIDENCE"
+          printf '%s\n' "$GITHUB_SHA" > "$EVIDENCE/attempt-source.txt"
+          printf '%s\n' "$RELEASE_MODE" > "$EVIDENCE/attempt-mode.txt"
           printf 'EVIDENCE=%s\nMOON_HOME=%s/.moon\n' "$EVIDENCE" "$HOME" >> "$GITHUB_ENV"
       - name: Install pinned official toolchain
         shell: bash
@@ -41,13 +43,13 @@ jobs:
         shell: bash
         run: |
           moon version --all
+          moon update
           moon run --target native scripts/check-toolchain.mbtx
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test -z "$(git status --porcelain)"
           grep -Fx 'name = "Delthin/moon_repomix"' moon.mod
           grep -Fx 'version = "0.5.1"' moon.mod
           printf '%s\n' "$GITHUB_SHA" > "$EVIDENCE/source-revision.txt"
-          moon update
           moon package --list > "$EVIDENCE/package-list.txt" 2>&1
           cp "_build/publish/Delthin-moon_repomix-$RELEASE_VERSION.zip" "$EVIDENCE/expected-source.zip"
       - name: Inspect public registry before any upload
