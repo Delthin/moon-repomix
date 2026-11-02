@@ -13,6 +13,7 @@ jobs:
     timeout-minutes: 15
     env:
       SOURCE_SHA: 2a6e0afee16f7342a89fd242ec29b0fe06e19a86
+      TAG_OBJECT_SHA: a2a724592c38198a4e4d40a1dcdd9912d86fbc2b
       REGISTRY_SHA256: 01310f7de5c743bfa4f0eef140b9a23f9bedc50043fae0a3331fcc44cacdf97d
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -34,6 +35,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse 'v0.5.1^{}')" = "$SOURCE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.5.1" > "$OUT/report/tag-ref-before.json"
+          jq -e --arg tag "$TAG_OBJECT_SHA" '.object.type == "tag" and .object.sha == $tag' "$OUT/report/tag-ref-before.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$TAG_OBJECT_SHA" > "$OUT/report/tag-object.json"
+          jq -e --arg sha "$SOURCE_SHA" '.tag == "v0.5.1" and .object.type == "commit" and .object.sha == $sha' "$OUT/report/tag-object.json"
           gh run view 41415234158 --repo "$GITHUB_REPOSITORY" --json headSha,status,conclusion,jobs > "$OUT/report/native-ci.json"
           jq -e --arg sha "$SOURCE_SHA" '.headSha == $sha and .status == "completed" and .conclusion == "success" and (.jobs | length) == 3 and all(.jobs[]; .conclusion == "success")' "$OUT/report/native-ci.json"
           gh run view 41416936880 --repo "$GITHUB_REPOSITORY" --json headSha,status,conclusion,jobs > "$OUT/report/registry-ci.json"
@@ -79,9 +84,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release create v0.5.1 "$OUT"/assets/* --repo "$GITHUB_REPOSITORY" --verify-tag --target "$SOURCE_SHA" --title v0.5.1 --notes-file "$OUT/report/release-notes.md" --draft
+          # The pre-existing immutable tag pins the source. target_commitish is
+          # unused for an existing tag; do not ask this API to resolve an old ref.
+          gh release create v0.5.1 "$OUT"/assets/* --repo "$GITHUB_REPOSITORY" --verify-tag --title v0.5.1 --notes-file "$OUT/report/release-notes.md" --draft
           gh release view v0.5.1 --repo "$GITHUB_REPOSITORY" --json tagName,targetCommitish,isDraft,isPrerelease,assets,url > "$OUT/report/github-draft.json"
-          jq -e --arg sha "$SOURCE_SHA" '.tagName == "v0.5.1" and .targetCommitish == $sha and .isDraft == true and .isPrerelease == false and (.assets | length) == 6 and all(.assets[]; .state == "uploaded")' "$OUT/report/github-draft.json"
+          jq -e '.tagName == "v0.5.1" and .isDraft == true and .isPrerelease == false and (.assets | length) == 6 and all(.assets[]; .state == "uploaded")' "$OUT/report/github-draft.json"
           gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == "v0.5.1")' > "$OUT/report/github-draft-api.json"
           while read -r HASH NAME; do
             jq -e --arg name "$NAME" --arg digest "sha256:$HASH" 'any(.assets[]; .name == $name and .digest == $digest)' "$OUT/report/github-draft-api.json"
@@ -90,9 +97,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.5.1" > "$OUT/report/tag-ref-draft.json"
+          jq -e --arg tag "$TAG_OBJECT_SHA" '.object.type == "tag" and .object.sha == $tag' "$OUT/report/tag-ref-draft.json"
           gh release edit v0.5.1 --repo "$GITHUB_REPOSITORY" --draft=false --latest
           gh release view v0.5.1 --repo "$GITHUB_REPOSITORY" --json tagName,targetCommitish,isDraft,isPrerelease,publishedAt,assets,url > "$OUT/report/github-release.json"
-          jq -e --arg sha "$SOURCE_SHA" '.tagName == "v0.5.1" and .targetCommitish == $sha and .isDraft == false and .isPrerelease == false and (.assets | length) == 6' "$OUT/report/github-release.json"
+          jq -e '.tagName == "v0.5.1" and .isDraft == false and .isPrerelease == false and (.assets | length) == 6' "$OUT/report/github-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.5.1" > "$OUT/report/tag-ref-published.json"
+          jq -e --arg tag "$TAG_OBJECT_SHA" '.object.type == "tag" and .object.sha == $tag' "$OUT/report/tag-ref-published.json"
       - name: Preserve public release evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
