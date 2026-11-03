@@ -17,7 +17,9 @@
 /* Status: 0 success, 1 parse-error, 2 timeout, 3 resource-limit,
  * 4 parser-unavailable, 6 unsupported-language. Failure always has wire=NULL.
  * Success wire: LE u32 status=0, count; then per definition
- * start_line, end_line, name_bytes, qualified_bytes, ref_count (all u32),
+ * start_byte, end_byte (0-based UTF-8, exclusive end),
+ * start_line, end_line (1-based inclusive), name_bytes, qualified_bytes,
+ * ref_count (all u32),
  * name, qualified_name, then repeated (u32 byte_length, UTF-8 reference).
  * Owns wire; caller frees it. No source/tree pointers survive this call. */
 typedef struct {

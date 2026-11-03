@@ -21,6 +21,7 @@ async fn main {
     "src/compression/javascript_scanner.c", "src/compression/typescript_parser.c",
     "src/compression/typescript_scanner.c", "src/compression/tsx_parser.c", "src/compression/tsx_scanner.c",
     "src/compression/python_parser.c", "src/compression/python_scanner.c",
+    "src/compression/moonbit_parser.c", "src/compression/moonbit_scanner.c",
   ]
   let args = [
     "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-g", "-O1", "-fsanitize=address,undefined",

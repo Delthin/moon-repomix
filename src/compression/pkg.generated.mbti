@@ -8,6 +8,8 @@ import {
 // Values
 pub fn compress(String, String) -> Outcome
 
+pub fn definition_extensions() -> Array[String]
+
 pub fn index_definitions(String, String) -> DefinitionIndex
 
 // Errors
@@ -30,6 +32,8 @@ pub fn BatchTicket::is_ready(Self) -> Bool
 pub(all) struct Definition {
   name : String
   qualified_name : String
+  start_byte : Int32
+  end_byte : Int32
   start_line : Int32
   end_line : Int32
   references : Array[String]

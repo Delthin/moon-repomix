@@ -83,14 +83,15 @@ static void drop(SDIndex result, int status, unsigned definitions) {
     assert(word(result.wire) == 0 && word(result.wire + 4) == definitions);
     uint32_t at = 8;
     for (unsigned i = 0; i < definitions; ++i) {
-      assert(at + 20 <= result.length);
-      assert(word(result.wire + at) >= 1);
+      assert(at + 28 <= result.length);
       assert(word(result.wire + at + 4) >= word(result.wire + at));
-      uint32_t name = word(result.wire + at + 8);
-      uint32_t qualified_name = word(result.wire + at + 12);
-      uint32_t refs = word(result.wire + at + 16);
+      assert(word(result.wire + at + 8) >= 1);
+      assert(word(result.wire + at + 12) >= word(result.wire + at + 8));
+      uint32_t name = word(result.wire + at + 16);
+      uint32_t qualified_name = word(result.wire + at + 20);
+      uint32_t refs = word(result.wire + at + 24);
       assert(name && qualified_name && refs <= SD_MAX_REFS);
-      at += 20 + name + qualified_name;
+      at += 28 + name + qualified_name;
       assert(at <= result.length);
       for (unsigned r = 0; r < refs; ++r) {
         assert(at + 4 <= result.length);
@@ -116,12 +117,12 @@ static char *repeat(const char *prefix, const char *piece, unsigned n, const cha
   memcpy(text + a + b * n, suffix, c + 1);
   return text;
 }
-static char *ref_function(unsigned refs, unsigned functions) {
+static char *ref_function(unsigned refs, unsigned functions, int moonbit) {
   char one[8192];
-  size_t at = (size_t)sprintf(one, "function use_refs() { return sink(");
+  size_t at = (size_t)sprintf(one, "%s", moonbit ? "fn use_refs() { sink(" : "function use_refs() { return sink(");
   for (unsigned i = 1; i < refs; ++i)
     at += (size_t)sprintf(one + at, "%sr%u", i == 1 ? "" : ",", i);
-  strcpy(one + at, "); }\n");
+  strcpy(one + at, moonbit ? ") }\n" : "); }\n");
   return repeat("", one, functions, "");
 }
 int main(void) {
@@ -131,7 +132,15 @@ int main(void) {
   drop(run(3, "消息 = '😀'\r\n@decorate(消息)\r\ndef read(arg):\r\n    return use(arg, 消息)\r\n"), 0, 2);
   drop(run(0, "const OK = 1; function bad( {"), 1, 0);
   drop(run(3, "OK = 1\ndef bad(:\n  pass"), 1, 0);
-  drop(run(4, ""), 6, 0);
+  drop(run(4, ""), 0, 0);
+  drop(run(4, "const LIMIT = 7\nfn read() -> Int { LIMIT }\n"), 0, 2);
+  drop(run(4, "trait Read { read(Self) -> Int }\nimpl Read for Int with read(self) { self }\n"), 0, 3);
+  drop(run(4, "pub fn Int::read(Self) -> Int\nimpl Read for Int\n"), 0, 2);
+  drop(run(4, "const OK = 1\nfn broken( {"), 1, 0);
+  drop(run(4, "let 消息 = \"😀\"\r\nfn 读取() -> String { 消息 }\r\n"), 0, 2);
+  drop(run(4, "pub typealias @pkg.(Foo as Local, Bar)\npub extend Point with Render::{render, debug}\nfn Point::render(self : Point) -> Int { self.x }\nextenum @pkg.State += { Extra }\n"), 0, 6);
+  drop(run(4, "fn outer() { if true { fn inner() { 1 }; inner() } }"), 0, 1);
+  drop(run(5, ""), 6, 0);
   drop(sd_index(0, "", SD_MAX_INPUT + 1, 0), 3, 0);
   char *input = repeat("", " ", SD_MAX_INPUT, "");
   drop(sd_index(0, input, SD_MAX_INPUT, 0), 0, 0);
@@ -142,16 +151,16 @@ int main(void) {
   defs = repeat("", "const same = 0;\n", SD_MAX_DEFINITIONS + 1, "");
   drop(run(0, defs), 3, 0);
   free(defs);
-  char *refs = ref_function(SD_MAX_REFS, 1);
+  char *refs = ref_function(SD_MAX_REFS, 1, 0);
   drop(run(0, refs), 0, 1);
   free(refs);
-  refs = ref_function(SD_MAX_REFS + 1, 1);
+  refs = ref_function(SD_MAX_REFS + 1, 1, 0);
   drop(run(0, refs), 3, 0);
   free(refs);
-  refs = ref_function(SD_MAX_REFS, SD_MAX_TOTAL_REFS / SD_MAX_REFS);
+  refs = ref_function(SD_MAX_REFS, SD_MAX_TOTAL_REFS / SD_MAX_REFS, 0);
   drop(run(0, refs), 0, SD_MAX_TOTAL_REFS / SD_MAX_REFS);
   free(refs);
-  refs = ref_function(SD_MAX_REFS, SD_MAX_TOTAL_REFS / SD_MAX_REFS + 1);
+  refs = ref_function(SD_MAX_REFS, SD_MAX_TOTAL_REFS / SD_MAX_REFS + 1, 0);
   drop(run(0, refs), 3, 0);
   free(refs);
   char *nodes = repeat("", "0;", SD_MAX_NODES / 3 + 1, "");
@@ -170,6 +179,40 @@ int main(void) {
   free(open);
   drop(run(0, deep), 3, 0);
   free(deep);
+  defs = repeat("", "fn same() { 0 }\n", SD_MAX_DEFINITIONS, "");
+  drop(run(4, defs), 0, SD_MAX_DEFINITIONS);
+  drop(sd_index(4, defs, (uint32_t)strlen(defs), 1), 2, 0);
+  free(defs);
+  defs = repeat("", "fn same() { 0 }\n", SD_MAX_DEFINITIONS + 1, "");
+  drop(run(4, defs), 3, 0);
+  free(defs);
+  refs = ref_function(SD_MAX_REFS, 1, 1);
+  drop(run(4, refs), 0, 1);
+  free(refs);
+  refs = ref_function(SD_MAX_REFS + 1, 1, 1);
+  drop(run(4, refs), 3, 0);
+  free(refs);
+  open = repeat("fn deep() { ", "[", SD_MAX_DEPTH + 1, "0");
+  deep = repeat(open, "]", SD_MAX_DEPTH + 1, " }");
+  free(open);
+  drop(run(4, deep), 3, 0);
+  free(deep);
+  open = repeat("fn ", "A", 3000, "::");
+  long_name = repeat(open, "m", 2000, "() { 0 }");
+  free(open);
+  drop(run(4, long_name), 3, 0);
+  free(long_name);
+  const char *ref_prefix[] = {"function use() { return ", "def use():\n    return ", "fn use() { "};
+  const char *ref_suffix[] = {"; }", "\n", " }"};
+  const int ref_languages[] = {0, 3, 4};
+  for (unsigned i = 0; i < 3; ++i) {
+    long_name = repeat(ref_prefix[i], "m", SD_MAX_NAME, ref_suffix[i]);
+    drop(run(ref_languages[i], long_name), 0, 1);
+    free(long_name);
+    long_name = repeat(ref_prefix[i], "m", SD_MAX_NAME + 1, ref_suffix[i]);
+    drop(run(ref_languages[i], long_name), 3, 0);
+    free(long_name);
+  }
   assert(inclusive_end((TSPoint){0, 0}, (TSPoint){3, 0}) == 3);
   assert(inclusive_end((TSPoint){0, 0}, (TSPoint){3, 1}) == 4);
   assert(inclusive_end((TSPoint){0, 0}, (TSPoint){0, 0}) == 1);
@@ -182,18 +225,25 @@ int main(void) {
   limits = (Indexer){0};
   assert(!reserve(&limits, SD_MAX_WIRE + 1) && limits.result.status == 3);
   released();
-  char *growth = repeat("", "const same = 0;\n", 200, "");
-  allocations = 0;
-  drop(run(0, growth), 0, 200);
-  unsigned growths = allocations;
-  assert(growths > 1);
-  for (unsigned i = 1; i <= growths; ++i) {
+  /* Exercise MoonBit-only cursor/name paths under every wire growth failure. */
+  for (unsigned pass = 0; pass < 2; ++pass) {
+    int language = pass ? 4 : 0;
+    char *growth = repeat("", pass ?
+      "trait Read { read(Self) -> Int }\nimpl Read for Int with read(self) { self }\n" :
+      "const same = 0;\n", 200, "");
+    unsigned definitions = pass ? 600 : 200;
     allocations = 0;
-    fail_at = i;
-    drop(run(0, growth), 3, 0);
+    drop(run(language, growth), 0, definitions);
+    unsigned growths = allocations;
+    assert(growths > 1);
+    for (unsigned i = 1; i <= growths; ++i) {
+      allocations = 0;
+      fail_at = i;
+      drop(run(language, growth), 3, 0);
+    }
+    fail_at = 0;
+    free(growth);
   }
-  fail_at = 0;
-  free(growth);
   released();
   puts("definition core: grammar, wire, exact quotas, timeout, allocation-failure cleanup passed");
   return 0;

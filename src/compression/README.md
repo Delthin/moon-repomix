@@ -137,12 +137,20 @@ and byte mask, and frees them before returning a MoonBit-managed byte plan.
 ## Complete-definition symbol index
 
 `index_definitions(path : String, text : String) -> DefinitionIndex` is a
-synchronous, I/O-free index for **JS/JSX, TS/TSX and Python only**, using the
-same extension detection and vendored parsers. `DefinitionIndex` contains
-`definitions : Array[Definition]` and `reason : String?`. Each `Definition`
-contains `name`, `qualified_name`, 1-based inclusive `start_line`/`end_line`,
-and `references : Array[String]`. Success has `reason = None`, including an
-empty file. Duplicate names/qualified names remain distinct and source ordered.
+synchronous, I/O-free index using vendored native ASTs for **JS/JSX, TS/TSX,
+Python and MoonBit source/interfaces**. The public pure function
+`definition_extensions() -> Array[String]` returns a **fresh array** on every
+call: `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`, `.tsx`, `.py`, `.pyi`,
+`.mbt`, `.mbti`. This same list gates index routing, case-insensitively;
+compression's additional Go/Rust/Java support does not imply index support.
+Consumers should use this function rather than duplicate the extension list.
+
+`DefinitionIndex` contains `definitions : Array[Definition]` and
+`reason : String?`. Each `Definition` contains `name`, `qualified_name`,
+`start_byte`/`end_byte` (**0-based UTF-8 bytes, exclusive end**),
+`start_line`/`end_line` (**1-based inclusive original lines**), and
+`references : Array[String]`. Success has `reason = None`, including an empty
+file. Duplicate names/qualified names remain distinct and source ordered.
 
 Ranges cover **complete original definitions**, never compressed signatures:
 assignment functions include `res.render = function ...;`, exports include their
@@ -154,14 +162,57 @@ produces an entry per binding with the **same complete declaration/export range*
 and conservative references from that entire range; consumers must deduplicate
 overlapping source selections. Dynamic computed names are not invented.
 
+MoonBit indexes top-level functions (including async, generic and extern forms),
+values/constants, types/structs/enums/errors/extensible enums, traits, aliases,
+`extend` method declarations, impl methods and bodyless impl declarations.
+Attributes/`#cfg`, signatures and **entire original bodies** remain in each
+range. Local functions/types stay inside their full outer definition, including
+enclosing conditions and lexical context; they are not promoted into globals.
+Trait-method entries retain the **entire trait**, not a contextless method
+signature. Shared trait/alias/extend ranges must also be deduplicated by callers.
+`.mbti` uses the same grammar and keeps original declarations, without fabricating
+bodies or treating `impl Trait for Type` as a definition of `Type`.
+
+MoonBit qualified names are syntactic identities, not inferred receiver dispatch:
+
+| Original declaration | `qualified_name` / exact symbol request |
+| --- | --- |
+| `fn Point::render(...) { ... }` (or bodyless `.mbti` signature) | `Point::render` |
+| `trait Render { render(Self) -> String }` | `Render` and `Render::render` |
+| `impl Render for Point with render(...) { ... }` | `Render for Point::render` |
+| `impl[T] Render for Array[T] with render(...) { ... }` | `Render for Array[T]::render` |
+| receiver-less `impl Render with render(...) { ... }` | `impl Render::render` |
+| `.mbti`: `impl Render for Point` | `impl Render for Point` |
+| `pub extend Point with Render::{render}` | `Point::render` |
+
+Bare method names remain `render`, so repeated bare names are ambiguous;
+repeated **qualified** names are ambiguous too. Do not guess that `Point::render`
+means `Render for Point::render`, nor erase the trait or impl receiver. Consumers
+must match these full identities (including `::` and bodyless `impl ...`, not
+just names containing `.`), then apply the same unique-match rule as JS/Python.
+Generic impl receiver syntax is canonicalized from AST leaf tokens, removing
+whitespace/comments without resolving aliases. Alias entries bind their local
+spellings and share the complete alias declaration.
+
 References are deduplicated UTF-8 identifier spellings in first-use order,
 including **property/attribute field names** (`client.fetch` contributes `client`
 and `fetch`), decorators and type identifiers. Syntactic declaration/parameter
 names are excluded; local/parameter *uses* remain lexical candidates. This is
 not semantic resolution: property keys, shadowing and whole multi-binding
-initializers can overapproximate dependencies. Qualified definition names retain
-member/class prefixes; references themselves are unqualified names. Unicode,
-CRLF and exclusive end-column-zero line accounting are preserved.
+initializers can overapproximate dependencies. JS/Python references remain
+unqualified; qualified definition names retain member/class prefixes.
+MoonBit explicit `Point::render`, `@pkg.fetch`, `@pkg.Type` and qualified
+constructors/alias sources remain **atomic qualified references**. They never
+fall back to `render`, `fetch` or `Type` and accidentally pick unrelated local
+symbols. Unqualified identifiers and receiver-dot field uses remain lexical
+candidates, like JS/Python. Declaration/parameter bindings are excluded, while
+the receiver type in a `Type::method` declaration remains a type reference.
+Explicit `Type::method` / `Type::Constructor` uses also retain the `Type`
+dependency (not the bare member), so local enum/type declarations remain reachable.
+Consumers can resolve atomic qualified references only by exact qualified-name
+lookup; this is not type checking, package loading, alias expansion or trait
+method inference. Unicode, CRLF and exclusive end-column-zero line accounting
+are preserved; byte ranges slice the original UTF-8, not UTF-16 code units.
 
 Hard limits (`definition_core.h`): 8 MiB UTF-8 input; 500,000 visible AST nodes
 including anonymous tokens; 1,000,000 combined traversal/name-processing visits;
@@ -171,7 +222,9 @@ including anonymous tokens; 1,000,000 combined traversal/name-processing visits;
 runs are also capped at 256. The timeout bounds parsing, not total indexing;
 post-parse work is bounded by the explicit traversal/output quotas.
 
-Any error discards **all** definitions. Reasons are `unsupported-language`,
+Any error discards **all** definitions; no partial index escapes. Unfamiliar
+MoonBit declaration/name shapes conservatively report `unsupported-language`
+instead of silently omitting a definition. Other reasons are
 `parse-error`, `timeout`, `resource-limit` (any quota or index-owned allocation
 failure), or `parser-unavailable`. Native input is borrowed only during the
 bridge call; output is copied into managed bytes and every parser/tree/cursor
@@ -182,9 +235,18 @@ MoonBit allocator can abort on actual system OOM; their failures cannot safely
 be converted to a reason by this local component. Explicit quota/allocation
 failure recovery does not claim recovery from those allocator aborts.
 
-`definitions_test.mbt` checks complete wrappers, duplicates, shared multi-binding
-ranges, property-reference candidates, Unicode/CRLF, all four grammars, syntax
-errors and limits. The standalone C harness additionally checks exact
+`definitions_test.mbt` checks suffix-list/routing agreement and fresh copies,
+complete wrappers, duplicates, shared multi-binding/trait/alias ranges,
+property-reference candidates, explicit-qualified false-match prevention,
+MoonBit trait/impl/default-impl/extern/nested definitions and bodyless interfaces,
+Unicode/CRLF byte slices, all five grammars, syntax errors and limits. Run only
+the definition-index groups with:
+
+```
+moon test src/compression/definitions_test.mbt --target native --frozen --deny-warn
+```
+
+The standalone C harness additionally checks exact
 input/definition/reference quotas, node/visit/depth/name/wire limits, deterministic
 parser timeout, exclusive column-zero bounds and every wire-growth allocation
 failure, asserting zero live native owners. Run its vendored-runtime ASan/UBSan
