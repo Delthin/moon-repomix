@@ -1,5 +1,13 @@
 # 版本升级
 
+## 升级到 v0.6.0
+
+下载 [v0.6.0 安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.6.0)，或将 SDK 依赖更新到 `0.6.0` 后执行 `moon update`。构建工具链仍为 MoonBit `0.10.17+d971670cd`，既有 CLI、配置、Root SDK 和 MCP 用法保持兼容。
+
+浏览器工作台的“工作方式”新增任务预算与代码补读。前者的硬上限针对共享文档，选择审计另外计数；后者在首轮固定累计预算，最多成功三轮，审计已经包含在每轮正文中。普通打包仍在超预算时保留完整输出。详细步骤与失败处理见 [工作台指南](webui.md)。
+
+本地 HTTP 新增 `/api/task-context` 和 `/api/code-context`；仍只允许授权工作区、启用原文扫描并使用既有限额。原有 `/api/pack` 保持兼容。
+
 ## 升级到 v0.5.1
 
 v0.5.1 固定使用 MoonBit `0.10.17+d971670cd`；已有 CLI、配置和 Root SDK 调用保持兼容。源码构建需先安装对应工具链，发行包运行不需要 MoonBit。

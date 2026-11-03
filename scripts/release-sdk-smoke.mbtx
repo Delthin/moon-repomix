@@ -1,6 +1,6 @@
 ----
 import {
-  "Delthin/moon_repomix@0.5.1" @repomix,
+  "Delthin/moon_repomix@0.6.0" @repomix,
   "moonbitlang/async@0.19.2",
   "moonbitlang/async@0.19.2/fs",
   "moonbitlang/core/encoding/utf8",
@@ -9,7 +9,7 @@ import {
 }
 ----
 
-// Registry-only v0.5.1 consumer. Run from an independent directory after resolving
+// Registry-only v0.6.0 consumer. Run from an independent directory after resolving
 // the published package and checking its ZIP and bundled tokenizer resources.
 
 ///|
@@ -22,7 +22,7 @@ let evidence_root : String = {
 }
 
 ///|
-let header : String = "Registry SDK v0.5.1: inspect public declarations and preserved implementation."
+let header : String = "Registry SDK v0.6.0: inspect public declarations and preserved implementation."
 
 ///|
 let inventory_signature : String = "pub fn inventory_total(values : Array[Int], offset~ : Int = 1) -> Int"
@@ -360,7 +360,7 @@ async fn main {
   )
   assert_true(options.security_check)
   let runtime = @repomix.Runtime::load(ranks)
-  assert_eq(@repomix.version(), "0.5.1")
+  assert_eq(@repomix.version(), "0.6.0")
   println("version: \{@repomix.version()}")
   let result = @repomix.pack(options, runtime)
   // Save actual responses before assertions, retaining diagnostics on failure.

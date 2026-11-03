@@ -1,4 +1,4 @@
-name: Publish and verify Mooncakes v0.5.1
+name: Publish and verify Mooncakes v0.6.0
 on:
   workflow_dispatch:
     inputs:
@@ -14,7 +14,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: mooncakes-publish-0.5.1
+  group: mooncakes-publish-0.6.0
   cancel-in-progress: false
 jobs:
   publish:
@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 20
     env:
       MOONBIT_INSTALL_VERSION: '0.10.17+d971670cd'
-      RELEASE_VERSION: '0.5.1'
+      RELEASE_VERSION: '0.6.0'
       RELEASE_MODE: ${{ inputs.mode }}
       RELEASE_SOURCE_REF: ${{ inputs.source_ref }}
     steps:
@@ -62,7 +62,7 @@ jobs:
             cd "$RUNNER_TEMP/frozen-publish-source"
           fi
           grep -Fx 'name = "Delthin/moon_repomix"' moon.mod
-          grep -Fx 'version = "0.5.1"' moon.mod
+          grep -Fx 'version = "0.6.0"' moon.mod
           printf '%s\n' "$PACKAGE_SHA" > "$EVIDENCE/source-revision.txt"
           printf '%s\n' "$GITHUB_SHA" > "$EVIDENCE/verification-revision.txt"
           moon package --list > "$EVIDENCE/package-list.txt" 2>&1
@@ -85,7 +85,7 @@ jobs:
         if: steps.before.outputs.exists == 'false' && inputs.mode == 'publish-and-verify'
         shell: bash
         env:
-          MOONCAKES_CREDENTIALS_JSON: ${{ secrets.MOONCAKES_PUBLISH_CREDENTIALS_051 }}
+          MOONCAKES_CREDENTIALS_JSON: ${{ secrets.MOONCAKES_PUBLISH_CREDENTIALS }}
         run: |
           test -n "$MOONCAKES_CREDENTIALS_JSON"
           test ! -e "$MOON_HOME/credentials.json"
@@ -164,7 +164,7 @@ jobs:
         if: always() && env.EVIDENCE != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mooncakes-release-0.5.1-${{ github.run_id }}-${{ github.run_attempt }}
+          name: mooncakes-release-0.6.0-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.EVIDENCE }}
           if-no-files-found: warn
           retention-days: 14

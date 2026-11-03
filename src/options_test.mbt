@@ -1,6 +1,6 @@
 ///|
 test "library release version and default output options" {
-  assert_eq(@moon_repomix.version(), "0.5.1")
+  assert_eq(@moon_repomix.version(), "0.6.0")
   let defaults = @moon_repomix.options(".")
   assert_eq(defaults.style, @moon_repomix.Style::Xml)
   assert_true(defaults.security_check)

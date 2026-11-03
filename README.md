@@ -2,11 +2,11 @@
 
 把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。使用 MoonBit native 实现，提供 CLI、SDK 和本地浏览器工作台；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
 
-当前源码版本为 **v0.5.1**，使用 MoonBit `0.10.17+d971670cd` 构建；安装包和 SDK 的可用版本分别见 [Releases](https://github.com/Delthin/moon-repomix/releases) 与 [Mooncakes](https://mooncakes.io/docs/Delthin/moon_repomix)。v0.5 系列新增完整实现读取、累计预算补读和任务上下文规划；原有 CLI、工作台、混合全文/骨架及精确分卷用法保持一致。完整变化见 [Changelog](CHANGELOG.md)，升级步骤见 [迁移指南](docs/migration.md)。
+当前源码版本为 **v0.6.0**，使用 MoonBit `0.10.17+d971670cd` 构建；安装包和 SDK 的可用版本分别见 [Releases](https://github.com/Delthin/moon-repomix/releases) 与 [Mooncakes](https://mooncakes.io/docs/Delthin/moon_repomix)。v0.6 将任务预算和累计预算补读接入浏览器工作台；原有 CLI、SDK、MCP、混合全文/骨架及精确分卷用法保持一致。完整变化见 [Changelog](CHANGELOG.md)，升级步骤见 [迁移指南](docs/migration.md)。
 
 ## 安装与第一次运行
 
-从 [v0.5.1 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.5.1) 下载平台归档，用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 的相对位置，在解压目录运行：
+从 [v0.6.0 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.6.0) 下载平台归档，用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 的相对位置，在解压目录运行：
 
 ```sh
 ./bin/moon-repomix /path/to/project
@@ -67,7 +67,7 @@ moon-repomix ./project --compress --split 12000 -f md -o review-parts
 
 ![编辑器工作台：选择目录、生成上下文、切换原文与结构输出、检查预算](assets/demo/webui.gif)
 
-安装 v0.5.1 后，在要处理的项目目录运行：
+安装 v0.6.0 后，在要处理的项目目录运行：
 
 ```sh
 moon-repomix --webui
@@ -75,9 +75,13 @@ moon-repomix --webui
 
 也可在本仓库根目录直接运行 `moon run src/cmd/moon-repomix --release -- --webui`。两种方式均默认处理当前目录，自动定位词表和页面资源；指定其他项目时使用 `moon-repomix ./project --webui`。
 
-打开 `http://127.0.0.1:8765`，在右侧选择授权目录、全文/骨架/混合策略及文件规则，点击“生成上下文”；左侧浏览结果文件，中间切换原文、处理后正文或完整 JSON，底部复制 CLI 或下载原始 JSON。
+打开 `http://127.0.0.1:8765`，在右侧选择授权目录和工作方式：
 
-修改参数会将现有结果标为旧结果，下一次生成成功后才替换；预算超限仍保留完整输出。动图来自真实 Native 服务操作，三种模式的浏览器下载已与相同参数 CLI 输出逐字节核对。端口设置、输入限额与服务边界见 [工作台指南](docs/webui.md)。
+- **普通打包**：全文、骨架或混合输出，支持原文对照、文件规则和完整 JSON 下载。上方动图展示这一流程。
+- **任务预算**：列出任务的必选、可选文件及优先级，在整文硬上限内生成共享上下文；单独查看、下载选择审计。
+- **代码补读**：按符号、行范围、全文或符号目录读取，在首轮确定的累计预算内最多成功三轮。分离的范围保留各自来源行号。
+
+修改参数会将现有结果标为旧结果，下一次成功后才替换。普通打包超预算保留完整输出；任务预算必选超限或补读失败保留上次成功结果。任务与补读只返回请求所需内容，不额外读取或传输原文对照。操作步骤、限额与服务边界见 [工作台指南](docs/webui.md)。
 
 ## 输出、计数与安全
 
@@ -90,7 +94,7 @@ moon-repomix --webui
 
 ## SDK
 
-SDK 模块为 `Delthin/moon_repomix`。以 `0.5.1` 为例，在调用项目的 `moon.mod` 中声明依赖、在 `moon.pkg` 导入：
+SDK 模块为 `Delthin/moon_repomix`。以 `0.6.0` 为例，在调用项目的 `moon.mod` 中声明依赖、在 `moon.pkg` 导入：
 
 ```moonbit
 import {
