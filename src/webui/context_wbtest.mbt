@@ -193,8 +193,8 @@ async test "code session accumulates only embedded body tokens, rotates ids and 
     Some(String(text)) => text
     _ => fail("text")
   }
-  assert_eq(initial.spent, state.runtime.encoder.count(text))
-  assert_eq(initial.rounds, 1)
+  assert_eq(initial.accounting.spent, state.runtime.encoder.count(text))
+  assert_eq(initial.accounting.rounds, 1)
   assert_true(
     test_result(first).get("report")
     is Some({ "counts": { "acceptedFiles": Number(1, ..), .. }, .. }),
@@ -207,7 +207,7 @@ async test "code session accumulates only embedded body tokens, rotates ids and 
   assert_true(
     test_result(tiny).get("report")
     is Some({ "requiredTokens": String(required), .. }) &&
-    required == initial.spent.to_string(),
+    required == initial.accounting.spent.to_string(),
   )
   assert_eq(code_session_json(state.code_session), saved)
   for
@@ -233,8 +233,8 @@ async test "code session accumulates only embedded body tokens, rotates ids and 
   let second = code_context(state, test_continue(initial.run_id))
   assert_exact_context(second, state, true)
   let middle = state.code_session.unwrap()
-  assert_eq(middle.spent, initial.spent * 2)
-  assert_eq(middle.rounds, 2)
+  assert_eq(middle.accounting.spent, initial.accounting.spent * 2)
+  assert_eq(middle.accounting.rounds, 2)
   assert_true(middle.run_id != initial.run_id)
   try code_context(state, test_continue(initial.run_id)) catch {
     PublicError(409, "invalid_code_session", _) => ()
@@ -244,8 +244,8 @@ async test "code session accumulates only embedded body tokens, rotates ids and 
   }
   let third = code_context(state, test_continue(middle.run_id))
   let final_session = state.code_session.unwrap()
-  assert_eq(final_session.spent, initial.spent * 3)
-  assert_eq(final_session.rounds, 3)
+  assert_eq(final_session.accounting.spent, initial.accounting.spent * 3)
+  assert_eq(final_session.accounting.rounds, 3)
   assert_true(
     third
     is {
@@ -267,7 +267,9 @@ async test "code session accumulates only embedded body tokens, rotates ids and 
     _ => fail("fourth round accepted")
   }
   // A valid continuation whose body does not fit must not consume a round.
-  ignore(code_context(state, test_code_request(initial.spent * 2 - 1)))
+  ignore(
+    code_context(state, test_code_request(initial.accounting.spent * 2 - 1)),
+  )
   let before_over_budget = code_session_json(state.code_session)
   let before_run = state.next_run
   let over_budget = code_context(
@@ -283,7 +285,7 @@ async test "code session accumulates only embedded body tokens, rotates ids and 
   assert_eq(code_session_json(state.code_session), before_over_budget)
   assert_eq(state.next_run, before_run)
   // A new session may use a smaller limit; exact exhaustion forbids continuing.
-  let exact = code_context(state, test_code_request(initial.spent))
+  let exact = code_context(state, test_code_request(initial.accounting.spent))
   assert_true(
     exact
     is {

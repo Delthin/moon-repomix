@@ -30,6 +30,12 @@ pub(all) suberror CodeContextError {
   InvalidCodeSpec
 }
 
+pub(all) suberror CodeSessionError {
+  InvalidCodeSession
+  CodeRoundLimit
+  CodeBudgetExhausted
+}
+
 pub(all) suberror PackError {
   ConfigurationError
   ContextTextError(String)
@@ -62,6 +68,18 @@ pub struct CodeContextPlan {
   audit : Json
   security : SecurityStatus
 }
+
+pub struct CodeContextSession {
+  limit : Int32
+  spent : Int32
+  rounds : Int32
+}
+pub fn CodeContextSession::advance(Self, CodeContextPlan) -> Self raise CodeSessionError
+pub fn CodeContextSession::can_continue(Self) -> Bool
+pub fn CodeContextSession::new(Int32) -> Self raise CodeSessionError
+pub fn CodeContextSession::remaining(Self) -> Int32
+pub fn CodeContextSession::request(Self, Json) -> CodeContextSpec raise
+pub fn CodeContextSession::to_json(Self) -> Json
 
 pub struct CodeContextSpec {
   max_tokens : Int32

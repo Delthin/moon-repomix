@@ -2,25 +2,21 @@
 priv struct CodeSession {
   run_id : String
   directory : String
-  limit : Int32
-  spent : Int32
-  rounds : Int32
+  accounting : @repomix.CodeContextSession
 }
 
 ///|
 fn code_session_json(session : CodeSession?) -> Json {
   match session {
     None => Json::null()
-    Some(session) =>
-      {
-        "runId": session.run_id,
-        "limit": session.limit,
-        "spent": session.spent,
-        "remaining": session.limit - session.spent,
-        "rounds": session.rounds,
-        "maxRounds": 3,
-        "canContinue": session.rounds < 3 && session.spent < session.limit,
+    Some(session) => {
+      let fields = match session.accounting.to_json() {
+        Object(fields) => fields
+        _ => Map([])
       }
+      fields["runId"] = Json(session.run_id)
+      Json::object(fields)
+    }
   }
 }
 
@@ -197,8 +193,7 @@ async fn code_context(state : State, value : Json) -> Json {
           guard state.code_session is Some(previous) &&
             previous.run_id == run_id &&
             previous.directory == directory &&
-            previous.rounds < 3 &&
-            previous.spent < previous.limit else {
+            previous.accounting.can_continue() else {
             invalid_code_session()
             return (Json::null(), None)
           }
@@ -216,13 +211,13 @@ async fn code_context(state : State, value : Json) -> Json {
       // Copy, retaining every caller field so Root rejects unknown fields and
       // invalid selector/range shapes. Only the continuation budget is supplied.
       let spec_fields = spec_fields.copy()
-      if previous is Some(previous) {
-        if spec_fields.contains("maxTokens") {
-          invalid()
+      let spec = try {
+        match previous {
+          Some(previous) =>
+            previous.accounting.request(Json::object(spec_fields))
+          None => @repomix.CodeContextSpec::from_json(Json::object(spec_fields))
         }
-        spec_fields["maxTokens"] = Json(previous.limit - previous.spent)
-      }
-      let spec = @repomix.CodeContextSpec::from_json(Json::object(spec_fields)) catch {
+      } catch {
         _ => raise PublicError(400, "invalid_request", "Invalid request.")
       }
       if state.next_run == 9223372036854775807L {
@@ -235,23 +230,14 @@ async fn code_context(state : State, value : Json) -> Json {
         None => Json::null()
       }
       let next = if plan.status == "complete" && plan.text is Some(_) {
+        let accounting = match previous {
+          Some(previous) => previous.accounting
+          None => @repomix.CodeContextSession::new(spec.max_tokens)
+        }
         Some({
           run_id: "code-" + state.next_run.to_string(),
           directory,
-          limit: match previous {
-            Some(previous) => previous.limit
-            None => spec.max_tokens
-          },
-          spent: plan.tokens +
-          (match previous {
-            Some(previous) => previous.spent
-            None => 0
-          }),
-          rounds: 1 +
-          (match previous {
-            Some(previous) => previous.rounds
-            None => 0
-          }),
+          accounting: accounting.advance(plan),
         })
       } else {
         state.code_session

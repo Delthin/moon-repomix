@@ -2,9 +2,7 @@
 priv struct CodeSession {
   run_id : String
   uri : String
-  limit : Int32
-  spent : Int32
-  rounds : Int32
+  accounting : @repomix.CodeContextSession
 }
 
 ///|
@@ -104,30 +102,37 @@ async fn read_code(state : State, args : Json) -> Json {
         state.resources.contains(previous.uri) else {
         return error_result("StaleCodeSession")
       }
-      if previous.rounds >= 3 {
-        return error_result("CodeRoundLimit")
-      }
-      if previous.spent >= previous.limit {
-        return error_result("CodeBudgetExhausted")
-      }
       Some(previous)
     }
     _ => return invalid()
   }
   let cap = match previous {
-    Some(previous) => previous.limit - previous.spent
+    Some(previous) => previous.accounting.remaining()
     None =>
       match values.get("maxTokens") {
         Some(value) => positive(value, state.max_tokens)
         None => state.max_tokens
       }
   }
-  let spec = @repomix.CodeContextSpec::from_json({
-    "maxTokens": cap,
-    "maxReadBytes": values.get("maxReadBytes").unwrap_or(Json(16777216)),
-    "requests": values.get("requests").unwrap_or(Json::null()),
-  }) catch {
+  let spec = try {
+    match previous {
+      Some(previous) =>
+        previous.accounting.request({
+          "maxReadBytes": values.get("maxReadBytes").unwrap_or(Json(16777216)),
+          "requests": values.get("requests").unwrap_or(Json::null()),
+        })
+      None =>
+        @repomix.CodeContextSpec::from_json({
+          "maxTokens": cap,
+          "maxReadBytes": values.get("maxReadBytes").unwrap_or(Json(16777216)),
+          "requests": values.get("requests").unwrap_or(Json::null()),
+        })
+    }
+  } catch {
     @repomix.InvalidCodeSpec => return invalid()
+    @repomix.CodeRoundLimit => return error_result("CodeRoundLimit")
+    @repomix.CodeBudgetExhausted => return error_result("CodeBudgetExhausted")
+    _ => return error_result("ResourceLimit")
   }
   if state.busy {
     return error_result("Busy")
@@ -190,20 +195,14 @@ async fn read_code(state : State, args : Json) -> Json {
   }
   let run = state.session_prefix + "-" + state.next_run.to_string()
   let uri = "moon-repomix://context/" + run + "/code.json"
-  let spent = plan.tokens +
-    (match previous {
-      Some(previous) => previous.spent
-      None => 0
-    })
-  let limit = match previous {
-    Some(previous) => previous.limit
-    None => cap
+  let accounting = match previous {
+    Some(previous) => previous.accounting
+    None => @repomix.CodeContextSession::new(cap)
   }
-  let rounds = 1 +
-    (match previous {
-      Some(previous) => previous.rounds
-      None => 0
-    })
+  let accounting = accounting.advance(plan)
+  let spent = accounting.spent
+  let limit = accounting.limit
+  let rounds = accounting.rounds
   let resource : Resource = {
     uri,
     name: "code.json",
@@ -246,7 +245,7 @@ async fn read_code(state : State, args : Json) -> Json {
   @async.sleep(0)
   state.resources.clear()
   state.resources[uri] = resource
-  state.code_session = Some({ run_id: run, uri, limit, spent, rounds, })
+  state.code_session = Some({ run_id: run, uri, accounting, })
   state.next_run += 1
   response
 }
