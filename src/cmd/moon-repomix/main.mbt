@@ -46,6 +46,7 @@ suberror CliError {
 priv struct RunState {
   mut report_json : Bool
   mut publication : String
+  mut operation : String
 }
 
 ///|
@@ -110,6 +111,18 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
   }
   let patch = read_config(cli, cwd)
   let resolved = @config.resolve(cli, patch) catch { _ => raise Configuration }
+  if (cli.context_request is Some(_) || cli.context_stdio) &&
+    (
+      resolved.remote is Some(_) ||
+      resolved.remote_branch is Some(_) ||
+      resolved.split_output is Enabled(_) ||
+      resolved.token_budget is Some(_) ||
+      resolved.include_diffs ||
+      resolved.include_logs ||
+      !resolved.include_files
+    ) {
+    raise Configuration
+  }
   if cli.mcp &&
     (
       resolved.remote is Some(_) ||
@@ -187,6 +200,9 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
     None => @platform.tokenizer_path() catch { _ => raise Resource }
   }
   let runtime = @repomix.Runtime::load(resource)
+  if cli.context_request is Some(_) || cli.context_stdio {
+    return run_context(cli, options, runtime, state)
+  }
   if cli.webui {
     @webui.serve(options, runtime, resource, port=cli.webui_port)
     return 0
@@ -284,10 +300,20 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
 async fn main {
   let argv = @env.args()
   // Preserve machine diagnostics even when a later option fails to parse.
-  let state = { report_json: false, publication: "not_started", }
+  let state = {
+    report_json: false,
+    publication: "not_started",
+    operation: "pack",
+  }
   for arg in argv[1:] {
     if arg == "--" {
       break
+    }
+    if arg == "--context-stdio" {
+      state.operation = "context_stdio"
+    }
+    if arg == "--context-request" || arg.has_prefix("--context-request=") {
+      state.operation = "context_request"
     }
     if arg == "--report-json" {
       state.report_json = true
@@ -360,9 +386,16 @@ async fn main {
               @repomix.InputLimitExceeded(kind=_, limit=_) => "InputLimitError"
               _ => category
             }
-            write_json_report(
-              error_report(safe_category, field, limit, state.publication),
-            ) catch {
+            let report = error_report(
+              safe_category,
+              field,
+              limit,
+              state.publication,
+            )
+            if report is Object(fields) {
+              fields["operation"] = Json(state.operation)
+            }
+            write_json_report(report) catch {
               _ => ()
             }
           } else {

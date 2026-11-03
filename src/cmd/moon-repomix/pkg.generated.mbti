@@ -6,6 +6,8 @@ package "Delthin/moon_repomix/cmd/moon-repomix"
 // Errors
 type CliError
 
+type ContextEntryError
+
 // Types and methods
 
 // Type aliases

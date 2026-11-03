@@ -133,6 +133,9 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
   let mut stdin_mode = StdinMode::Off
   let explain_paths : Array[String] = []
   let mut report_json = false
+  let mut context_request : String? = None
+  let mut context_stdio = false
+  let context_conflicts : Array[String] = []
   let mut mcp = false
   let mut webui = false
   let mut webui_port = 8765
@@ -166,6 +169,15 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
     }
     let original_key = key
     let key = canonical_option(key)
+    if [
+        "--remote", "--remote-branch", "--split-output", "--no-split-output", "--token-budget",
+        "--token-count-tree", "--top-files-len", "--include-diffs", "--no-include-diffs",
+        "--include-logs", "--no-include-logs", "--include-logs-count", "--max-git-bytes",
+        "--mcp-max-tokens", "--mcp-max-output-bytes", "--mcp-max-volumes", "--parsable-style",
+        "--no-files", "--webui-port", "--compress", "--no-compress",
+      ].contains(key) {
+      context_conflicts.push(key)
+    }
     if ![
         "--webui", "--webui-port", "--tokenizer-path", "--max-files", "--max-total-size",
         "--max-file-size", "-h", "--help", "--help-all", "-v", "--version",
@@ -213,6 +225,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
       | "--mcp-max-output-bytes"
       | "--mcp-max-volumes"
       | "--explain-path"
+      | "--context-request"
       | "-c"
       | "--config"
       | "--tokenizer-path" => true
@@ -252,6 +265,10 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
             patch.keep_full_patterns,
             csv_patterns(value),
           )
+        "--context-request" => {
+          validate_path(value, "context.request")
+          context_request = Some(value)
+        }
         "--explain-path" => {
           validate_path(value, "explain.paths")
           if explain_paths.length() >= 256 {
@@ -344,6 +361,7 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
         raise InvalidValue(key)
       }
       match key {
+        "--context-stdio" => context_stdio = true
         "--mcp" => mcp = true
         "--webui" => webui = true
         "--stdout" => stdout = true
@@ -425,6 +443,20 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
   if webui && !webui_other_options.is_empty() {
     raise Conflict("webui.options")
   }
+  if context_request is Some(_) || context_stdio {
+    if (context_request is Some(_) && context_stdio) ||
+      mcp ||
+      webui ||
+      stdin_mode != Off ||
+      !explain_paths.is_empty() ||
+      action == Init ||
+      !context_conflicts.is_empty() {
+      raise Conflict("context.options")
+    }
+    if context_stdio && patch.output is Some(_) {
+      raise Conflict("context-stdio/output")
+    }
+  }
   validate_patch(patch)
   {
     directory: directory.unwrap_or("."),
@@ -432,6 +464,8 @@ pub fn parse_cli(args : Array[String]) -> Cli raise ConfigError {
     action,
     stdout,
     stdin_mode,
+    context_request,
+    context_stdio,
     explain_paths,
     report_json,
     mcp,

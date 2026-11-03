@@ -148,6 +148,8 @@ pub(all) struct Cli {
   action : Action
   stdout : Bool
   stdin_mode : StdinMode
+  context_request : String?
+  context_stdio : Bool
   explain_paths : Array[String]
   report_json : Bool
   mcp : Bool
@@ -399,7 +401,27 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
   let split_output = patch.split_output.unwrap_or(
     file.split_output.unwrap_or(SplitOutput::Disabled),
   )
-  let default_output = if split_output is SplitOutput::Enabled(_) {
+  let context = cli.context_request is Some(_) || cli.context_stdio
+  if context &&
+    (
+      file.remote is Some(_) ||
+      file.remote_branch is Some(_) ||
+      file.split_output is Some(Enabled(_)) ||
+      file.token_budget is Some(_) ||
+      file.include_diffs == Some(true) ||
+      file.include_logs == Some(true) ||
+      file.include_files == Some(false) ||
+      file.compress == Some(true) ||
+      file.include_logs_count is Some(_) ||
+      file.max_git_bytes is Some(_) ||
+      file.top_files_length is Some(_) ||
+      file.token_count_tree is Some(_)
+    ) {
+    raise Conflict("context.config")
+  }
+  let default_output = if context {
+    "-"
+  } else if split_output is SplitOutput::Enabled(_) {
     "moon-repomix-output"
   } else {
     match style {
@@ -409,7 +431,17 @@ pub fn resolve(cli : Cli, json : Patch?) -> Options raise ConfigError {
       Plain => "repomix-output.txt"
     }
   }
-  let output = patch.output.unwrap_or(file.output.unwrap_or(default_output))
+  // A pack output setting never silently redirects a portable response.
+  let output = patch.output.unwrap_or(
+    if context {
+      default_output
+    } else {
+      file.output.unwrap_or(default_output)
+    },
+  )
+  if cli.context_stdio && output != "-" {
+    raise Conflict("context-stdio/output")
+  }
   let token_budget = match patch.token_budget {
     Some(_) as value => value
     None => file.token_budget

@@ -1,0 +1,698 @@
+----
+import {
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
+  "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/encoding/utf8",
+}
+----
+
+///|
+// One supplied frozen Native binary. No builds, installs, MCP or HTTP calls.
+struct Fixture {
+  binary : String
+  vocab : String
+  log : String
+  root : String
+  mut invocations : Int32
+}
+
+///|
+struct Session {
+  input : @process.WriteToProcess
+  output : @process.ReadFromProcess
+  log : String
+  mut pending : Bytes
+  mut requests : Int32
+}
+
+///|
+fn prop(value : Json, key : String) -> Json raise {
+  guard value is Object(fields) && fields.get(key) is Some(found) else {
+    fail("missing field: " + key)
+  }
+  found
+}
+
+///|
+fn text(value : Json) -> String raise {
+  guard value is String(found) else { fail("expected string") }
+  found
+}
+
+///|
+fn number(value : Json) -> Int32 raise {
+  guard value is Number(found, ..) else { fail("expected number") }
+  found.to_int()
+}
+
+///|
+fn rows(value : Json) -> Array[Json] raise {
+  guard value is Array(found) else { fail("expected array") }
+  found
+}
+
+///|
+fn absent(value : Json, key : String) -> Bool {
+  value is Object(fields) && !fields.contains(key)
+}
+
+///|
+fn task(path : String, cap~ : Int32 = 12000) -> Json {
+  {
+    "schemaVersion": 1,
+    "operation": "plan_task_context",
+    "spec": {
+      "maxTokens": cap,
+      "tasks": [
+        { "id": "read", "required": [{ "path": path, "mode": "full" }] },
+      ],
+    },
+  }
+}
+
+///|
+fn code(cap : Int32, path~ : String = "src/code.js") -> Json {
+  {
+    "schemaVersion": 1,
+    "operation": "read_code_context",
+    "spec": {
+      "maxTokens": cap,
+      "requests": [
+        { "path": path, "symbols": ["answer"], "includeDependencies": true },
+      ],
+    },
+  }
+}
+
+///|
+fn more(id : String, path~ : String = "src/code.js") -> Json {
+  {
+    "schemaVersion": 1,
+    "operation": "read_code_context",
+    "continueFrom": id,
+    "spec": {
+      "requests": [
+        { "path": path, "symbols": ["answer"], "includeDependencies": true },
+      ],
+    },
+  }
+}
+
+///|
+async fn put(path : String, body : String) -> Unit {
+  @fs.write_file(path, body, create_mode=CreateNew)
+}
+
+///|
+fn common(f : Fixture) -> Array[String] {
+  [
+    f.root,
+    "--tokenizer-path",
+    f.vocab,
+    "--no-gitignore",
+    "--include",
+    "src/**",
+    "--style=json",
+    "--report-json",
+  ]
+}
+
+///|
+fn safe(value : String, f : Fixture) -> Unit raise {
+  for
+    forbidden in [
+      f.root,
+      "/Volumes/",
+      "/Users/",
+      "CONTEXT_PRIVATE_SENTINEL",
+      "OUTSIDE_SENTINEL",
+    ] {
+    assert_false(value.contains(forbidden))
+  }
+}
+
+///|
+async fn invoke(
+  f : Fixture,
+  name : String,
+  args : Array[String],
+) -> (Int32, String, String) {
+  f.invocations += 1
+  let dir = f.log + "/" + name
+  @fs.mkdir(dir)
+  put(
+    dir + "/argv.json",
+    Json::array(args.map(Json::string)).stringify() + "\n",
+  )
+  let (exit, out, err) = @async.with_timeout(90000, () => {
+    @process.collect_output(f.binary, args, cwd=f.root)
+  })
+  put(dir + "/stdout.ndjson", out.text())
+  put(dir + "/stderr.ndjson", err.text())
+  put(dir + "/exit.json", ({ "exitCode": exit } : Json).stringify() + "\n")
+  (exit, out.text(), err.text())
+}
+
+///|
+async fn single(
+  f : Fixture,
+  name : String,
+  request : Json,
+  extra~ : Array[String] = [],
+) -> (Int32, String, String) {
+  let path = f.log + "/" + name + ".request.json"
+  put(path, request.stringify())
+  invoke(f, name, common(f) + ["--context-request", path] + extra)
+}
+
+///|
+fn report(
+  err : String,
+  operation : String,
+  publication : String,
+  exit : Int32,
+) -> Unit raise {
+  let value = @json.parse(err)
+  assert_eq(prop(value, "operation"), Json(operation))
+  assert_eq(prop(value, "publication"), Json(publication))
+  assert_eq(prop(value, "exitCode"), Json(exit))
+}
+
+///|
+fn body(value : Json) -> String raise {
+  assert_eq(prop(value, "ok"), Json(true))
+  let body = text(prop(value, "text"))
+  assert_eq(number(prop(value, "bytes")), @utf8.encode(body).length())
+  assert_true(number(prop(value, "tokens")) > 0)
+  body
+}
+
+///|
+async fn file_cases(f : Fixture) -> (Int32, String) {
+  let (exit, out, err) = single(f, "task", task("src/alpha.txt"))
+  assert_eq(exit, 0)
+  report(err, "plan_task_context", "committed", 0)
+  let result = @json.parse(out)
+  let full = body(result)
+  assert_eq(prop(result, "auditIncludedInText"), Json(false))
+  assert_true(number(prop(result, "auditTokens")) > 0)
+  assert_eq(
+    number(prop(result, "auditBytes")),
+    @utf8.encode(text(prop(result, "auditText"))).length(),
+  )
+  assert_true(full.contains("ALPHA_SENTINEL"))
+  let task_files = prop(@json.parse(full), "files")
+  assert_eq(
+    prop(task_files, "src/alpha.txt"),
+    Json("ALPHA_SENTINEL\r\n完整正文 😀\r\n"),
+  )
+  let target = f.log + "/response.json"
+  put(target, "OLD_RESPONSE")
+  let (exit, out, err) = single(f, "atomic-success", task("src/alpha.txt"), extra=[
+    "-o", target,
+  ])
+  assert_eq(exit, 0)
+  assert_eq(out, "")
+  report(err, "plan_task_context", "committed", 0)
+  let preserved = @fs.read_file(target).text()
+  assert_eq(body(@json.parse(preserved)), full)
+  for
+    (name, request) in [
+      ("required-missing", task("src/missing.txt")),
+      ("task-over-budget", task("src/alpha.txt", cap=1)),
+      ("ignored", task("src/ignored.txt")),
+      ("outside-include", task("README.md")),
+      ("secret", task("src/secret.js")),
+    ] {
+    let (exit, out, err) = single(f, name, request, extra=["-o", target])
+    assert_eq(exit, 1)
+    assert_eq(out, "")
+    report(err, "plan_task_context", "not_started", 1)
+    assert_eq(@fs.read_file(target).text(), preserved)
+    safe(err, f)
+  }
+  let invalid : Json = {
+    "schemaVersion": 1,
+    "operation": "plan_task_context",
+    "spec": {},
+    "permissions": true,
+  }
+  let (exit, out, err) = single(f, "invalid-request-preserves-file", invalid, extra=[
+    "-o", target,
+  ])
+  assert_eq(exit, 1)
+  assert_eq(out, "")
+  report(err, "context_request", "not_started", 1)
+  assert_eq(@fs.read_file(target).text(), preserved)
+  let instructions = f.log + "/instructions.md"
+  put(instructions, "INSTRUCTIONS_SENTINEL\n")
+  let (exit, out, _) = single(f, "root-templates", task("src/alpha.txt"), extra=[
+    "--header-text", "HEADER_SENTINEL", "--instruction-file-path", instructions,
+  ])
+  assert_eq(exit, 0)
+  let templated = body(@json.parse(out))
+  assert_true(templated.contains("HEADER_SENTINEL"))
+  assert_true(templated.contains("INSTRUCTIONS_SENTINEL"))
+  let (exit, out, err) = single(f, "missing-parent", task("src/alpha.txt"), extra=[
+    "-o",
+    f.log + "/missing/response.json",
+  ])
+  assert_eq(exit, 1)
+  assert_eq(out, "")
+  report(err, "plan_task_context", "not_started", 1)
+  assert_eq(
+    prop(prop(@json.parse(err), "error"), "category"),
+    Json("OutputError"),
+  )
+  let (exit, out, err) = single(f, "code", code(12000))
+  assert_eq(exit, 0)
+  report(err, "read_code_context", "committed", 0)
+  let result = @json.parse(out)
+  let exact = body(result)
+  let tokens = number(prop(result, "tokens"))
+  assert_eq(prop(result, "auditIncludedInText"), Json(true))
+  assert_eq(prop(@json.parse(exact), "audit"), prop(result, "audit"))
+  assert_eq(prop(result, "canContinue"), Json(false))
+  let files = rows(prop(@json.parse(exact), "files"))
+  assert_eq(files.length(), 1)
+  let fragments = rows(prop(files[0], "fragments"))
+  assert_eq(fragments.length(), 1)
+  assert_eq(prop(fragments[0], "startLine"), Json(1))
+  assert_eq(prop(fragments[0], "endLine"), Json(3))
+  assert_eq(
+    prop(fragments[0], "text"),
+    Json(
+      "const LIMIT = 17;\nfunction helper() { return LIMIT; }\nfunction answer() { return helper(); }\n",
+    ),
+  )
+  assert_true(exact.contains("answer"))
+  assert_false(exact.contains("unrelated implementation padding"))
+  let id = text(prop(result, "runId"))
+  let (exit, out, err) = single(f, "cross-process-stale", more(id))
+  assert_eq(exit, 1)
+  report(err, "read_code_context", "committed", 1)
+  let failure = @json.parse(out)
+  assert_eq(prop(prop(failure, "error"), "category"), Json("StaleCodeSession"))
+  safe(out, f)
+  let secret_code : Json = {
+    "schemaVersion": 1,
+    "operation": "read_code_context",
+    "spec": {
+      "maxTokens": 12000,
+      "requests": [{ "path": "src/secret.js", "symbols": ["harmless"] }],
+    },
+  }
+  let (exit, out, _) = single(f, "code-original-source-scan", secret_code)
+  assert_eq(exit, 1)
+  let rejected = @json.parse(out)
+  assert_eq(prop(rejected, "status"), Json("unavailable"))
+  assert_eq(prop(prop(rejected, "security"), "status"), Json("excluded"))
+  assert_true(absent(rejected, "text"))
+  safe(out, f)
+  let (exit, out, _) = single(f, "code-exact-cap", code(tokens))
+  assert_eq(exit, 0)
+  assert_eq(body(@json.parse(out)), exact)
+  let (exit, out, _) = single(f, "code-one-under", code(tokens - 1))
+  assert_eq(exit, 1)
+  let failure = @json.parse(out)
+  assert_eq(prop(failure, "status"), Json("over_budget"))
+  assert_eq(prop(failure, "requiredTokens"), Json(tokens))
+  assert_true(absent(failure, "text"))
+  let config = f.log + "/pack-config.json"
+  put(
+    config, "{\"output\":{\"filePath\":\"must-not-write.xml\",\"style\":\"json\"}}",
+  )
+  let (exit, out, _) = single(
+    f,
+    "config-output-isolation",
+    task("src/alpha.txt"),
+    extra=["-c", config],
+  )
+  assert_eq(exit, 0)
+  assert_eq(body(@json.parse(out)), full)
+  assert_false(@fs.exists(f.root + "/must-not-write.xml"))
+  let (exit, out, _) = single(f, "explicit-stdout", task("src/alpha.txt"), extra=[
+    "-o", "-",
+  ])
+  assert_eq(exit, 0)
+  assert_eq(body(@json.parse(out)), full)
+  let path = f.log + "/boundary.request.json"
+  let encoded = task("src/alpha.txt").stringify()
+  put(path, encoded + " ".repeat(65536 - @utf8.encode(encoded).length()))
+  let (exit, out, _) = invoke(
+    f,
+    "file-64k",
+    common(f) + ["--context-request", path],
+  )
+  assert_eq(exit, 0)
+  assert_eq(body(@json.parse(out)), full)
+  let oversized = f.log + "/oversized.request.json"
+  put(oversized, " ".repeat(65537))
+  let (exit, out, _) = invoke(
+    f,
+    "file-oversized",
+    common(f) + ["--context-request", oversized],
+  )
+  assert_eq(exit, 1)
+  assert_eq(
+    prop(prop(@json.parse(out), "error"), "category"),
+    Json("RequestTooLarge"),
+  )
+  for
+    (name, bytes) in [
+      ("invalid-utf8", b"\xff"),
+      ("bom", b"\xef\xbb\xbf{}"),
+      ("broken-json", b"{broken"),
+    ] {
+    let path = f.log + "/" + name + ".request.json"
+    @fs.write_file(path, bytes, create_mode=CreateNew)
+    let (exit, out, err) = invoke(
+      f,
+      name,
+      common(f) + ["--context-request", path],
+    )
+    assert_eq(exit, 1)
+    safe(out, f)
+    safe(err, f)
+    assert_eq(
+      prop(prop(@json.parse(out), "error"), "category"),
+      Json("InvalidContextRequest"),
+    )
+  }
+  for
+    (name, extra) in [
+      ("conflict-budget", ["--budget=20"]),
+      ("conflict-compress", ["--compress"]),
+      ("conflict-remote", ["--remote=https://example.com/repo.git"]),
+      ("conflict-input", ["--stdin"]),
+      ("conflict-service", ["--mcp"]),
+    ] {
+    let (exit, out, err) = single(f, name, task("src/alpha.txt"), extra~)
+    assert_eq(exit, 1)
+    assert_eq(out, "")
+    safe(err, f)
+    report(err, "context_request", "not_started", 1)
+  }
+  // An ordinary pack command still publishes its old document, not an envelope.
+  let (exit, out, err) = invoke(f, "old-pack", common(f) + ["--stdout"])
+  assert_eq(exit, 0)
+  assert_true(prop(@json.parse(out), "files") is Object(_))
+  assert_true(absent(@json.parse(out), "operation"))
+  report(err, "pack", "committed", 0)
+  (tokens, exact)
+}
+
+///|
+async fn send_raw(s : Session, bytes : Bytes) -> Json {
+  s.requests += 1
+  @fs.write_file(
+    s.log + "/stdin.bin",
+    bytes,
+    append=true,
+    create_mode=OpenExisting,
+  )
+  s.input.write(bytes)
+  @async.with_timeout(90000, () => {
+    for ;; {
+      if s.pending.find(b"\n") is Some(end) {
+        let line = s.pending[:end].to_owned()
+        s.pending = s.pending[end + 1:].to_owned()
+        break @json.parse(@utf8.decode(line))
+      }
+      guard s.output.read_some() is Some(bytes) else {
+        fail("EOF before context response")
+      }
+      @fs.write_file(
+        s.log + "/stdout.ndjson",
+        bytes,
+        append=true,
+        create_mode=OpenExisting,
+      )
+      s.pending = s.pending + bytes
+      assert_true(s.pending.length() <= 16777216)
+    }
+  })
+}
+
+///|
+async fn send(s : Session, value : Json) -> Json {
+  send_raw(s, @utf8.encode(value.stringify() + "\n"))
+}
+
+///|
+fn failure(value : Json, category : String) -> Unit raise {
+  assert_eq(prop(value, "ok"), Json(false))
+  assert_true(absent(value, "text"))
+  assert_eq(prop(prop(value, "error"), "category"), Json(category))
+}
+
+///|
+async fn workflow(
+  s : Session,
+  tokens : Int32,
+  exact : String,
+  f : Fixture,
+) -> Unit {
+  let first = send(s, code(tokens * 3))
+  assert_eq(body(first), exact)
+  assert_eq(prop(first, "round"), Json(1))
+  assert_eq(prop(first, "remainingTokens"), Json(tokens * 2))
+  let id1 = text(prop(first, "runId"))
+  failure(send_raw(s, b"{broken\n"), "InvalidContextRequest")
+  failure(send_raw(s, b"\xff\n"), "InvalidContextRequest")
+  failure(
+    send(s, {
+      "schemaVersion": 1,
+      "operation": "read_code_context",
+      "continueFrom": id1,
+      "spec": {
+        "maxTokens": 1000000,
+        "requests": [{ "path": "src/code.js", "full": true }],
+      },
+    }),
+    "InvalidContextRequest",
+  )
+  failure(
+    send(s, {
+      "schemaVersion": 1,
+      "operation": "read_code_context",
+      "root": "/tmp/OUTSIDE_SENTINEL",
+      "spec": {},
+    }),
+    "InvalidContextRequest",
+  )
+  failure(send(s, task("../OUTSIDE_SENTINEL")), "InvalidContextRequest")
+  let unavailable = send(s, more(id1, path="src/missing.js"))
+  assert_eq(prop(unavailable, "ok"), Json(false))
+  assert_eq(prop(unavailable, "status"), Json("unavailable"))
+  assert_true(absent(unavailable, "text"))
+  let failed_task = send(s, task("src/ignored.txt"))
+  assert_eq(prop(failed_task, "ok"), Json(false))
+  let failed_new = send(s, code(1))
+  assert_eq(prop(failed_new, "status"), Json("over_budget"))
+  let second = send(s, more(id1))
+  assert_eq(body(second), exact)
+  assert_eq(prop(second, "round"), Json(2))
+  assert_eq(prop(second, "sessionTokens"), Json(tokens * 2))
+  assert_eq(prop(second, "remainingTokens"), Json(tokens))
+  let id2 = text(prop(second, "runId"))
+  assert_true(id2 != id1)
+  failure(send(s, more(id1)), "StaleCodeSession")
+  let third = send(s, more(id2))
+  assert_eq(body(third), exact)
+  assert_eq(prop(third, "round"), Json(3))
+  assert_eq(prop(third, "sessionTokens"), Json(tokens * 3))
+  assert_eq(prop(third, "remainingTokens"), Json(0))
+  assert_eq(prop(third, "canContinue"), Json(false))
+  failure(send(s, more(text(prop(third, "runId")))), "CodeRoundLimit")
+  // Remaining-budget failures retain the most recent success and its allowance.
+  let fresh = send(s, code(tokens * 2 - 1))
+  assert_eq(body(fresh), exact)
+  let fresh_id = text(prop(fresh, "runId"))
+  failure(send(s, more(id2)), "StaleCodeSession")
+  let over = send(s, more(fresh_id))
+  assert_eq(prop(over, "status"), Json("over_budget"))
+  assert_true(absent(over, "text"))
+  let over2 = send(s, more(fresh_id))
+  assert_eq(over2, over)
+  let fresh = send(s, code(tokens))
+  assert_eq(body(fresh), exact)
+  failure(send(s, more(text(prop(fresh, "runId")))), "CodeBudgetExhausted")
+  // Three rounds is a hard cap even with budget left.
+  let first = send(s, code(tokens * 10))
+  let second = send(s, more(text(prop(first, "runId"))))
+  let third = send(s, more(text(prop(second, "runId"))))
+  assert_eq(prop(third, "round"), Json(3))
+  assert_eq(prop(third, "remainingTokens"), Json(tokens * 7))
+  failure(send(s, more(text(prop(third, "runId")))), "CodeRoundLimit")
+  let fresh = send(s, code(tokens * 4))
+  let latest = text(prop(fresh, "runId"))
+  let encoded = task("src/alpha.txt").stringify()
+  let boundary = send_raw(
+    s,
+    @utf8.encode(
+      encoded + " ".repeat(65536 - @utf8.encode(encoded).length()) + "\n",
+    ),
+  )
+  assert_eq(prop(boundary, "ok"), Json(true))
+  failure(send(s, more(latest)), "StaleCodeSession")
+  // Batched lines are processed serially; no missing or extra response.
+  let first = send_raw(
+    s,
+    @utf8.encode(
+      task("src/alpha.txt").stringify() +
+      "\n" +
+      task("src/alpha.txt").stringify() +
+      "\n",
+    ),
+  )
+  assert_eq(prop(first, "ok"), Json(true))
+  let second = send_raw(s, b"")
+  assert_eq(prop(second, "ok"), Json(true))
+  // Failure metadata never echoes request values or private paths.
+  safe(unavailable.stringify(), f)
+  safe(failed_task.stringify(), f)
+}
+
+///|
+async fn stream_case(
+  f : Fixture,
+  name : String,
+  tokens : Int32,
+  exact : String,
+  oversized : Bool,
+) -> Unit {
+  f.invocations += 1
+  let directory = f.log + "/" + name
+  @fs.mkdir(directory)
+  put(directory + "/stdin.bin", "")
+  put(directory + "/stdout.ndjson", "")
+  let (stdin, input) = @process.write_to_process()
+  let (output, stdout) = @process.read_from_process()
+  let (errors, stderr) = @process.read_from_process()
+  defer input.close()
+  defer output.close()
+  defer errors.close()
+  let s : Session = {
+    input,
+    output,
+    log: directory,
+    pending: b"",
+    requests: 0,
+  }
+  let args = common(f) + ["--context-stdio"]
+  put(
+    directory + "/argv.json",
+    Json::array(args.map(Json::string)).stringify() + "\n",
+  )
+  @async.with_task_group(group => {
+    let child = @process.spawn(
+      group,
+      f.binary,
+      args,
+      stdin~,
+      stdout~,
+      stderr~,
+      cwd=f.root,
+    )
+    let diagnostics = group.spawn(() => {
+      let data = errors.read_all().text()
+      put(directory + "/stderr.ndjson", data)
+      safe(data, f)
+      let reports = data.split("\n").filter(line => !line.is_empty()).collect()
+      // Batched response reads use an empty send; all still correspond to lines.
+      assert_eq(reports.length(), s.requests)
+      for line in reports {
+        assert_eq(prop(@json.parse(line), "publication"), Json("committed"))
+      }
+    })
+    if oversized {
+      let response = send_raw(s, @utf8.encode(" ".repeat(65537)))
+      failure(response, "RequestTooLarge")
+      // Keep stdin open: the child must exit without waiting for a terminator.
+      let exit = @async.with_timeout(5000, () => child.wait())
+      assert_eq(exit, 1)
+      put(
+        directory + "/exit.json",
+        ({ "exitCode": exit } : Json).stringify() + "\n",
+      )
+    } else {
+      workflow(s, tokens, exact, f)
+      input.close()
+      let exit = @async.with_timeout(5000, () => child.wait())
+      assert_eq(exit, 0)
+      put(
+        directory + "/exit.json",
+        ({ "exitCode": exit } : Json).stringify() + "\n",
+      )
+    }
+    assert_true(s.pending.is_empty())
+    assert_true(
+      @async.with_timeout(5000, () => output.read_all().binary()).is_empty(),
+    )
+    diagnostics.wait()
+  })
+  put(
+    directory + "/result.json",
+    ({ "state": "passed", "requests": s.requests } : Json).stringify() + "\n",
+  )
+}
+
+///|
+async fn main {
+  let args = @env.args()
+  guard args.length() == 5 && args[1] == "--ready" else {
+    fail("expected --ready FROZEN_NATIVE_BINARY VOCABULARY NEW_LOG_DIRECTORY")
+  }
+  let binary = @fs.realpath(args[2])
+  let vocab = @fs.realpath(args[3])
+  let log = args[4]
+  assert_true(
+    binary.has_prefix("/") && vocab.has_prefix("/") && log.has_prefix("/"),
+  )
+  @fs.mkdir(log, permission=0o700)
+  let root = log + "/fixture"
+  @fs.mkdir(root + "/src", recursive=true)
+  put(root + "/src/alpha.txt", "ALPHA_SENTINEL\r\n完整正文 😀\r\n")
+  put(
+    root + "/src/code.js",
+    "const LIMIT = 17;\nfunction helper() { return LIMIT; }\nfunction answer() { return helper(); }\n" +
+    "// unrelated implementation padding\n".repeat(100),
+  )
+  put(root + "/src/ignored.txt", "CONTEXT_PRIVATE_SENTINEL\n")
+  put(
+    root + "/src/secret.js",
+    "const secret = '" +
+    "gh" +
+    "p_" +
+    "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" +
+    "';\nfunction harmless() { return 1; }\n",
+  )
+  put(root + "/.repomixignore", "src/ignored.txt\n")
+  put(root + "/README.md", "OUTSIDE_SENTINEL\n")
+  let f : Fixture = { binary, vocab, log, root, invocations: 0, }
+  let (tokens, exact) = file_cases(f)
+  stream_case(f, "stdio", tokens, exact, false)
+  stream_case(f, "stdio-oversized", tokens, exact, true)
+  put(
+    log + "/result.json",
+    (
+      {
+        "state": "passed",
+        "productInvocations": f.invocations,
+        "frozenNativeBinary": binary,
+        "wholeBodyTokens": tokens,
+        "independentTokenRecount": false,
+        "uncovered": [
+          "late publication cancellation", "16MiB response boundary", "cross-entry shared-material parity (host integration)",
+        ],
+      } : Json).stringify() +
+    "\n",
+  )
+  println(
+    "PASS: portable file/JSONL entries, exact bodies/audits, shared budget/three rounds, failure preservation, bounded input and ordinary pack compatibility",
+  )
+}

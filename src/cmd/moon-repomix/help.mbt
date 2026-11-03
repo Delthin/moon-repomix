@@ -24,6 +24,8 @@ let help : String =
   #|  Split output includes a separately counted index and conflicts with --budget/stdout.
   #|
   #|Other entry points:
+  #|      --context-request FILE  Portable task/code request -> JSON envelope
+  #|      --context-stdio         Serial JSONL task/code session (not MCP)
   #|      --remote HTTPS_URL     Pack a public repository
   #|      --webui                Local browser workbench
   #|      --mcp                  Read-only MCP stdio server
@@ -106,6 +108,18 @@ let full_help : String =
   #|      --quiet / --verbose        Diagnostic level (mutually exclusive)
   #|  --report-json overrides quiet. File/directory sums are not final document counts.
   #|  Place directory before --token-count-tree, or separate it with --.
+  #|
+  #|Portable task/code context:
+  #|      --context-request FILE    Strict UTF-8 JSON request; stdout JSON by default
+  #|      --context-stdio           Serial JSONL; same-process continuation, not MCP
+  #|  Request: schemaVersion=1, operation=plan_task_context|read_code_context, spec.
+  #|  File mode allows atomic -o FILE; stdio forbids -o and uses latest continueFrom.
+  #|  Code sessions share a cumulative maxTokens cap and at most 3 successful reads.
+  #|  Requests are bounded to 64KiB; responses to 16MiB. No persistent sessions.
+  #|  Conflicts: MCP/WebUI, stdin lists, explain, init, remote, split, pack budget.
+  #|  Selection, scanning, templates and host input limits still apply.
+  #|  --report-json writes operation/publication diagnostics only to stderr.
+  #|  See docs/context-cli.md for the portable schema and audit accounting.
   #|
   #|Local services:
   #|      --webui                    Read-only local Web UI on 127.0.0.1

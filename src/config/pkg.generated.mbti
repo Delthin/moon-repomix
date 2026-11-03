@@ -46,6 +46,8 @@ pub(all) struct Cli {
   action : Action
   stdout : Bool
   stdin_mode : StdinMode
+  context_request : String?
+  context_stdio : Bool
   explain_paths : Array[String]
   report_json : Bool
   mcp : Bool

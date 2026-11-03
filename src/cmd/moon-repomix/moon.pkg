@@ -10,6 +10,7 @@ import {
   "moonbitlang/async/stdio",
   "moonbitlang/async/os_error",
   "moonbitlang/core/env",
+  "moonbitlang/core/json",
   "moonbitlang/core/buffer",
   "moonbitlang/core/encoding/utf8",
 }
