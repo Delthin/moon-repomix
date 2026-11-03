@@ -613,6 +613,7 @@ async test "whole context response output ceiling rejects a real Root body witho
       "\"".repeat(1500000),
       create_mode=CreateNew,
     )
+    assert_eq(@fs.read_file(root + "/" + path).text().length(), 1500000)
   }
   try
     code_context(state, {
@@ -629,7 +630,22 @@ async test "whole context response output ceiling rejects a real Root body witho
     PublicError(413, "output_too_large", _) => ()
     _ => fail("wrong output-limit error")
   } noraise {
-    _ => fail("oversized envelope accepted")
+    response => {
+      let bytes = @utf8.encode(response.stringify()).length()
+      let report = test_result(response).get("report").unwrap_or(Json::null())
+      let audit = match response {
+        { "audit": { "document": audit, .. }, .. } => audit
+        _ => Json::null()
+      }
+      fail(
+        "oversized envelope accepted: bytes=" +
+        bytes.to_string() +
+        "; report=" +
+        report.stringify() +
+        "; audit=" +
+        audit.stringify(),
+      )
+    }
   }
   assert_eq(code_session_json(state.code_session), old)
   assert_false(state.busy)

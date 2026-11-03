@@ -392,7 +392,7 @@ async fn main {
               limit,
               state.publication,
             )
-            if report is Object(fields) {
+            if state.operation != "pack" && report is Object(fields) {
               fields["operation"] = Json(state.operation)
             }
             write_json_report(report) catch {
