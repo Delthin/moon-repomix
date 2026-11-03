@@ -69,6 +69,15 @@
         <select id="operationSelect"><option value="pack">普通打包</option><option value="task">任务预算</option><option value="code">代码补读</option></select>
         <p class="hint" id="operationHint">按全文、骨架或混合策略整理目录。</p>
       </section>
+      <section class="ins-sec">
+        <h2>请求配置</h2>
+        <div class="request-actions">
+          <button type="button" class="btn" id="importRequestBtn">导入配置…</button>
+          <button type="button" class="btn" id="saveRequestBtn" disabled>保存配置</button>
+        </div>
+        <input type="file" id="requestFile" accept="application/json,.json" hidden>
+        <p class="hint" id="presetMessage" aria-live="polite">任务与补读配置可供 CLI、SDK、MCP 复用；不包含源码或会话 ID。</p>
+      </section>
       <section class="ins-sec" id="packSettings">
         <h2>策略</h2>
         <div class="opt-group" role="radiogroup" aria-label="打包策略">
@@ -99,7 +108,7 @@
         <p class="hint">完整原文先扫描，再返回所选全文、行片段或符号目录。</p>
         <div id="codeEditor"></div>
         <button type="button" class="btn add-row" id="addCodeBtn">添加文件请求</button>
-        <p class="hint">符号与目录支持 JS / JSX / TS / TSX / Python；其他 UTF-8 文件可选全文或行范围。</p>
+        <p class="hint" id="definitionHint">连接 Native 后显示符号读取支持的文件类型；其他 UTF-8 文件可选全文或行范围。</p>
         <details class="advanced"><summary>高级补读 JSON</summary><label class="check-row"><input type="checkbox" id="codeAdvanced"> 使用 JSON 请求规范</label><textarea id="codeJson" hidden rows="7" spellcheck="false" aria-label="补读规范 JSON" placeholder='{"requests":[{"path":"src/main.ts","symbols":["main"]}]}'></textarea><p class="hint">首轮使用右侧预算，JSON 可含 maxReadBytes；续读禁止 maxTokens。</p></details>
       </section>
       <section class="ins-sec">

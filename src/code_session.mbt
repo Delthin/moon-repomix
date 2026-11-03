@@ -29,13 +29,18 @@ pub fn CodeContextSession::new(
 }
 
 ///|
+pub fn CodeContextSession::max_rounds() -> Int32 {
+  3
+}
+
+///|
 pub fn CodeContextSession::remaining(self : CodeContextSession) -> Int32 {
   self.limit - self.spent
 }
 
 ///|
 pub fn CodeContextSession::can_continue(self : CodeContextSession) -> Bool {
-  self.rounds < 3 && self.spent < self.limit
+  self.rounds < CodeContextSession::max_rounds() && self.spent < self.limit
 }
 
 ///|
@@ -55,7 +60,7 @@ pub fn CodeContextSession::request(
   self : CodeContextSession,
   value : Json,
 ) -> CodeContextSpec raise {
-  if self.rounds >= 3 {
+  if self.rounds >= CodeContextSession::max_rounds() {
     raise CodeRoundLimit
   }
   if self.spent >= self.limit {
@@ -78,7 +83,7 @@ pub fn CodeContextSession::advance(
   if plan.status != "complete" || plan.text is None {
     return self
   }
-  if self.rounds >= 3 {
+  if self.rounds >= CodeContextSession::max_rounds() {
     raise CodeRoundLimit
   }
   if self.spent >= self.limit {
@@ -101,7 +106,7 @@ pub fn CodeContextSession::to_json(self : CodeContextSession) -> Json {
     "spent": self.spent,
     "remaining": self.remaining(),
     "rounds": self.rounds,
-    "maxRounds": 3,
+    "maxRounds": CodeContextSession::max_rounds(),
     "canContinue": self.can_continue(),
   }
 }

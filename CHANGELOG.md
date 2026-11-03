@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- MoonBit `.mbt` / `.mbti` 的完整定义索引，供符号读取、符号目录和同文件依赖补读使用。
+- `ContextRequest` 版本化请求与 CLI `--context-request` / `--context-stdio`；任务和代码规格可在 SDK、CLI、MCP、工作台复用。
+- MCP `execute_context_request` / `context_capabilities`，HTTP 通用请求执行与纯校验接口；原有工具和路由保持兼容。
+- 工作台请求配置保存与导入，保留完整规格，不迁移源码、授权目录或会话 ID；支持类型从 Native 能力元数据读取。
+
+### Changed
+
+- SDK、CLI、MCP 和 HTTP 使用共享的代码会话预算与轮数策略，保持三轮成功、累计硬上限和失败不扣额度的规则。
+
 ## [0.6.0] - 2026-11-03
 
 ### Added

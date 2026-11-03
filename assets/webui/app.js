@@ -10,7 +10,7 @@
   const INT_MAX = 2147483647;
   const names = new Map([['raw', '全文'], ['mixed', '混合'], ['skeleton', '骨架'], ['task', '任务预算'], ['code', '代码补读']]);
   const state = {
-    session: null, connecting: false, online: false, busy: false,
+    session: null, connecting: false, online: false, busy: false, presetBusy: false,
     directory: '.', profile: 'mixed', operation: 'pack', snapshot: null, snapshotConfig: null,
     codeSession: null, latestAudit: null,
     stale: false, packError: '', view: 'processed', active: null, open: [],
@@ -105,10 +105,10 @@
   }
 
   function renderCli() {
-    el.commandLabel.textContent = state.operation === 'pack' ? 'CLI' : 'HTTP JSON';
+    el.commandLabel.textContent = state.operation === 'pack' ? 'CLI' : '请求 JSON';
     el.copyCliBtn.textContent = state.operation === 'pack' ? '复制命令' : '复制请求';
     try {
-      const command = state.operation === 'pack' ? cliCommand() : JSON.stringify(contextRequest(false));
+      const command = state.operation === 'pack' ? cliCommand() : JSON.stringify(portableRequest(false));
       el.cliText.textContent = command || '请输入有效的整数预算，以生成 CLI 命令。';
       el.copyCliBtn.disabled = command === null;
     } catch (error) {
@@ -174,12 +174,15 @@
   }
 
   function updateControls() {
-    el.configFields.disabled = state.busy;
-    el.configFields.inert = state.busy;
-    el.selectDirBtn.disabled = state.busy || !state.online;
-    el.generateBtn.disabled = state.busy || !state.online;
-    el.generateBtn.textContent = state.busy ? '正在处理…' : state.operation === 'task' ? '生成预算内上下文' : state.operation === 'code' ? '开始新补读会话' : '生成上下文';
-    el.budgetInput.disabled = state.busy || (state.operation === 'task' && el.taskAdvanced.checked);
+    const locked = state.busy || state.presetBusy;
+    el.configFields.disabled = locked;
+    el.configFields.inert = locked;
+    el.selectDirBtn.disabled = locked || !state.online;
+    el.generateBtn.disabled = locked || !state.online;
+    el.importRequestBtn.disabled = locked || !state.online;
+    el.saveRequestBtn.disabled = locked || !state.online || state.operation === 'pack';
+    el.generateBtn.textContent = state.presetBusy ? '正在校验配置…' : state.busy ? '正在处理…' : state.operation === 'task' ? '生成预算内上下文' : state.operation === 'code' ? '开始新补读会话' : '生成上下文';
+    el.budgetInput.disabled = locked || (state.operation === 'task' && el.taskAdvanced.checked);
     el.editor.setAttribute('aria-busy', String(state.busy));
     renderCodeSession();
   }
@@ -194,6 +197,10 @@
       const data = await apiRequest('/api/session');
       state.session = data;
       state.online = true;
+      const extensions = data.context?.code?.definitionExtensions;
+      el.definitionHint.textContent = Array.isArray(extensions)
+        ? `符号与目录支持 ${extensions.join(' / ')}；其他 UTF-8 文件可选全文或行范围。`
+        : '当前服务未提供符号读取类型，请查阅本机版本文档。';
       el.workspace.textContent = data.workspaceName;
       el.connectionBtn.textContent = `Native 在线 · v${data.version}`;
       el.connectionBtn.dataset.status = 'connected';
@@ -789,7 +796,7 @@
       if (next) focusRow(next);
     });
     el.copyCliBtn.addEventListener('click', () => {
-      try { const command = state.operation === 'pack' ? cliCommand() : JSON.stringify(contextRequest(false)); if (command !== null) copyText(command); }
+      try { const command = state.operation === 'pack' ? cliCommand() : JSON.stringify(portableRequest(false)); if (command !== null) copyText(command); }
       catch (error) { toast(error.message); }
     });
     el.copyJsonBtn.addEventListener('click', () => { if (state.snapshot) copyText(state.snapshot.result.serialized); });
@@ -979,6 +986,84 @@
     }
     return spec;
   }
+  function portableRequest(continuation) {
+    const current = contextRequest(continuation);
+    const request = {
+      schemaVersion: 1,
+      operation: state.operation === 'task' ? 'plan_task_context' : 'read_code_context',
+      spec: current.spec
+    };
+    if (continuation) request.continueFrom = current.runId;
+    return request;
+  }
+  function presetMessage(message, error = false) {
+    el.presetMessage.textContent = message;
+    el.presetMessage.dataset.error = String(error);
+  }
+  async function validatePortable(value) {
+    const response = await apiRequest('/api/context-request/validate', value).catch(error => {
+      if (error.outcomeUnknown) throw new Error('配置校验连接中断，未修改配置；请重试。');
+      throw error;
+    });
+    const request = response.request;
+    if (request?.schemaVersion !== 1 || !['plan_task_context', 'read_code_context'].includes(request.operation) || !request.spec || Array.isArray(request.spec)) {
+      throw new Error('Native 未返回有效的请求配置。');
+    }
+    return request;
+  }
+  async function importRequest() {
+    const file = el.requestFile.files?.[0];
+    if (!file || state.busy || state.presetBusy || !state.online) return;
+    state.presetBusy = true; updateControls();
+    let imported = false;
+    try {
+      if (file.size > 65536) throw new Error('配置文件不能超过 64 KiB。');
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+      const value = JSON.parse(text);
+      if (value?.continueFrom !== undefined) throw new Error('可保存的配置不接受会话 ID；请导入一个带 maxTokens 的新请求。');
+      const request = await validatePortable(value);
+      const operation = request.operation === 'plan_task_context' ? 'task' : 'code';
+      el.operationSelect.value = operation;
+      el.budgetInput.value = String(request.spec.maxTokens);
+      if (operation === 'task') {
+        el.taskAdvanced.checked = true; el.taskJson.hidden = false;
+        el.taskEditor.hidden = true; el.addTaskBtn.hidden = true;
+        el.taskJson.value = JSON.stringify(request.spec, null, 2);
+        el.taskJson.closest('details').open = true;
+      } else {
+        const spec = { ...request.spec }; delete spec.maxTokens;
+        el.codeAdvanced.checked = true; el.codeJson.hidden = false;
+        el.codeEditor.hidden = true; el.addCodeBtn.hidden = true;
+        el.codeJson.value = JSON.stringify(spec, null, 2);
+        el.codeJson.closest('details').open = true;
+      }
+      state.codeSession = null; state.packError = '';
+      applyOperation();
+      presetMessage('已导入并校验。沿用当前授权目录；点击生成后才读取源码。');
+      imported = true;
+    } catch (error) {
+      presetMessage('未导入：' + errorMessage(error), true);
+    } finally {
+      el.requestFile.value = ''; state.presetBusy = false; updateControls();
+      (imported ? el.operationSelect : el.importRequestBtn).focus();
+    }
+  }
+  async function saveRequest() {
+    if (state.operation === 'pack' || state.busy || state.presetBusy || !state.online) return;
+    state.presetBusy = true; updateControls();
+    try {
+      const request = await validatePortable(portableRequest(false));
+      let text = JSON.stringify(request, null, 2) + '\n';
+      if (byteLength(text) > 65536) text = JSON.stringify(request);
+      if (byteLength(text) > 65536) throw new Error('配置 JSON 不能超过 64 KiB。');
+      const url = URL.createObjectURL(new Blob([text], { type: 'application/json;charset=utf-8' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'context-request.json';
+      document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      presetMessage('已保存新请求配置：不含目录、源码或会话 ID。CLI 可用 --context-request 执行。');
+    } catch (error) {
+      presetMessage('未保存：' + errorMessage(error), true);
+    } finally { state.presetBusy = false; updateControls(); }
+  }
   function contextRequest(continuation) {
     if (state.operation === 'task') return { directory: state.directory, spec: taskSpec() };
     const request = { directory: state.directory, spec: codeSpec(continuation) };
@@ -993,7 +1078,7 @@
     const session = state.codeSession;
     el.codeSessionSummary.hidden = state.operation !== 'code';
     el.continueCodeBtn.hidden = state.operation !== 'code';
-    el.continueCodeBtn.disabled = state.busy || !state.online || !session?.canContinue || session.directory !== state.directory;
+    el.continueCodeBtn.disabled = state.busy || state.presetBusy || !state.online || !session?.canContinue || session.directory !== state.directory;
     el.codeSessionSummary.textContent = session
       ? `${session.rounds}/${session.maxRounds} 轮 · 已用 ${fmt(session.spent)} / ${fmt(session.limit)} · 剩余 ${fmt(session.remaining)} tokens${session.canContinue ? '' : ' · 会话已结束'}`
       : '首轮确定累计预算；成功最多三轮。失败不扣额度，续读不能增加预算。';
@@ -1046,16 +1131,16 @@
     renderTree(); renderTabs(); renderCode(); renderInspector(); renderAudit();
   }
   async function generateContext(continuation) {
-    if (state.busy || !state.online || document.querySelector('dialog[open]')) return;
+    if (state.busy || state.presetBusy || !state.online || document.querySelector('dialog[open]')) return;
     const operation = state.operation;
     let request;
     try {
-      request = contextRequest(continuation);
+      request = { directory: state.directory, request: portableRequest(continuation) };
       if (byteLength(JSON.stringify(request)) > 65536) throw new Error('请求 JSON 不能超过 64 KiB。');
     } catch (error) { state.packError = error.message; renderResultState(); renderBudget(); return; }
     state.busy = true; state.packError = null; updateControls(); renderResultState();
     try {
-      const data = await apiRequest(operation === 'task' ? '/api/task-context' : '/api/code-context', request);
+      const data = await apiRequest('/api/context-request', request);
       data.operation = operation; setAudit(data);
       if (data.result.serialized === null) {
         state.packError = `${data.result.status}${data.result.report.requiredTokens == null ? '' : ` · 必选正文需 ${fmt(data.result.report.requiredTokens)} tokens`}。未替换上次成功正文；审计已更新。`;
@@ -1075,7 +1160,10 @@
       if (state.snapshot) state.stale = true;
     } finally { state.busy = false; updateControls(); renderResultState(); renderBudget(); }
   }
-  function generate() { return state.operation === 'pack' ? generatePack() : generateContext(false); }
+  function generate() {
+    if (state.presetBusy) return;
+    return state.operation === 'pack' ? generatePack() : generateContext(false);
+  }
   function applyOperation() {
     state.operation = el.operationSelect.value; $('app').dataset.operation = state.operation;
     el.packSettings.hidden = state.operation !== 'pack'; el.taskSettings.hidden = state.operation !== 'task'; el.codeSettings.hidden = state.operation !== 'code';
@@ -1103,6 +1191,9 @@
     el.continueCodeBtn.addEventListener('click', () => generateContext(true));
     el.treeAudit.addEventListener('click', () => selectKey(AUDIT)); el.openAuditBtn.addEventListener('click', () => { selectKey(AUDIT); focusActiveTab(); });
     el.downloadAuditBtn.addEventListener('click', downloadAudit);
+    el.importRequestBtn.addEventListener('click', () => el.requestFile.click());
+    el.requestFile.addEventListener('change', importRequest);
+    el.saveRequestBtn.addEventListener('click', saveRequest);
     addTask(); addCodeRequest();
     el.taskJson.value = JSON.stringify({ maxTokens: 8000, tasks: [{ id: 'review', required: [{ path: 'src/config/types.mbt', mode: 'full' }], optional: [{ path: 'src/config/cli.mbt', mode: 'either', priority: 90 }] }] }, null, 2);
     el.codeJson.value = JSON.stringify({ requests: [{ path: 'src/api.ts', symbols: ['greet'] }] }, null, 2);
@@ -1112,7 +1203,7 @@
   function init() {
     const ids = ['workspace', 'connectionBtn', 'connectionDetail', 'limitsBtn', 'configFields', 'selectDirBtn', 'currentDirectory', 'keepFullGroup', 'includeInput', 'keepFullInput', 'budgetInput', 'budgetMsg', 'generateBtn', 'requestMessage', 'resultState', 'treeOutput', 'tree', 'treeCount', 'treeEmpty', 'fileSearch', 'tabbar', 'codepane', 'code', 'empty', 'emptyTitle', 'emptyText', 'openOutputBtn', 'chPath', 'chMode', 'chInfo', 'viewSeg', 'copyCodeBtn', 'snapshotLabel', 'mTokens', 'mBytes', 'mFiles', 'mChanged', 'curSummary', 'scanFindings', 'scanMeta', 'stFile', 'stTok', 'stScan', 'cliText', 'copyCliBtn', 'copyJsonBtn', 'exportBtn', 'exportInfo', 'bottomPanel', 'bottomToggle', 'directoryDialog', 'closeDirectoryBtn', 'cancelDirectoryBtn', 'confirmDirectoryBtn', 'goUpBtn', 'browseDirectory', 'directoryMessage', 'dirList', 'retryDirectoryBtn', 'limitsDialog', 'closeLimitsBtn', 'sessionDetails', 'copyDialog', 'closeCopyBtn', 'copyText', 'toast'];
     ids.forEach(id => { el[id] = $(id); });
-    ['operationSelect','operationHint','packSettings','taskSettings','codeSettings','taskEditor','codeEditor','addTaskBtn','addCodeBtn','taskAdvanced','taskJson','codeAdvanced','codeJson','budgetHint','continueCodeBtn','codeSessionSummary','changedMetric','treeLegend','treeAudit','auditSection','auditSummary','auditDecisions','openAuditBtn','downloadAuditBtn','commandLabel'].forEach(id => { el[id] = $(id); });
+    ['operationSelect','operationHint','packSettings','taskSettings','codeSettings','taskEditor','codeEditor','addTaskBtn','addCodeBtn','taskAdvanced','taskJson','codeAdvanced','codeJson','budgetHint','continueCodeBtn','codeSessionSummary','changedMetric','treeLegend','treeAudit','auditSection','auditSummary','auditDecisions','openAuditBtn','downloadAuditBtn','commandLabel','importRequestBtn','saveRequestBtn','requestFile','presetMessage','definitionHint'].forEach(id => { el[id] = $(id); });
     el.editor = document.querySelector('.editor');
     bindEvents();
     bindContextEvents();

@@ -81,13 +81,19 @@ required 无法提供或无法在预算内装入时，返回 `isError: true`，�
 
 v0.5.0 起提供 `read_code_context`：按根相对路径读取完整符号、指定行范围、全文或符号目录。首次请求可设 `maxTokens`；后续携带最近一次成功的 `runId` 作为 `continueFrom`，省略 `maxTokens`。最多三轮成功读取，完整 JSON（含审计）累计计入同一会话预算。
 
-成功只返回一个 `code.json` 资源，先读取资源再续读；每轮成功替换旧资源。符号支持 JS / TS / TSX / Python，歧义、缺失或预算不足不返回部分正文。全文安全扫描先于任何切片。参数、错误和累计计量口径见 [按实现读取与补读](code-context.md)。
+成功只返回一个 `code.json` 资源，先读取资源再续读；每轮成功替换旧资源。当前源码的符号读取支持 JS / JSX / TS / TSX / Python / MoonBit（`.mbt`、`.mbti`），歧义、缺失或预算不足不返回部分正文。全文安全扫描先于任何切片。参数、错误和累计计量口径见 [按实现读取与补读](code-context.md)。
 
 ### 解释与缓存管理
 
 `explain_selection` 接受 `{"paths":["src/main.mbt"]}`。至多 256 项，每项最多 4,096 UTF-8 bytes，使用固定根、启动 style、主机白名单、选择与源码安全检查。结果给出阶段、固定原因、检测器标签和安全规则位置，不返回正文或规则内容。白名单外保留 `NotListed` 决策，不将查询视作额外授权。它不生成或修改资源，与打包共享 busy 槽；序列化工具结果不能超过 4 MiB 或主机输出上限。详见 [入选原因查询](selection-explanation.md)。
 
 `release_context` 接受空对象，释放当前派生缓存，不修改磁盘。失败或提交前取消保留上一份成功结果；下次成功打包、任务规划或代码读取整体替换它，旧 URI 随即失效；三者共享递增 run ID，URI 不复用。进程结束也释放资源。打包、任务规划、代码读取与解释互相占用同一 busy 槽；资源读取可与计算并行。
+
+## 通用请求与能力查询
+
+当前源码增加 `execute_context_request`，`arguments` 接受与 SDK、CLI、工作台相同的[版本化请求 JSON](context-requests.md)。它调用原有规划和补读流程，保留授权、输出限额、资源发布与会话规则。两个原工具继续可用，可以使用最近成功的 ID 在原工具和通用工具之间续读。
+
+`context_capabilities` 接受空对象，返回 `structuredContent.capabilities` 和主机限额 `host`。共享能力包括实际支持的定义索引后缀、选择器、请求上限和成功轮数；能力查询不读取源码，也不扩大主机权限。
 
 ## 协议范围
 

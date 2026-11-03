@@ -177,6 +177,8 @@ async fn dispatch(state : State, request_name : String, params : Json) -> Json {
         "pack_repository" => build(state, args)
         "plan_task_context" => plan_tasks(state, args)
         "read_code_context" => read_code(state, args)
+        "execute_context_request" => execute_context_request(state, args)
+        "context_capabilities" => capabilities(state, args)
         "explain_selection" => explain(state, args)
         "release_context" => {
           ignore(fields(args, []))

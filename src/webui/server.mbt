@@ -53,7 +53,8 @@ fn session(state : State) -> Json {
     },
     "port": state.port,
     "capabilities": ["pack", "task-context", "code-context"],
-    "codeMaxRounds": 3,
+    "codeMaxRounds": @repomix.CodeContextSession::max_rounds(),
+    "context": @repomix.context_capabilities(),
   }
 }
 
@@ -93,16 +94,23 @@ async fn handle(
           "application/json; charset=utf-8",
         )
       }
-      (Post, "/api/task-context" | "/api/code-context") => {
+      (
+        Post,
+        "/api/task-context"
+        | "/api/code-context"
+        | "/api/context-request"
+        | "/api/context-request/validate",
+      ) => {
         let value = @async.with_timeout(
           10000,
           () => read_json(body),
           error=PublicError(400, "body_timeout", "Request body timed out."),
         )
-        let result = if request.path == "/api/task-context" {
-          task_context(state, value)
-        } else {
-          code_context(state, value)
+        let result = match request.path {
+          "/api/task-context" => task_context(state, value)
+          "/api/code-context" => code_context(state, value)
+          "/api/context-request/validate" => validate_context_request(value)
+          _ => execute_context_request(state, value)
         }
         (200, result.stringify(), "application/json; charset=utf-8")
       }

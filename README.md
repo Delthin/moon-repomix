@@ -2,7 +2,7 @@
 
 把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。使用 MoonBit native 实现，提供 CLI、SDK 和本地浏览器工作台；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
 
-当前源码版本为 **v0.6.0**，使用 MoonBit `0.10.17+d971670cd` 构建；安装包和 SDK 的可用版本分别见 [Releases](https://github.com/Delthin/moon-repomix/releases) 与 [Mooncakes](https://mooncakes.io/docs/Delthin/moon_repomix)。v0.6 将任务预算和累计预算补读接入浏览器工作台；原有 CLI、SDK、MCP、混合全文/骨架及精确分卷用法保持一致。完整变化见 [Changelog](CHANGELOG.md)，升级步骤见 [迁移指南](docs/migration.md)。
+当前已发布版本为 **v0.6.0**，使用 MoonBit `0.10.17+d971670cd` 构建；安装包和 SDK 的可用版本分别见 [Releases](https://github.com/Delthin/moon-repomix/releases) 与 [Mooncakes](https://mooncakes.io/docs/Delthin/moon_repomix)。v0.6 将任务预算和累计预算补读接入浏览器工作台；原有 CLI、SDK、MCP、混合全文/骨架及精确分卷用法保持一致。完整变化见 [Changelog](CHANGELOG.md)，升级步骤见 [迁移指南](docs/migration.md)。
 
 ## 安装与第一次运行
 
@@ -82,6 +82,20 @@ moon-repomix --webui
 - **代码补读**：按符号、行范围、全文或符号目录读取，在首轮确定的累计预算内最多成功三轮。分离的范围保留各自来源行号。
 
 修改参数会将现有结果标为旧结果，下一次成功后才替换。普通打包超预算保留完整输出；任务预算必选超限或补读失败保留上次成功结果。任务与补读只返回请求所需内容，不额外读取或传输原文对照。操作步骤、限额与服务边界见 [工作台指南](docs/webui.md)。
+
+## 复用同一份上下文请求
+
+当前源码为 SDK、CLI、MCP 和工作台提供相同的[版本化请求 JSON](docs/context-requests.md)。任务必选 / 可选、代码符号 / 范围 / 全文 / 目录、精确预算和审计采用同一套规则；符号读取新增 MoonBit `.mbt` 与 `.mbti`。
+
+```sh
+# 从源码构建的 CLI 执行工作台保存的请求
+moon-repomix ./project --context-request request.json
+
+# 同一进程内通过 JSONL 请求进行有界补读
+moon-repomix ./project --context-stdio
+```
+
+MCP 使用 `execute_context_request`，SDK 使用 `ContextRequest` 校验并调用已有规划 / 读取 API；工作台可以保存或导入配置。配置不含源码、授权目录或会话 ID。新增用法需当前源码，v0.6.0 安装包的原有入口保持兼容。
 
 ## 输出、计数与安全
 

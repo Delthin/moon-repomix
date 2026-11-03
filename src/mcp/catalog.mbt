@@ -3,6 +3,8 @@ fn tools() -> Json {
   {
     "tools": [
       code_tool(),
+      context_request_tool(),
+      capabilities_tool(),
       {
         "name": "pack_repository",
         "title": "Build bounded repository context",

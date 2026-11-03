@@ -71,6 +71,10 @@ git ls-files -z | moon-repomix --stdin0 -f md -o -
 
 保存后运行 `moon-repomix ./project -o context.md` 即可。标量由显式 CLI 覆盖；include、ignore、keepFull 追加去重。显式配置路径和输出路径相对启动目录，规则相对输入根。JSON 使用完整名称 `markdown`、`plain` 和既有字段名。
 
+## 任务预算与代码补读
+
+当前源码增加 `--context-request request.json` 单次请求和 `--context-stdio` 持久 JSONL 会话；使用与 SDK、MCP、工作台相同的任务 / 代码规格。见 [CLI 上下文读取](context-cli.md) 与 [可复用请求格式](context-requests.md)。
+
 ## 帮助与兼容写法
 
 `--help` 展示常见任务，`--help-all` 列出全部参数，包括 MCP、机器报告、展示和资源控制。两个帮助入口及 `--version` 都在加载词表或启动服务前返回。

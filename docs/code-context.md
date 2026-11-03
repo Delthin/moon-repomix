@@ -2,7 +2,7 @@
 
 `read_code_context` 用于需要理解具体行为的任务：先读取完整函数实现，遇到缺失的函数、常量或文件再补读。它按调用者给出的路径和符号工作，不解释自然语言任务，也不自动证明材料足以回答问题。
 
-v0.5.0 起提供 SDK 与 MCP 入口。
+v0.5.0 起提供 SDK 与 MCP，v0.6.0 接入浏览器工作台。当前源码增加 CLI 单次和 JSONL 会话；各入口可复用同一份[版本化请求](context-requests.md)。
 
 ## 选择读取内容
 
@@ -26,7 +26,7 @@ v0.5.0 起提供 SDK 与 MCP 入口。
 | `outline: true` | 只返回名称、限定名与行范围，用于定位，不返回实现 |
 | `includeDependencies: true` | 仅用于符号读取，递归添加同文件中唯一匹配的词法引用定义及常量，最多 64 个定义；默认关闭 |
 
-符号和 outline 支持 JavaScript（含 JSX）、TypeScript、TSX、Python。索引单文件上限为 8 MiB，解析超时为 200 ms，最多 4,096 个定义、每个定义 256 个词法引用；遍历另有节点、深度和总引用配额。超过索引限额返回 `resource-limit`，不会返回部分目录。完整限额及原生内存边界见 [索引说明](../src/compression/README.md#complete-definition-symbol-index)。名称重复时返回 `ambiguous-symbol` 和最多八个候选，不擅自选第一个。找不到名称返回 `symbol-not-found`。解析、资源或语言限制会明确报出；需要时调用者可另行选择 ranges 或 full。
+当前源码的符号和 outline 支持 JavaScript（含 JSX）、TypeScript、TSX、Python、MoonBit（`.mbt`、`.mbti`）。MoonBit 限定名保留原上下文：例如 `Point::render`、`Render::render`、`Render for Point::render`，接口实现声明使用 `impl Read for Point`。先请求 outline 可获得实际名称；裸名称有多个候选时返回歧义，不猜接收者或 trait 映射。索引单文件上限为 8 MiB，解析超时为 200 ms，最多 4,096 个定义、每个定义 256 个词法引用；遍历另有节点、深度和总引用配额。超过索引限额返回 `resource-limit`，不会返回部分目录。完整限额及原生内存边界见 [索引说明](../src/compression/README.md#complete-definition-symbol-index)。名称重复时返回 `ambiguous-symbol` 和最多八个候选，不擅自选第一个。找不到名称返回 `symbol-not-found`。解析、资源或语言限制会明确报出；需要时调用者可另行选择 ranges 或 full。
 
 词法依赖不是语义调用图。动态调用、别名、跨文件导入和局部遮蔽都可能影响解析；自动展开可能多带代码，也可能缺少行为依据。审计会列出同文件有多个候选的依赖，最多 32 个名称，并标记提示是否截短；源代码本身不会因此被截断。需要进一步判断时，指定正确文件及限定名补读。
 
