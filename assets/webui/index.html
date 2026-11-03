@@ -23,11 +23,12 @@
     <button type="button" class="tree-output" id="treeOutput" disabled>
       <span class="tree-output-name">context.json</span><span class="tag">整份</span>
     </button>
+    <button type="button" class="tree-output" id="treeAudit" disabled><span class="tree-output-name">audit.json</span><span class="tag">审计</span></button>
     <label class="search-label" for="fileSearch">筛选文件</label>
     <input type="search" id="fileSearch" placeholder="搜索路径…" autocomplete="off" disabled>
     <div class="treelist" id="tree" role="tree" aria-label="本次入选文件"></div>
     <p class="tree-empty" id="treeEmpty">生成后在此浏览入选文件。</p>
-    <div class="tree-legend"><span class="dot dot-full" aria-hidden="true"></span>正文相同 <span class="dot dot-skel" aria-hidden="true"></span>正文变化</div>
+    <div class="tree-legend" id="treeLegend"><span class="dot dot-full" aria-hidden="true"></span>正文相同 <span class="dot dot-skel" aria-hidden="true"></span>正文变化</div>
   </nav>
 
   <main class="editor">
@@ -64,6 +65,11 @@
         <p class="hint">仅限启动时授权的工作区。</p>
       </section>
       <section class="ins-sec">
+        <label class="field-label mode-label" for="operationSelect">工作方式</label>
+        <select id="operationSelect"><option value="pack">普通打包</option><option value="task">任务预算</option><option value="code">代码补读</option></select>
+        <p class="hint" id="operationHint">按全文、骨架或混合策略整理目录。</p>
+      </section>
+      <section class="ins-sec" id="packSettings">
         <h2>策略</h2>
         <div class="opt-group" role="radiogroup" aria-label="打包策略">
           <label class="opt"><input type="radio" name="profile" value="raw"><span class="opt-name">全文 <i>raw</i></span><span class="opt-desc">保留正文</span></label>
@@ -81,18 +87,35 @@
           <p class="hint" id="patternHint">每行一个 glob，相对所选目录。Include 留空使用默认入选规则；两类合计最多 64 条，每条最多 1,024 个 UTF-8 字节。</p>
         </details>
       </section>
+      <section class="ins-sec" id="taskSettings" hidden>
+        <h2>任务与文件</h2>
+        <p class="hint">先保证必选内容，再按优先级纳入可选内容。路径相对工作目录。</p>
+        <div id="taskEditor"></div>
+        <button type="button" class="btn add-row" id="addTaskBtn">添加任务</button>
+        <details class="advanced"><summary>高级任务 JSON</summary><label class="check-row"><input type="checkbox" id="taskAdvanced"> 使用 JSON 中的完整任务规范</label><textarea id="taskJson" hidden rows="7" spellcheck="false" aria-label="任务规范 JSON" placeholder='{"maxTokens":8000,"tasks":[…]}'></textarea><p class="hint">启用后以 JSON 为准，包括其中的预算。最多 16 个任务、128 个不同路径。</p></details>
+      </section>
+      <section class="ins-sec" id="codeSettings" hidden>
+        <h2>补读请求</h2>
+        <p class="hint">完整原文先扫描，再返回所选全文、行片段或符号目录。</p>
+        <div id="codeEditor"></div>
+        <button type="button" class="btn add-row" id="addCodeBtn">添加文件请求</button>
+        <p class="hint">符号与目录支持 JS / JSX / TS / TSX / Python；其他 UTF-8 文件可选全文或行范围。</p>
+        <details class="advanced"><summary>高级补读 JSON</summary><label class="check-row"><input type="checkbox" id="codeAdvanced"> 使用 JSON 请求规范</label><textarea id="codeJson" hidden rows="7" spellcheck="false" aria-label="补读规范 JSON" placeholder='{"requests":[{"path":"src/main.ts","symbols":["main"]}]}'></textarea><p class="hint">首轮使用右侧预算，JSON 可含 maxReadBytes；续读禁止 maxTokens。</p></details>
+      </section>
       <section class="ins-sec">
-        <h2>预算</h2>
+        <h2>预算 <span class="unit-label">o200k_base</span></h2>
         <div class="budget-row">
           <label class="lbl" for="budgetInput">Token 预算</label>
           <input type="number" id="budgetInput" value="8000" min="1" max="2147483647" step="1" inputmode="numeric" aria-describedby="budgetMsg">
         </div>
         <p class="bmsg" id="budgetMsg" aria-live="polite">生成后对照整文计数。</p>
-        <p class="hint">预算用于提示，超限不截断输出。</p>
+        <p class="hint" id="budgetHint">预算用于提示，超限不截断输出。</p>
       </section>
     </fieldset>
     <section class="ins-sec generate-section">
       <button type="button" class="btn btn-primary generate-btn" id="generateBtn" disabled>生成上下文</button>
+      <button type="button" class="btn generate-btn continue-btn" id="continueCodeBtn" hidden disabled>继续补读</button>
+      <p class="hint session-summary" id="codeSessionSummary" hidden>尚未开始补读会话。</p>
       <p class="hint">Cmd / Ctrl + Enter</p>
       <p class="request-message" id="requestMessage" role="status"></p>
     </section>
@@ -102,8 +125,14 @@
       <div class="num-row"><span>整文 tokens</span><b id="mTokens">—</b></div>
       <div class="num-row"><span>输出字节</span><b id="mBytes">—</b></div>
       <div class="num-row"><span>收录 / 跳过</span><b id="mFiles">—</b></div>
-      <div class="num-row"><span>正文变化 / 文件</span><b id="mChanged">—</b></div>
+      <div class="num-row" id="changedMetric"><span>正文变化 / 文件</span><b id="mChanged">—</b></div>
       <p class="hint" id="curSummary">整文计数包含 JSON 包装与完整元数据。</p>
+    </section>
+    <section class="ins-sec" id="auditSection" hidden>
+      <h2>本次选择审计</h2>
+      <p class="hint" id="auditSummary"></p>
+      <div id="auditDecisions" class="audit-decisions"></div>
+      <button type="button" class="btn add-row" id="openAuditBtn">查看完整审计</button>
     </section>
     <section class="ins-sec">
       <h2>扫描</h2>
@@ -115,12 +144,13 @@
   <section class="bottom" id="bottomPanel" aria-label="命令与导出">
     <div class="bottom-in">
       <div class="cli-row">
-        <span class="cli-label">CLI</span>
+        <span class="cli-label" id="commandLabel">CLI</span>
         <code class="cli-text" id="cliText"></code>
         <button type="button" class="btn" id="copyCliBtn">复制命令</button>
       </div>
       <div class="exp-row">
         <span class="exp-msg" id="exportInfo">下载绑定最后成功结果，不随参数切换。</span>
+        <button type="button" class="btn" id="downloadAuditBtn" disabled>下载审计</button>
         <button type="button" class="btn" id="copyJsonBtn" disabled>复制 JSON</button>
         <button type="button" class="btn btn-primary" id="exportBtn" disabled>下载 JSON</button>
       </div>

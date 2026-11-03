@@ -22,7 +22,7 @@
 html { color-scheme: dark; }
 html, body { margin: 0; padding: 0; }
 body { font: 14px/1.5 var(--sans); color: var(--text); background: var(--bg0); }
-button, input, textarea { font: inherit; }
+button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled, input:disabled { cursor: default; }
 button:disabled { opacity: .5; }
@@ -61,7 +61,7 @@ button:disabled { opacity: .5; }
 .tag { font-size: 12px; color: var(--mint); border: 1px solid var(--mint-2); border-radius: 4px; padding: 0 5px; line-height: 18px; flex: none; }
 .search-label { font-size: 12px; color: var(--text-3); margin: 10px 12px 4px; }
 #fileSearch { margin: 0 10px 6px; width: calc(100% - 20px); min-width: 0; height: 32px; padding: 4px 8px; }
-input[type="search"], input[type="number"], textarea { color: var(--text); background: var(--bg2); border: 1px solid var(--border); border-radius: 5px; }
+input[type="search"], input[type="number"], input[type="text"], select, textarea { color: var(--text); background: var(--bg2); border: 1px solid var(--border); border-radius: 5px; }
 input::placeholder, textarea::placeholder { color: var(--text-3); opacity: 1; }
 .treelist { padding: 4px 0 8px; }
 .tree-row { display: flex; align-items: center; gap: 7px; width: 100%; text-align: left; background: none; border: none; color: var(--text-2); font: 13px/1.6 var(--mono); padding: 5px 12px 5px 10px; }
@@ -189,7 +189,40 @@ dialog::backdrop { background: #0009; }
 .session-details dd { margin: 0; overflow-wrap: anywhere; font-family: var(--mono); }
 #copyText { margin-top: 14px; }
 .toast { position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 10px 16px; border: 1px solid var(--mint-2); border-radius: 6px; background: var(--bg2); color: var(--text); font-size: 13px; z-index: 5; box-shadow: 0 5px 24px #0006; overflow-wrap: anywhere; }
+/* Context modes extend the same editor, keeping the generated text primary. */
+#operationSelect { width: 100%; padding: 8px; min-height: 40px; }
+.mode-label { margin-top: 0; }
+.unit-label { font: 12px var(--mono); letter-spacing: 0; font-weight: 400; margin-left: 6px; }
+.context-card { margin-top: 12px; padding-block: 12px; border-top: 1px solid var(--border); min-width: 0; }
+.context-card-head { display: flex; gap: 8px; align-items: end; min-width: 0; }
+.context-card-head .context-field { flex: 1; }
+.context-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; margin: 7px 0; color: var(--text-2); font-size: 12px; }
+.context-field.wide { grid-column: 1 / -1; }
+.context-field input:not([type="checkbox"]), .context-field select { width: 100%; min-width: 0; min-height: 40px; padding: 7px 8px; font-size: 14px; }
+.context-field input[type="text"] { font-family: var(--mono); }
+.context-field input[type="checkbox"] { align-self: start; accent-color: var(--mint); }
+.context-path-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 8px; min-width: 0; padding-top: 5px; }
+.context-card h3 { margin: 13px 0 0; font-size: 13px; font-weight: 500; color: var(--text); }
+.context-remove, .context-add, .add-row { min-height: 40px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg2); color: var(--text-2); font-size: 12px; }
+.context-remove { align-self: end; margin-bottom: 7px; }
+.context-add { width: 100%; margin-top: 8px; }
+.add-row { margin-top: 9px; }
+.context-remove:hover, .context-add:hover { border-color: var(--mint-2); color: var(--text); }
+.context-field textarea { font-size: 14px; }
+.check-row { display: flex; gap: 7px; align-items: center; color: var(--text-2); font-size: 12px; margin: 8px 0; }
+.check-row input { accent-color: var(--mint); }
+.continue-btn { margin-top: 8px; }
+.session-summary { color: var(--mint); font-family: var(--mono); letter-spacing: 0; }
+#auditSummary { margin-top: 0; }
+.audit-decisions { font-size: 12px; color: var(--text-2); max-height: 210px; overflow: auto; }
+.audit-decision { padding: 7px 0; border-bottom: 1px solid var(--border-soft); overflow-wrap: anywhere; }
+.audit-decision strong { display: block; color: var(--text); font: 12px var(--mono); }
+.fragment-head { position: sticky; left: 0; padding: 10px 16px 6px; font: 12px/1.6 var(--sans); color: var(--mint); border-top: 1px solid var(--border); background: var(--bg1); }
+.outline-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; padding: 8px 16px; border-bottom: 1px solid var(--border-soft); font: 14px/1.6 var(--mono); }
+.outline-row span:first-child { overflow-wrap: anywhere; }
+.outline-row span:last-child { color: var(--text-3); }
 @media (min-width: 861px) {
+  #app[data-operation="task"], #app[data-operation="code"] { grid-template-columns: 210px minmax(0, 1fr) 320px; }
   #app { grid-template-columns: 210px minmax(0, 1fr) 260px; grid-template-areas: "title title title" "tree editor inspect" "bottom bottom bottom" "status status status"; grid-template-rows: auto minmax(0, 1fr) auto auto; height: 100vh; height: 100dvh; }
   .tree { border-bottom: none; border-right: 1px solid var(--border); overflow-y: auto; }
   .inspect { border-bottom: none; border-left: 1px solid var(--border); overflow-y: auto; }
@@ -216,7 +249,10 @@ dialog::backdrop { background: #0009; }
   .btn, .connection, .tree-row, .tree-output, .opt, .seg-opt, .tab-btn, .tab-x, .st-toggle, .advanced summary, #budgetInput, #fileSearch { min-height: 44px; }
   .advanced summary { display: list-item; padding-block: 11px; }
   textarea { font-size: 16px; }
-  input[type="search"], input[type="number"] { font-size: 16px !important; }
+  input[type="search"], input[type="number"], input[type="text"], select { font-size: 16px !important; }
+  select, .context-field input:not([type="checkbox"]), .context-remove, .context-add, .add-row, .check-row { min-height: 44px; }
+  .context-field input:not([type="checkbox"]), .context-field select, .context-field textarea { font-size: 16px; }
+  .outline-row { grid-template-columns: minmax(0, 1fr); gap: 3px; }
 }
 @media (max-width: 480px) {
   .brand { font-size: 14px; }
