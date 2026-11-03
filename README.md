@@ -1,145 +1,128 @@
 # moon-repomix
 
-把本地目录或公开 HTTPS 仓库整理成 XML、Markdown、JSON 或纯文本，供 AI 阅读、代码评审和问题追踪。使用 MoonBit native 实现，提供 CLI、SDK 和本地浏览器工作台；解析器和分词资源随源码或安装包提供，运行时不需要 Node.js。
+`moon-repomix` 是由 MoonBit native 实现的代码仓库上下文工具，运行时无需 Node.js。它支持读取本地目录或公开 HTTPS Git 仓库，输出 XML、Markdown、JSON 或 plain 文本；默认对完整原文先执行敏感信息启发式扫描，再做目录投影、AST 骨架压缩或按需读取，并对最终交付的完整正文执行精确 `o200k_base` token 计量。
 
-当前已发布版本为 **v0.6.0**，使用 MoonBit `0.10.17+d971670cd` 构建；安装包和 SDK 的可用版本分别见 [Releases](https://github.com/Delthin/moon-repomix/releases) 与 [Mooncakes](https://mooncakes.io/docs/Delthin/moon_repomix)。v0.6 将任务预算和累计预算补读接入浏览器工作台；原有 CLI、SDK、MCP、混合全文/骨架及精确分卷用法保持一致。完整变化见 [Changelog](CHANGELOG.md)，升级步骤见 [迁移指南](docs/migration.md)。
+除普通目录打包外，项目围绕**任务预算规划**（`plan_task_context`）与**代码按需补读**（`read_code_context`）提供跨 SDK、CLI、MCP 和浏览器工作台（WebUI）的统一上下文工作流：
+
+- **AST 骨架压缩（7 类语言）**：MoonBit（含 `.mbti`）、JavaScript / TypeScript（含 JSX / TSX）、Python、Go、Rust、Java。
+- **符号读取、符号目录与同文件依赖索引**：支持 JavaScript / JSX / TypeScript / TSX、Python、MoonBit（`.mbt` / `.mbti`）。
+
+## 版本边界与当前源码说明
+
+- **已发布版本（`v0.6.0`）**：[GitHub Release v0.6.0](https://github.com/Delthin/moon-repomix/releases/tag/v0.6.0) 与 [Mooncakes 注册表 `Delthin/moon_repomix`](https://mooncakes.io/docs/Delthin/moon_repomix) 当前正式版本仍为 `v0.6.0`，已包含普通打包、SDK `pack` / `read_code_context` / `plan_task_context`、MCP 与浏览器工作台基础功能。
+- **需从当前主线源码构建的功能**：统一 `ContextRequest` 协议与校验 API、CLI `--context-request` / `--context-stdio`、MoonBit（`.mbt` / `.mbti`）符号与同文件依赖索引，以及 WebUI 请求配置保存/导入。
+
+## 统一任务规划与代码补读协议
+
+在当前源码中，任务预算（必选/可选文件模式与优先级）和代码补读（完整符号、不连续行范围、全文或符号目录）共享版本化 `ContextRequest` JSON（规范化上限 64 KiB）。以下请求可直接在本仓库使用，读取 `src/version.mbt` 的 `version` 符号及同文件依赖：
+
+```json
+{
+  "schemaVersion": 1,
+  "operation": "read_code_context",
+  "spec": {
+    "maxTokens": 8000,
+    "requests": [
+      { "path": "src/version.mbt", "symbols": ["version"], "includeDependencies": true }
+    ]
+  }
+}
+```
+
+| 入口 | 如何使用同一份 `ContextRequest` | 权限、限额与会话边界 |
+| :--- | :--- | :--- |
+| **CLI** | `moon-repomix . --context-request request.json`（或 `-o response.json`）；多轮 JSONL 用 `moon-repomix . --context-stdio` | 规格内路径相对命令指定的授权根解释；响应 JSON 封装完整正文、计量与审计 |
+| **SDK** | `ContextRequest::from_json` 校验后取出 `spec_json()`，转交 `CodeContextSpec` / `TaskContextSpec` 并调用对应 Root API | 不自动执行或授予文件权限；用 `CodeContextSession` 管理最多 3 轮成功累计预算 |
+| **MCP** | 直接作为 `execute_context_request` 的 `arguments`；用 `context_capabilities` 查询主机能力与后缀 | 绑定启动时固定的只读根目录；原 `plan_task_context` / `read_code_context` 继续兼容 |
+| **WebUI / HTTP** | 工作台切到任务预算或代码补读后“导入配置”/“保存配置”；HTTP 用 `{directory, request}` 外层对象发送至 `POST /api/context-request` | 沿用页面当前授权目录；保存的配置不含源码、目录与会话 ID |
+
+代码补读会话由首轮 `spec.maxTokens` 固定累计正文硬上限，续读在顶层传 `continueFrom`（不带 `maxTokens`），最多成功 3 轮，失败不扣额度。会话 ID 不能跨进程或跨入口迁移。代码审计嵌于正文并计入正文预算，任务审计独立计数；正文 cap 均不含外层传输封装。普通打包参数与主机输出风格仍按各入口规则收紧。
 
 ## 安装与第一次运行
 
-从 [v0.6.0 Release](https://github.com/Delthin/moon-repomix/releases/tag/v0.6.0) 下载平台归档，用附带的 `SHA256SUMS` 校验。解压后保留 `bin`、`share` 和 `LICENSES` 的相对位置，在解压目录运行：
+### 1. 使用 v0.6.0 预编译归档
+
+从 [GitHub Releases (`v0.6.0`)](https://github.com/Delthin/moon-repomix/releases/tag/v0.6.0) 下载对应平台归档并通过 `SHA256SUMS` 校验。解压时请保留 `bin/`、`share/`、`LICENSES/` 的相对目录位置（分词词表等资源随包附带）。
 
 ```sh
+# Unix
 ./bin/moon-repomix /path/to/project
-```
 
-Windows PowerShell：
-
-```powershell
+# Windows PowerShell
 .\bin\moon-repomix.exe "C:\path\to\project"
 ```
 
-结果写到启动目录的 `repomix-output.xml`，终端显示文件数和精确 token 数。也可将 `bin` 加入 `PATH`，在要处理的项目目录直接运行 `moon-repomix`。归档运行不需要 MoonBit；本地打包和骨架压缩不需要 Git，差异、历史和远程获取需要系统 Git。
+默认在当前启动目录生成 `repomix-output.xml`。本地目录打包无需安装 Git；仅在读取 Git diff/log 或克隆公开 HTTPS 仓库时需要系统 `git`。
 
-### 从源码运行
+### 2. 从当前源码构建与安装
 
-从源码构建需要固定的 MoonBit **0.10.17+d971670cd** 和平台 C 工具链，见 [工具链](docs/toolchain.md)。在仓库根目录运行：
+源码构建固定要求 MoonBit `0.10.17+d971670cd` 与平台 C 工具链（默认 `native` 后端），源码运行会自动发现仓库内 `assets`：
 
 ```sh
 moon update
 moon run src/cmd/moon-repomix --release -- examples/demo -f md -o -
-```
 
-终端显示示例源码和目录结构；正文写 stdout，统计与诊断写 stderr。项目默认使用 native，标准源码构建自动查找 `assets/` 资源。要将当前源码与资源一起安装到本地前缀：
-
-```sh
+# 安装到用户目录（Windows 可用 "$env:LOCALAPPDATA\moon-repomix"）
 moon run --target native scripts/install.mbtx "$HOME/.local"
 ```
 
-Windows PowerShell 使用 `moon run --target native scripts/install.mbtx "$env:LOCALAPPDATA\moon-repomix"`。安装只需执行一次，将前缀的 `bin` 加入 `PATH` 后，日常使用下面的 `moon-repomix` 命令。移动安装目录时一并保留 `bin`、`share` 和 `LICENSES`。
+将安装前缀下的 `bin` 加入 `PATH` 后即可直接调用 `moon-repomix`。
 
-## 常用命令
+## 常用 CLI 命令
 
 ```sh
-# 当前目录，默认输出 repomix-output.xml
-moon-repomix
-
-# 导出 Markdown；加 --compress 提取骨架
+# 输出 Markdown 到文件；-o - 表示正文写 stdout、统计信息写 stderr
 moon-repomix ./project -f md -o context.md
-moon-repomix ./project --compress -f md -o structure.md
 
-# 只选源码和 README，导出 JSON
-moon-repomix ./project --include 'src/**,README.md' -f json -o context.json
+# 提取 AST 骨架压缩；按 glob 过滤并输出 JSON
+moon-repomix ./project --compress --include 'src/**,README.md' -f json -o context.json
 
-# 检查单文档预算，或按每卷硬上限分卷
+# 软预算检查（超限仍写出完整文件并以状态码 1 退出，不同于任务/代码硬预算）
 moon-repomix ./project --budget 12000
+
+# 分卷输出（目标目录必须尚不存在；每卷按完整输出计量，索引文件单独计数）
 moon-repomix ./project --compress --split 12000 -f md -o review-parts
 ```
 
-输入目录默认是当前目录。格式用 `-f` 指定：`xml`、`md`、`json`、`txt`；未指定时使用配置值或 XML。`-o -` 将正文写 stdout。`--budget` 超限仍保留完整输出并退出 **1**；`--split` 限制每卷的最终 token 数，`-o` 此时是必须不存在的新目录，索引另外计数。
+更多选项可通过 `--help` 或 `--help-all` 查看。
 
-用 `moon-repomix --help` 查看常用任务，`--help-all` 查看全部参数。已有 `--style`、`--token-budget`、`--split-output` 继续可用；JSON 字段名称保持不变。Git 差异、远程仓库、stdin、保存常用配置等用法见 [CLI 按任务速查](docs/cli.md)，关键文件保留全文和自动化组合见 [使用场景](docs/scenarios.md)。
-
-输出和显式配置路径相对启动目录，自动配置位于输入根。普通输出文件会原子替换已有同名文件；失败时保留旧输出。分卷目标必须不存在。详见 [配置](docs/configuration.md) 与 [文件选择](docs/file-selection.md)。
-
-## 浏览器工作台
-
-工作台使用原生 HTML/CSS/JavaScript，通过本地 HTTP 接口调用 MoonBit native 引擎。目录浏览、源码读取、安全扫描、AST 压缩和最终 JSON 的精确 token 计数均由 Native 服务完成；浏览器负责配置、查看与下载。
-
-![编辑器工作台：选择目录、生成上下文、切换原文与结构输出、检查预算](assets/demo/webui.gif)
-
-安装 v0.6.0 后，在要处理的项目目录运行：
+## 浏览器工作台（WebUI）与 MCP 服务
 
 ```sh
-moon-repomix --webui
+# 启动本地浏览器工作台（默认监听 http://127.0.0.1:8765）
+moon-repomix ./project --webui
+
+# 启动固定只读根目录的 stdio MCP 服务
+moon-repomix /absolute/project --mcp --mcp-max-tokens 12000
 ```
 
-也可在本仓库根目录直接运行 `moon run src/cmd/moon-repomix --release -- --webui`。两种方式均默认处理当前目录，自动定位词表和页面资源；指定其他项目时使用 `moon-repomix ./project --webui`。
+工作台提供**普通打包**、**任务预算**与**代码补读**三种工作方式。下图演示普通打包流程：
 
-打开 `http://127.0.0.1:8765`，在右侧选择授权目录和工作方式：
+![WebUI 普通打包演示](assets/demo/webui.gif)
 
-- **普通打包**：全文、骨架或混合输出，支持原文对照、文件规则和完整 JSON 下载。上方动图展示这一流程。
-- **任务预算**：列出任务的必选、可选文件及优先级，在整文硬上限内生成共享上下文；单独查看、下载选择审计。
-- **代码补读**：按符号、行范围、全文或符号目录读取，在首轮确定的累计预算内最多成功三轮。分离的范围保留各自来源行号。
+MCP 客户端配置细节参见 [docs/mcp.md](docs/mcp.md)。
 
-修改参数会将现有结果标为旧结果，下一次成功后才替换。普通打包超预算保留完整输出；任务预算必选超限或补读失败保留上次成功结果。任务与补读只返回请求所需内容，不额外读取或传输原文对照。操作步骤、限额与服务边界见 [工作台指南](docs/webui.md)。
+## MoonBit SDK
 
-## 复用同一份上下文请求
-
-当前源码为 SDK、CLI、MCP 和工作台提供相同的[版本化请求 JSON](docs/context-requests.md)。任务必选 / 可选、代码符号 / 范围 / 全文 / 目录、精确预算和审计采用同一套规则；符号读取新增 MoonBit `.mbt` 与 `.mbti`。
-
-```sh
-# 从源码构建的 CLI 执行工作台保存的请求
-moon-repomix ./project --context-request request.json
-
-# 同一进程内通过 JSONL 请求进行有界补读
-moon-repomix ./project --context-stdio
-```
-
-MCP 使用 `execute_context_request`，SDK 使用 `ContextRequest` 校验并调用已有规划 / 读取 API；工作台可以保存或导入配置。配置不含源码、授权目录或会话 ID。新增用法需当前源码，v0.6.0 安装包的原有入口保持兼容。
-
-## 输出、计数与安全
-
-- 默认保留完整正文；`--compress` 提取语法骨架，保留声明、类型、注释与结构。支持 MoonBit（含 `.mbti`）、JavaScript/TypeScript（含 JSX/TSX）、Python、Go、Rust、Java；其他语言或无精确 token 收益时保留原文。范围见 [仓库上下文](docs/context.md)。
-- 读取有效 UTF-8 普通文件，去除 UTF-8 BOM 并保留换行。默认单文件上限 50 MiB；另有 20,000 个过滤后普通候选、200 MiB 原始读取的总量限制。链接、二进制、无效 UTF-8 等跳过原因见 [错误指南](docs/errors.md)。
-- 默认扫描压缩前原文，命中时排除整个文件、Git 补丁或提交；模板命中则停止整个打包。扫描是启发式检测，分享前仍应审阅结果，详见 [安全边界](SECURITY.md) 和 [检测规则](docs/security.md)。
-- 对完整渲染字符串精确计算 `o200k_base` tokens，包含格式包装、模板与显示装饰。文件排名和目录统计不能代替最终预算；分卷的独立索引开销见 [分卷](docs/partition.md)。
-
-打包与计数在内存中完成，token 预算不是内存配额。v0.4.1 在固定 35 MB TypeScript 大库的五轮 CLI 对照中，macOS 原文/完整元数据压缩的耗时中位数为 1.05 / 1.43 秒，原版为 1.37 / 1.62 秒；Linux 分别为 1.82 / 2.40 秒，原版为 2.62 / 3.59 秒。平台、内存代价、Linux 原文回退、全部样本及常驻 MCP 结果见 [性能测量](docs/performance.md)。
-
-## SDK
-
-SDK 模块为 `Delthin/moon_repomix`。以 `0.6.0` 为例，在调用项目的 `moon.mod` 中声明依赖、在 `moon.pkg` 导入：
+在 `moon.mod` 添加 `Delthin/moon_repomix`，并在包配置中导入 `"Delthin/moon_repomix" @repomix`。`Runtime` 会加载 `o200k_base.tiktoken` 与同目录的 `tokenizer-unicode-16.0.0.txt` 并校验 SHA-256，可在多次调用间复用；返回结果不会自动写盘：
 
 ```moonbit
-import {
-  "Delthin/moon_repomix" @repomix,
+async fn run_pack() -> Unit {
+  let runtime = @repomix.Runtime::load("/absolute/share/moon-repomix/o200k_base.tiktoken")
+  let options = @repomix.options("/absolute/project", style=@repomix.Style::Json, compress=true)
+  let result = @repomix.pack(options, runtime)
+  println(result.tokens.to_string())
 }
 ```
 
-在 `async fn` 中加载资源并打包：
+## 安全扫描与精确计量说明
 
-```moonbit
-let runtime = @repomix.Runtime::load("/absolute/share/moon-repomix/o200k_base.tiktoken")
-let options = @repomix.options("/absolute/project", style=@repomix.Style::Json, compress=true)
-let result = @repomix.pack(options, runtime)
-// result.text 是完整文档，result.tokens 是最终 token 数。
-// result.document 提供规范模型；files / skipped / findings / security / budget 提供处理结果。
-```
+- **编码与启发式安全扫描**：仅处理有效 UTF-8 普通文件（去 BOM、保留原换行）。先扫描完整原文，命中的敏感文件、patch 或 commit 整项排除；若自定义模板自身命中敏感规则则直接停止。启发式扫描不能替代人工审阅，分享前请检查输出。
+- **资源边界与完整计数**：token 预算只约束输出正文，不是进程内存配额（普通打包默认单文件 50 MiB、候选 20,000 个、原始总读取 200 MiB，服务端点有更严格上限）。总 token 针对含格式头部、模板与包装在内的完整正文计算，而非逐文件数字简单相加。
 
-词表同目录须有 `tokenizer-unicode-16.0.0.txt`，加载时校验两份资源的 SHA-256。`Runtime` 可复用于多次顺序打包；SDK 返回结果，不写输出文件。`pack_volumes`、`explain_selection`、选项与结构字段见 [迁移](docs/migration.md) 和 [生成接口](src/pkg.generated.mbti)。
+## 文档导航、致谢与许可
 
-v0.5.0 新增两种 SDK / MCP 读取方式：
-
-- [按实现读取与补读](docs/code-context.md)：读取完整函数、指定行或符号目录，按需补充依赖；MCP 在累计预算内允许最多三轮成功读取。
-- [任务上下文预算](docs/task-context.md)：按必选文件与候选优先级选择全文或骨架，生成多任务共享文档及独立审计。
-
-
-## 文档与贡献
-
-[CLI 速查](docs/cli.md) · [工作台](docs/webui.md) · [场景](docs/scenarios.md) · [配置](docs/configuration.md) · [输出格式](docs/output.md) · [分卷](docs/partition.md) · [机器报告](docs/reports.md) · [MCP](docs/mcp.md) · [入选原因](docs/selection-explanation.md) · [分词](docs/tokenization.md) · [错误处理](docs/errors.md)
-
-[贡献指南](CONTRIBUTING.md) 说明定点测试、格式与接口更新、资源许可；[工具链](docs/toolchain.md) 说明本地构建和归档。[演示指南](docs/demo.md) 提供可保留产物的三步演示。[三平台 CI](https://github.com/Delthin/moon-repomix/actions/workflows/ci.yml) 覆盖 macOS arm64、Linux x64 和 Windows x64。
-
-## 来源与许可
-
-项目参考 [Repomix](https://github.com/yamadashy/repomix) 的仓库上下文生成行为，采用 [MIT](LICENSE) 许可。第三方代码及资源告知保存在 [LICENSES/](LICENSES/)，解析器固定版本和本地修改见 [来源清单](src/compression/THIRD_PARTY.md)。
+- **上下文与入口文档**：[统一请求协议](docs/context-requests.md) · [CLI 上下文读取](docs/context-cli.md) · [代码补读规格](docs/code-context.md) · [任务预算规格](docs/task-context.md) · [WebUI 指南](docs/webui.md) · [MCP 指南](docs/mcp.md)
+- **参考与维护文档**：[CLI 参数参考](docs/cli.md) · [配置文件](docs/configuration.md) · [分卷说明](docs/partition.md) · [性能基准（v0.4.1 基线）](docs/performance.md) · [工具链说明](docs/toolchain.md) · [迁移指南](docs/migration.md) · [公开接口 (`pkg.generated.mbti`)](src/pkg.generated.mbti) · [三平台 CI 工作流](https://github.com/Delthin/moon-repomix/actions/workflows/ci.yml)
+- **社区与治理**：[CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md)
+- **来源与许可**：本项目基于 [MIT License](LICENSE) 开源。产品设计致敬上游 [yamadashy/repomix](https://github.com/yamadashy/repomix)；第三方组件与语法压缩相关许可详见 [LICENSES/](LICENSES) 与 [src/compression/THIRD_PARTY.md](src/compression/THIRD_PARTY.md)。
