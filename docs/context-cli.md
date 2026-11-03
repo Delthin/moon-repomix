@@ -44,7 +44,7 @@ moon-repomix ./project --context-stdio
 
 `spec` 就是 `TaskContextSpec` 或 `CodeContextSpec`。代码请求的每个路径仅选 `symbols`、`ranges`、`full: true`、`outline: true` 之一；符号请求可加 `includeDependencies`。必选任务模式为 `full` / `skeleton`，可选另支持 `either`。具体限制、依赖、歧义及不可用原因见[代码读取](code-context.md)和[任务预算](task-context.md)。
 
-输入须为严格 UTF-8 JSON，原始输入和规范化 JSON 均不得超过 65,536 字节。`schemaVersion` 必须为整数 1；未知字段、目录、词表路径及主机权限不属于便携请求。`ContextRequest::from_json` 校验并保存不可变快照，JSON 访问方法返回新副本。
+输入须为有效 UTF-8 JSON，接受并去除开头的 UTF-8 BOM，与工作台配置导入一致。原始输入（含 BOM）和规范化 JSON 均不得超过 65,536 字节。`schemaVersion` 必须为整数 1；未知字段、目录、词表路径及主机权限不属于便携请求。`ContextRequest::from_json` 校验并保存不可变快照，JSON 访问方法返回新副本。
 
 ## 响应与计数
 

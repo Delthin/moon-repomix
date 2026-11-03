@@ -77,7 +77,7 @@ fn context_error(operation : String, category : String) -> Json {
 
 ///|
 fn context_parse(bytes : Bytes) -> @repomix.ContextRequest raise {
-  let text = @utf8.decode(bytes, ignore_bom=false) catch {
+  let text = @utf8.decode(bytes, ignore_bom=true) catch {
     _ => raise InvalidRequest
   }
   let value = @json.parse(text) catch { _ => raise InvalidRequest }

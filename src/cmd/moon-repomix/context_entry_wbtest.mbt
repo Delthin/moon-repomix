@@ -1,4 +1,19 @@
 ///|
+test "portable request decoding accepts the same leading UTF-8 BOM as preset imports" {
+  let request : Json = {
+    "schemaVersion": 1,
+    "operation": "read_code_context",
+    "spec": {
+      "maxTokens": 1000,
+      "requests": [{ "path": "src/main.mbt", "full": true }],
+    },
+  }
+  let encoded = @utf8.encode(request.stringify())
+  assert_eq(context_parse(encoded).to_json(), request)
+  assert_eq(context_parse(b"\xef\xbb\xbf" + encoded).to_json(), request)
+}
+
+///|
 async test "oversized serialized response cannot publish or commit candidate session" {
   let options = @config.resolve(@config.parse_cli(["--context-stdio"]), None)
   let previous = @repomix.CodeContextSession::new(1000)
