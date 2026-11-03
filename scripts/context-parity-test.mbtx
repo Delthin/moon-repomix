@@ -23,6 +23,70 @@ import {
 // Run --ready only after the owner freezes all three identities.
 // The external workspace consumer compiles against SOURCE_ROOT via moon.work.
 
+fn normalized_path(path : String, windows : Bool) -> String {
+  // Backslashes are filename characters on POSIX, separators only on Windows.
+  if windows { path.replace_all(old="\\", new="/") } else { path }
+}
+fn is_absolute_path(path : String, windows : Bool) -> Bool {
+  let path = normalized_path(path, windows)
+  if !windows { return path.has_prefix("/") }
+  if path.length() >= 3 && path[0] is ('A'..<='Z' | 'a'..<='z') && path[1] == ':' && path[2] == '/' { return true }
+  if path.has_prefix("//") {
+    let parts = path[2:].split("/").to_array()
+    return parts.length() >= 2 && !["", ".", ".."].contains(parts[0].to_owned()) && !["", ".", ".."].contains(parts[1].to_owned())
+  }
+  false
+}
+fn windows_host() -> Bool { @env.get_env_var("OS") == Some("Windows_NT") }
+async fn canonical_path(path : String) -> String {
+  normalized_path(@fs.realpath(path), windows_host())
+}
+// moon work init emits one quoted member per line. Decode each string rather
+// than searching serialized text: Windows backslashes are escaped in moon.work.
+fn workspace_members(manifest : String) -> Array[String] raise {
+  let manifest = manifest.trim().to_owned()
+  guard manifest.has_prefix("members = [") && manifest.has_suffix("]") else { fail("unexpected generated moon.work") }
+  let body = manifest[11:manifest.length() - 1]
+  let members : Array[String] = []
+  for line in body.split("\n") {
+    let line = line.trim().to_owned()
+    if line.is_empty() { continue }
+    let literal = if line.has_suffix(",") { line[:line.length() - 1].to_owned() } else { line }
+    members.push(text(@json.parse(literal)))
+  }
+  members
+}
+fn same_workspace_members(members : Array[String], source : String, consumer : String) -> Bool {
+  members.length() == 2 && source != consumer && members.contains(source) && members.contains(consumer)
+}
+async fn check_workspace(manifest : String, log : String, source : String) -> Unit {
+  let resolved : Array[String] = []
+  for member_path in workspace_members(manifest) {
+    resolved.push(canonical_path(if is_absolute_path(member_path, windows_host()) { member_path } else { log + "/" + member_path }))
+  }
+  assert_true(same_workspace_members(resolved, canonical_path(source), canonical_path(log + "/consumer")), msg="workspace must link exactly the frozen local SDK and consumer")
+}
+fn check_path_contract() -> Unit raise {
+  for path in ["C:/fixture", "d:\\fixture", "D:\\a/mixed", "\\\\server\\share\\fixture", "//server/share", "\\\\server/share\\fixture"] { assert_true(is_absolute_path(path, true), msg=path) }
+  for path in ["", "relative", "C:relative", "C:", "1:/fixture", "/fixture", "\\fixture", "//server", "//server/", "///share", "//server//share"] { assert_false(is_absolute_path(path, true), msg=path) }
+  assert_true(is_absolute_path("/tmp/literal\\name", false))
+  assert_false(is_absolute_path("C:\\fixture", false))
+  assert_false(is_absolute_path("\\\\server\\share", false))
+  assert_eq(normalized_path("/tmp/literal\\name", false), "/tmp/literal\\name")
+  assert_eq(normalized_path("D:\\a/mixed", true), "D:/a/mixed")
+  assert_eq(normalized_path("\\\\server\\share", true), "//server/share")
+  let drive = workspace_members("members = [\n  \"C:\\\\repo\",\n  \".\\\\consumer\",\n]")
+  assert_eq(drive, ["C:\\repo", ".\\consumer"])
+  let unc = workspace_members("members = [\n  \"\\\\\\\\server\\\\share\\\\repo\",\n  \"./consumer\",\n]")
+  assert_eq(normalized_path(unc[0], true), "//server/share/repo")
+  let posix = workspace_members("members = [\n  \"/tmp/literal\\\\name\",\n  \"./consumer\",\n]")
+  assert_eq(normalized_path(posix[0], false), "/tmp/literal\\name")
+  assert_true(same_workspace_members(["C:/repo", "C:/run/consumer"], "C:/repo", "C:/run/consumer"))
+  assert_false(same_workspace_members(["C:/repo-other", "C:/run/consumer"], "C:/repo", "C:/run/consumer"))
+  assert_false(same_workspace_members(["C:/repo", "C:/repo"], "C:/repo", "C:/run/consumer"))
+  assert_false(same_workspace_members(["C:/repo", "C:/run/consumer", "C:/extra"], "C:/repo", "C:/run/consumer"))
+}
+
 fn prop(value : Json, key : String) -> Json raise {
   guard value is Object(fields) && fields.get(key) is Some(found) else { fail("missing " + key) }
   found
@@ -67,8 +131,10 @@ fn failed_spec() -> Json {
   { "requests": [{ "path": "src/secret.mbt", "symbols": ["harmless"] }] }
 }
 async fn prepare(log : String, support : String) -> Unit {
-  assert_true(log.has_prefix("/") && support.has_prefix("/"))
+  assert_true(is_absolute_path(log, windows_host()) && is_absolute_path(support, windows_host()))
+  let support = canonical_path(support)
   @fs.mkdir(log, permission=0o700)
+  let log = canonical_path(log)
   @fs.mkdir(log + "/fixture")
   @fs.mkdir(log + "/fixture/src")
   let files : Map[String, String] = {
@@ -288,7 +354,7 @@ fn fixture_contract(value : Json, i : Int) -> Unit raise {
 }
 
 async fn ready(binary : String, vocab : String, source : String, sha : String, prepared : String, log : String) -> Unit {
-  assert_true([binary, vocab, source, prepared, log].all(path => path.has_prefix("/")))
+  assert_true([binary, vocab, source, prepared, log].all(path => is_absolute_path(path, windows_host())))
   assert_true(@fs.exists(prepared + "/prepared.json"))
   @fs.mkdir(log + "/consumer")
   for name in ["prepared.json", "request-0.json", "request-1.json", "request-2.json", "request-3.json", "consumer/main.mbt", "consumer/moon.mod", "consumer/moon.pkg"] {
@@ -301,7 +367,7 @@ async fn ready(binary : String, vocab : String, source : String, sha : String, p
   let binary_hash = digest(binary)
   let vocab_hash = digest(vocab)
   save(log, "identity", { "source": source, "sourceSHA": sha, "binary": binary, "binarySHA256": binary_hash, "vocab": vocab, "vocabSHA256": vocab_hash, "fixture": prepared + "/fixture", "sdkSupportSHA256": digest(log + "/consumer/main.mbt"), "async": "0.19.2", "protocol": "2026-07-28" })
-  let root = @fs.realpath(prepared + "/fixture")
+  let root = canonical_path(prepared + "/fixture")
   assert_eq(root, prepared + "/fixture", msg="use a canonical absolute evidence directory")
   ignore(command(log, "toolchain", "moon", ["version", "--all"], log))
   // WebUI constrains its launch flags. All entries use identical default
@@ -310,8 +376,7 @@ async fn ready(binary : String, vocab : String, source : String, sha : String, p
   save(log, "host-arguments", { "common": common, "cli": ["--style", "json", "--context-stdio"], "mcp": ["--style", "json", "--mcp", "--mcp-max-tokens", "16000", "--mcp-max-output-bytes", "4194304"], "http": ["--webui"], "includeIgnoreDisplayTemplate": "unchanged defaults", "security": true })
   ignore(command(log, "workspace-init", "moon", ["work", "init", source, log + "/consumer"], log))
   let manifest = @fs.read_file(log + "/moon.work").text()
-  assert_true(manifest.contains(source))
-  assert_true(manifest.contains(log + "/consumer") || manifest.contains("\"./consumer\""))
+  check_workspace(manifest, log, source)
   put(log + "/workspace-manifest.txt", manifest)
   ignore(command(log, "sdk-check", "moon", ["check", "-v", "--target", "native", "--target-dir", log + "/sdk-build", "."], log + "/consumer"))
   let (cli_stdin, cli_input) = @process.write_to_process()
@@ -475,20 +540,25 @@ async fn verify(binary : String, vocab : String, source : String, sha : String, 
   println("artifacts: " + log)
 }
 async fn main {
+  check_path_contract()
   let args = @env.args()
   if args.length() == 4 && args[1] == "--prepare-only" { prepare(args[2], args[3]); return }
   guard args.length() == 7 && ["--ready", "--verify-only"].contains(args[1]) else { fail("expected --prepare-only NEW_LOG_DIR SDK_SUPPORT_MBT or --ready/--verify-only BINARY VOCAB SOURCE_ROOT SOURCE_SHA LOG_DIR") }
-  assert_true([args[2], args[3], args[4], args[6]].all(path => path.has_prefix("/")), msg="all paths must be absolute")
+  assert_true([args[2], args[3], args[4], args[6]].all(path => is_absolute_path(path, windows_host())), msg="all paths must be absolute")
+  let binary = canonical_path(args[2])
+  let vocab = canonical_path(args[3])
+  let source = canonical_path(args[4])
+  let prepared = canonical_path(args[6])
   let log = if args[1] == "--ready" {
     let mut attempt = 1
-    while @fs.exists(args[6] + "/run-" + attempt.to_string()) { attempt += 1 }
-    let log = args[6] + "/run-" + attempt.to_string()
+    while @fs.exists(prepared + "/run-" + attempt.to_string()) { attempt += 1 }
+    let log = prepared + "/run-" + attempt.to_string()
     @fs.mkdir(log, permission=0o700)
-    log
-  } else { args[6] }
+    canonical_path(log)
+  } else { prepared }
   try {
-    if args[1] == "--ready" { ready(args[2], args[3], args[4], args[5], args[6], log) }
-    else { verify(args[2], args[3], args[4], args[5], log) }
+    if args[1] == "--ready" { ready(binary, vocab, source, args[5], prepared, log) }
+    else { verify(binary, vocab, source, args[5], log) }
   } catch {
     error => {
       let mut name = "failure"
