@@ -89,6 +89,10 @@ jobs:
           --log-dir "${{ runner.temp }}/volume-cli"
           ${{ runner.os == 'Linux' && '--xml-oracle' || '' }}
       - name: Native WebUI HTTP functional test
+        env:
+          TMPDIR: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
         run: >-
           moon run --target native scripts/webui-test.mbtx --
           "${{ github.workspace }}/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe"
@@ -158,6 +162,17 @@ jobs:
         with:
           name: volume-cli-${{ matrix.platform }}
           path: ${{ runner.temp }}/volume-cli
+          if-no-files-found: ignore
+      - name: WebUI HTTP request and response diagnostics
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: webui-http-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/moon-webui-http-*/*.json
+            ${{ runner.temp }}/moon-webui-http-*/*.txt
+            ${{ runner.temp }}/moon-webui-http-*/http/**
+            ${{ runner.temp }}/moon-webui-http-*/quota-http/**
           if-no-files-found: ignore
       - name: MCP stdio diagnostics
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
