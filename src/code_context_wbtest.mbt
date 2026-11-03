@@ -132,10 +132,58 @@ async test "code context disambiguates and follows bounded same-file references"
     "function ( {",
     create_mode=CreateOrTruncate,
   )
+  @fs.write_file(
+    root + "/methods.mbt",
+    "struct A { n : Int }\nstruct B { n : Int }\nfn value() -> Int { 0 }\nfn A::value(self : A) -> Int { self.n + 1 }\nfn B::value(self : B) -> Int { self.n + 2 }\nfn answer() -> Int { B::value({ n: 0 }) }\n" +
+    "// padding to keep selection smaller\n".repeat(100),
+    create_mode=CreateOrTruncate,
+  )
   let runtime = Runtime::load(
     @env.current_dir().unwrap() + "/assets/tokenizer-o200k_base.tiktoken",
   )
   let base = options(root)
+  for symbol in ["value", "Missing::value"] {
+    let rejected = read_code_context(
+      base,
+      runtime,
+      code_test_spec([{ "path": "methods.mbt", "symbols": [symbol] }]),
+    )
+    assert_eq(rejected.text, None)
+    assert_true(
+      rejected.audit
+      .stringify()
+      .contains(
+        if symbol == "value" {
+          "ambiguous-symbol"
+        } else {
+          "symbol-not-found"
+        },
+      ),
+    )
+  }
+  let qualified_method = read_code_context(
+    base,
+    runtime,
+    code_test_spec([{ "path": "methods.mbt", "symbols": ["B::value"] }]),
+  )
+  assert_eq(qualified_method.status, "complete")
+  assert_true(qualified_method.text.unwrap().contains("self.n + 2"))
+  assert_false(qualified_method.text.unwrap().contains("self.n + 1"))
+  let method_closure = read_code_context(
+    base,
+    runtime,
+    code_test_spec([
+      {
+        "path": "methods.mbt",
+        "symbols": ["answer"],
+        "includeDependencies": true,
+      },
+    ]),
+  )
+  assert_eq(method_closure.status, "complete")
+  assert_true(method_closure.text.unwrap().contains("B::value({ n: 0 })"))
+  assert_true(method_closure.text.unwrap().contains("self.n + 2"))
+  assert_false(method_closure.text.unwrap().contains("self.n + 1"))
   let closure = read_code_context(
     base,
     runtime,

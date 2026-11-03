@@ -112,11 +112,11 @@ fn code_projection(
     }
     let pending : Array[Int32] = []
     for symbol in request.symbols {
-      let matches = if symbol.contains(".") {
-        qualified.get(symbol).unwrap_or([])
-      } else {
-        names.get(symbol).unwrap_or([])
-      }
+      // Bare names retain all ambiguity candidates. Otherwise match the exact
+      // indexed qualified name, including MoonBit :: and impl spellings.
+      let matches = names
+        .get(symbol)
+        .unwrap_or(qualified.get(symbol).unwrap_or([]))
       if matches.length() != 1 {
         return (
           None,
@@ -153,7 +153,9 @@ fn code_projection(
       matched.push(code_definition_json(definition))
       if request.dependencies {
         for reference in definition.references {
-          let matches = names.get(reference).unwrap_or([])
+          let matches = names
+            .get(reference)
+            .unwrap_or(qualified.get(reference).unwrap_or([]))
           if matches.length() == 1 && !selected.contains(matches[0]) {
             if pending.length() >= 64 {
               return (None, { "path": path, "reason": "dependency-limit" })
