@@ -1,4 +1,4 @@
-///|
+----
 import {
   "moonbitlang/async@0.19.2",
   "moonbitlang/async@0.19.2/fs",
@@ -9,8 +9,10 @@ import {
   "moonbitlang/core/env",
   "moonbitlang/x@0.5.5/path",
   "moonbitlang/core/json",
+  "moonbitlang/core/string",
   "moonbitlang/core/encoding/utf8",
 }
+----
 
 ///|
 // Read-only native HTTP integration on synthetic fixtures. No browser/network
@@ -41,18 +43,60 @@ fn request(profile : String) -> Json {
 }
 
 ///|
+struct Http {
+  url : String
+  log : String
+  mut next : Int32
+}
+
+///|
 async fn post(
-  url : String,
+  http : Http,
   path : String,
   value : Json,
   expected : Int32,
+  content_type~ : String = "application/json",
 ) -> Json {
-  let (response, body) = @http.post(url + path, value, headers={
+  http.next += 1
+  let stem = http.log + "/" + http.next.to_string()
+  let headers = {
     "x-moon-repomix": "webui",
-    "content-type": "application/json",
-  })
-  assert_eq(response.code, expected, msg=path + " " + body.text())
-  body.json()
+    "content-type": content_type,
+    "origin": http.url,
+  }
+  @fs.write_file(
+    stem + "-request.json",
+    (
+      {
+        "method": "POST",
+        "path": path,
+        "headers": headers,
+        "body": value,
+        "serialized": value.stringify(),
+        "expectedStatus": expected,
+      } : Json).stringify(),
+    create_mode=CreateNew,
+  )
+  let (response, body) = @http.post(http.url + path, value, headers~)
+  let serialized = body.text()
+  @fs.write_file(
+    stem + "-response.json",
+    (
+      {
+        "status": response.code,
+        "headers": response.headers,
+        "serialized": serialized,
+      } : Json).stringify(),
+    create_mode=CreateNew,
+  )
+  assert_eq(response.code, expected, msg=path + " " + serialized)
+  assert_true(
+    response.headers
+    .get("content-type")
+    .unwrap_or("")
+    .has_prefix("application/json"),
+  )
+  @json.parse(serialized)
 }
 
 ///|
@@ -61,16 +105,449 @@ async fn raw(
   headers : String,
   verb~ : String = "GET",
   path~ : String = "/api/session",
+  evidence~ : String = "",
 ) -> String {
   let conn = @socket.Tcp::connect(
     @socket.Addr::parse("127.0.0.1:" + port.to_string()),
   )
   defer conn.close()
-  @io.Writer::write(
-    conn,
-    verb + " " + path + " HTTP/1.1\r\n" + headers + "Connection: close\r\n\r\n",
+  let wire = verb +
+    " " +
+    path +
+    " HTTP/1.1\r\n" +
+    headers +
+    "Connection: close\r\n\r\n"
+  if evidence != "" {
+    @fs.write_file(evidence + "-request.txt", wire, create_mode=CreateNew)
+  }
+  @io.Writer::write(conn, wire)
+  let response = conn.read_all().text()
+  if evidence != "" {
+    @fs.write_file(evidence + "-response.txt", response, create_mode=CreateNew)
+  }
+  response
+}
+
+///|
+fn rows(value : Json) -> Array[Json] raise {
+  guard value is Array(found) else { fail("expected array") }
+  found
+}
+
+///|
+fn integer(value : Json) -> Int32 raise {
+  guard value is Number(n, ..) &&
+    n >= 0 &&
+    n <= 2147483647.0 &&
+    n == n.to_int().to_double() else {
+    fail("expected nonnegative integer")
+  }
+  n.to_int()
+}
+
+///|
+fn decimal(value : Json) -> Int32 raise {
+  let string = text(value)
+  let n = @string.parse_int(string)
+  assert_true(n >= 0)
+  assert_eq(n.to_string(), string)
+  n
+}
+
+///|
+fn context_result(
+  value : Json,
+  status : String,
+  cap : Int32,
+  embedded : Bool,
+) -> (Json, Int32) raise {
+  assert_eq(
+    prop(value, "operation"),
+    Json(if embedded { "read_code_context" } else { "plan_task_context" }),
   )
-  conn.read_all().text()
+  assert_eq(prop(value, "directory"), Json("src"))
+  guard value is Object(fields) else { fail("expected context envelope") }
+  assert_false(fields.contains("baseline"))
+  assert_false(fields.contains("raw"))
+  let result = prop(value, "result")
+  assert_eq(prop(result, "status"), Json(status))
+  let report = prop(result, "report")
+  assert_eq(prop(report, "status"), Json(status))
+  let security = prop(report, "security")
+  assert_eq(prop(security, "enabled"), Json(true))
+  assert_eq(prop(security, "status"), Json("passed"))
+  let over = status == "over_budget" || status == "required_over_budget"
+  assert_eq(prop(report, "budget"), ({ "limit": cap, "exceeded": over } : Json))
+  let tokens = decimal(prop(prop(report, "tokens"), "total"))
+  let bytes = decimal(prop(prop(report, "bytes"), "total"))
+  let document = prop(result, "document")
+  if status == "complete" || status == "with_omissions" {
+    let serialized = text(prop(result, "serialized"))
+    assert_eq(document, @json.parse(serialized))
+    assert_eq(bytes, @utf8.encode(serialized).length())
+    assert_true(tokens > 0 && tokens <= cap)
+    assert_eq(prop(report, "requiredTokens"), Json::null())
+    let accepted = if embedded {
+      rows(prop(document, "files")).length()
+    } else {
+      guard prop(document, "files") is Object(files) else {
+        fail("expected task files")
+      }
+      files.length()
+    }
+    assert_eq(integer(prop(prop(report, "counts"), "acceptedFiles")), accepted)
+  } else {
+    assert_eq(document, Json::null())
+    assert_eq(prop(result, "serialized"), Json::null())
+    assert_eq(tokens, 0)
+    assert_eq(bytes, 0)
+    assert_eq(prop(prop(report, "counts"), "acceptedFiles"), Json(0))
+    if over {
+      assert_true(decimal(prop(report, "requiredTokens")) > cap)
+    } else {
+      assert_eq(prop(report, "requiredTokens"), Json::null())
+    }
+  }
+  let audit = prop(value, "audit")
+  let serialized = text(prop(audit, "serialized"))
+  assert_eq(prop(audit, "document"), @json.parse(serialized))
+  assert_eq(decimal(prop(audit, "bytes")), @utf8.encode(serialized).length())
+  assert_true(decimal(prop(audit, "tokens")) > 0)
+  assert_eq(prop(audit, "includedInDocument"), Json(embedded))
+  if embedded && document != Json::null() {
+    assert_eq(prop(document, "audit"), prop(audit, "document"))
+  }
+  (document, tokens)
+}
+
+///|
+fn code_session(
+  value : Json,
+  limit : Int32,
+  spent : Int32,
+  rounds : Int32,
+) -> String raise {
+  let session = prop(value, "codeSession")
+  assert_eq(integer(prop(session, "limit")), limit)
+  assert_eq(integer(prop(session, "spent")), spent)
+  assert_eq(integer(prop(session, "remaining")), limit - spent)
+  assert_eq(integer(prop(session, "rounds")), rounds)
+  assert_eq(prop(session, "maxRounds"), Json(3))
+  assert_eq(prop(session, "canContinue"), Json(rounds < 3 && spent < limit))
+  let id = text(prop(session, "runId"))
+  assert_false(id.is_empty())
+  id
+}
+
+///|
+fn code_request(requests : Json, cap : Int32) -> Json {
+  { "directory": "src", "spec": { "maxTokens": cap, "requests": requests } }
+}
+
+///|
+fn continuation(id : String, requests : Json) -> Json {
+  { "directory": "src", "runId": id, "spec": { "requests": requests } }
+}
+
+///|
+fn task_request(cap : Int32, optional~ : Bool = false) -> Json {
+  {
+    "directory": "src",
+    "spec": {
+      "maxTokens": cap,
+      "tasks": [
+        {
+          "id": "review",
+          "required": [{ "path": "context.js", "mode": "full" }],
+          "optional": if optional {
+            [{ "path": "missing.txt", "mode": "either", "priority": 90 }]
+          } else {
+            []
+          },
+        },
+      ],
+    },
+  }
+}
+
+///|
+async fn session_error(
+  http : Http,
+  request : Json,
+  status~ : Int32 = 409,
+) -> Unit {
+  let response = post(http, "/api/code-context", request, status)
+  assert_eq(
+    prop(response, "error"),
+    if status == 409 {
+      (
+        {
+          "code": "invalid_code_session",
+          "message": "Code session cannot be continued.",
+        } : Json)
+    } else {
+      ({ "code": "invalid_request", "message": "Invalid request." } : Json)
+    },
+  )
+}
+
+///|
+async fn contexts(
+  http : Http,
+  main_source : String,
+  lines : Array[String],
+) -> Unit {
+  let source = lines.join("")
+  let task = post(http, "/api/task-context", task_request(8000), 200)
+  let (document, task_tokens) = context_result(task, "complete", 8000, false)
+  assert_eq(prop(document, "files"), ({ "context.js": source } : Json))
+  assert_eq(prop(task, "codeSession"), Json::null())
+  let omitted = post(
+    http,
+    "/api/task-context",
+    task_request(8000, optional=true),
+    200,
+  )
+  let (document, _) = context_result(omitted, "with_omissions", 8000, false)
+  assert_eq(prop(document, "files"), ({ "context.js": source } : Json))
+  assert_eq(prop(omitted, "codeSession"), Json::null())
+  let symbols : Json = [{ "path": "context.js", "symbols": ["selected"] }]
+  let ranges : Json = [
+    {
+      "path": "context.js",
+      "ranges": [
+        { "startLine": 1, "endLine": 1 },
+        { "startLine": 4, "endLine": 5 },
+      ],
+    },
+  ]
+  let outline_full : Json = [
+    { "path": "context.js", "outline": true },
+    { "path": "main.js", "full": true },
+  ]
+  // Root returns the exact required body cost on over_budget. These probes
+  // derive a tight aggregate cap without guessing BPE constants or recounting.
+  let costs : Array[Int32] = []
+  for requests in [symbols, ranges, outline_full] {
+    let probe = post(http, "/api/code-context", code_request(requests, 1), 200)
+    ignore(context_result(probe, "over_budget", 1, true))
+    assert_eq(prop(probe, "codeSession"), Json::null())
+    costs.push(
+      decimal(prop(prop(prop(probe, "result"), "report"), "requiredTokens")),
+    )
+  }
+  let limit = costs[0] + costs[1] + costs[2]
+  let first = post(http, "/api/code-context", code_request(symbols, limit), 200)
+  let (document, first_tokens) = context_result(first, "complete", limit, true)
+  assert_eq(first_tokens, costs[0])
+  assert_eq(
+    prop(document, "files"),
+    (
+      [
+        {
+          "path": "context.js",
+          "mode": "ranges",
+          "fragments": [
+            {
+              "startLine": 3,
+              "endLine": 6,
+              "text": lines[2:6].to_owned().join(""),
+            },
+          ],
+        },
+      ] : Json),
+  )
+  let first_id = code_session(first, limit, first_tokens, 1)
+  let saved = prop(first, "codeSession")
+  // Both failed continuation and failed new-first-round preserve this session.
+  let absent = post(
+    http,
+    "/api/code-context",
+    continuation(first_id, [{ "path": "missing.txt", "full": true }]),
+    200,
+  )
+  ignore(context_result(absent, "unavailable", limit - first_tokens, true))
+  assert_eq(prop(absent, "codeSession"), saved)
+  let replacement = post(
+    http,
+    "/api/code-context",
+    code_request(outline_full, 1),
+    200,
+  )
+  ignore(context_result(replacement, "over_budget", 1, true))
+  assert_eq(prop(replacement, "codeSession"), saved)
+  let failed_task = post(
+    http,
+    "/api/task-context",
+    task_request(task_tokens - 1),
+    200,
+  )
+  ignore(
+    context_result(failed_task, "required_over_budget", task_tokens - 1, false),
+  )
+  assert_eq(
+    decimal(prop(prop(prop(failed_task, "result"), "report"), "requiredTokens")),
+    task_tokens,
+  )
+  assert_eq(prop(failed_task, "codeSession"), saved)
+  session_error(
+    http,
+    {
+      "directory": "src",
+      "runId": first_id,
+      "spec": { "maxTokens": limit, "requests": ranges },
+    },
+    status=400,
+  )
+  session_error(http, {
+    "directory": ".",
+    "runId": first_id,
+    "spec": { "requests": ranges },
+  })
+  session_error(
+    http,
+    {
+      "directory": "src",
+      "runId": first_id,
+      "spec": { "unknown": true, "requests": ranges },
+    },
+    status=400,
+  )
+  session_error(http, continuation("not-a-current-id", ranges))
+  let second = post(
+    http,
+    "/api/code-context",
+    continuation(first_id, ranges),
+    200,
+  )
+  let (document, second_tokens) = context_result(
+    second,
+    "complete",
+    limit - first_tokens,
+    true,
+  )
+  assert_eq(second_tokens, costs[1])
+  assert_eq(
+    prop(document, "files"),
+    (
+      [
+        {
+          "path": "context.js",
+          "mode": "ranges",
+          "fragments": [
+            { "startLine": 1, "endLine": 1, "text": lines[0] },
+            { "startLine": 4, "endLine": 5, "text": lines[3] + lines[4] },
+          ],
+        },
+      ] : Json),
+  )
+  let spent = first_tokens + second_tokens
+  let second_id = code_session(second, limit, spent, 2)
+  assert_true(second_id != first_id)
+  session_error(http, continuation(first_id, ranges))
+  let over_budget = post(
+    http,
+    "/api/code-context",
+    continuation(second_id, [
+      { "path": "context.js", "full": true },
+      { "path": "main.js", "full": true },
+    ]),
+    200,
+  )
+  ignore(context_result(over_budget, "over_budget", limit - spent, true))
+  assert_eq(prop(over_budget, "codeSession"), prop(second, "codeSession"))
+  let third = post(
+    http,
+    "/api/code-context",
+    continuation(second_id, outline_full),
+    200,
+  )
+  let (document, third_tokens) = context_result(
+    third,
+    "complete",
+    limit - spent,
+    true,
+  )
+  assert_eq(third_tokens, costs[2])
+  let files = rows(prop(document, "files"))
+  assert_eq(files.length(), 2)
+  let outlines = files.filter(file => prop(file, "mode") == Json("outline"))
+  let full = files.filter(file => prop(file, "mode") == Json("full"))
+  assert_eq(outlines.length(), 1)
+  assert_eq(
+    Json(full),
+    ([{ "path": "main.js", "mode": "full", "text": main_source }] : Json),
+  )
+  assert_eq(prop(outlines[0], "path"), Json("context.js"))
+  let definitions = rows(prop(outlines[0], "definitions"))
+  assert_true(
+    definitions.contains(
+      (
+        {
+          "name": "selected",
+          "qualifiedName": "selected",
+          "startLine": 3,
+          "endLine": 6,
+        } : Json),
+    ),
+  )
+  assert_true(
+    definitions.contains(
+      (
+        {
+          "name": "helper",
+          "qualifiedName": "helper",
+          "startLine": 2,
+          "endLine": 2,
+        } : Json),
+    ),
+  )
+  let third_id = code_session(third, limit, spent + third_tokens, 3)
+  assert_true(third_id != second_id)
+  assert_eq(spent + third_tokens, limit)
+  session_error(http, continuation(second_id, ranges))
+  session_error(http, continuation(third_id, ranges))
+  // Both successful task statuses invalidate an existing session. The first
+  // also confirms that a previously exhausted session is actually cleared.
+  let omitted = post(
+    http,
+    "/api/task-context",
+    task_request(8000, optional=true),
+    200,
+  )
+  ignore(context_result(omitted, "with_omissions", 8000, false))
+  assert_eq(prop(omitted, "codeSession"), Json::null())
+  let fresh = post(http, "/api/code-context", code_request(symbols, 8000), 200)
+  ignore(context_result(fresh, "complete", 8000, true))
+  let fresh_id = code_session(fresh, 8000, first_tokens, 1)
+  assert_true(fresh_id != third_id)
+  let complete = post(http, "/api/task-context", task_request(8000), 200)
+  ignore(context_result(complete, "complete", 8000, false))
+  assert_eq(prop(complete, "codeSession"), Json::null())
+  session_error(http, continuation(fresh_id, ranges))
+  let fresh = post(http, "/api/code-context", code_request(symbols, 8000), 200)
+  ignore(context_result(fresh, "complete", 8000, true))
+  let pack_id = code_session(fresh, 8000, first_tokens, 1)
+  assert_true(pack_id != fresh_id)
+  let packed = post(http, "/api/pack", request("raw"), 200)
+  assert_eq(
+    prop(prop(packed, "result"), "serialized"),
+    prop(prop(packed, "baseline"), "serialized"),
+  )
+  session_error(http, continuation(pack_id, ranges))
+  @fs.write_file(
+    http.log + "/context-summary.json",
+    (
+      {
+        "taskTokens": task_tokens,
+        "roundTokens": costs,
+        "limit": limit,
+        "spent": spent + third_tokens,
+        "thirdSession": prop(third, "codeSession"),
+        "passed": true,
+      } : Json).stringify(),
+    create_mode=CreateNew,
+  )
 }
 
 ///|
@@ -96,8 +573,16 @@ async fn run(binary : String, vocab : String) -> Unit {
   @fs.mkdir(root + "/node_modules")
   // Such POSIX leaf names must not prevent browsing otherwise valid children.
   if @env.get_env_var("OS") != Some("Windows_NT") {
-    @fs.write_file(root + "/ordinary:name.txt", "not a directory", create_mode=CreateNew)
-    @fs.write_file(root + "/literal\\name.txt", "not a directory", create_mode=CreateNew)
+    @fs.write_file(
+      root + "/ordinary:name.txt",
+      "not a directory",
+      create_mode=CreateNew,
+    )
+    @fs.write_file(
+      root + "/literal\\name.txt",
+      "not a directory",
+      create_mode=CreateNew,
+    )
   }
   @fs.mkdir(log + "/webui")
   @fs.write_file(
@@ -123,15 +608,31 @@ async fn run(binary : String, vocab : String) -> Unit {
       .to_string(),
     log + "/tokenizer-unicode-16.0.0.txt",
   )
-  @fs.write_file(
-    root + "/src/main.js",
-    "export function answer(value) {\n" +
+  let main_source = "export function answer(value) {\n" +
     "  // a long explanation which is not part of the function signature\n".repeat(
       50,
     ) +
-    "  return value + 42;\n}\n",
+    "  return value + 42;\n}\n"
+  @fs.write_file(root + "/src/main.js", main_source, create_mode=CreateNew)
+  let context_lines = [
+    "const OFFSET = 7;\r\n", "function helper(value) { return value + OFFSET; }\r\n",
+    "export function selected(value) {\r\n", "  // 非ASCII片段\r\n", "  return helper(value);\r\n",
+    "}\r\n",
+  ]
+  @fs.write_file(
+    root + "/src/context.js",
+    context_lines.join("") +
+    "// OUTSIDE_SELECTION_SENTINEL unrelated implementation padding\r\n".repeat(
+      50,
+    ),
     create_mode=CreateNew,
   )
+  // Keep complete fixture lines for independent exact fragment expectations.
+  for _ in 0..<50 {
+    context_lines.push(
+      "// OUTSIDE_SELECTION_SENTINEL unrelated implementation padding\r\n",
+    )
+  }
   let fake_secret = "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
   @fs.write_file(
     root + "/src/secret.txt",
@@ -151,7 +652,9 @@ async fn run(binary : String, vocab : String) -> Unit {
   @fs.write_file(log + "/empty.json", "{}", create_mode=CreateNew)
   @fs.symlink(target=log + "/outside.txt", root + "/src/outside.txt")
   @fs.symlink(target=log, root + "/escape")
-  let paths = ["src/main.js", "src/secret.txt", "repomix.config.json"]
+  let paths = [
+    "src/main.js", "src/context.js", "src/secret.txt", "repomix.config.json",
+  ]
   let before = snapshot(root, paths)
   @fs.write_file(
     log + "/before.json",
@@ -164,6 +667,8 @@ async fn run(binary : String, vocab : String) -> Unit {
   let port = reservation.addr.port()
   reservation.close()
   let url = "http://127.0.0.1:" + port.to_string()
+  @fs.mkdir(log + "/http")
+  let http : Http = { url, log: log + "/http", next: 0, }
   let (output, stdout) = @process.read_from_process()
   defer output.close()
   let stderr = @process.redirect_to_file(
@@ -194,43 +699,79 @@ async fn run(binary : String, vocab : String) -> Unit {
       "x-moon-repomix": "webui",
     })
     assert_eq(session.code, 200)
-    assert_eq(prop(body.json(), "workspaceName"), Json("workspace"))
-    assert_eq(prop(prop(body.json(), "limits"), "maxFiles"), Json(2000))
-    let listed = post(url, "/api/directories", { "directory": "." }, 200)
+    let session = body.json()
+    @fs.write_file(
+      log + "/session.json",
+      session.stringify(),
+      create_mode=CreateNew,
+    )
+    assert_eq(prop(session, "workspaceName"), Json("workspace"))
+    assert_eq(prop(prop(session, "limits"), "maxFiles"), Json(2000))
+    assert_eq(
+      prop(session, "capabilities"),
+      Json(["pack", "task-context", "code-context"]),
+    )
+    assert_eq(prop(session, "codeMaxRounds"), Json(3))
+    let listed = post(http, "/api/directories", { "directory": "." }, 200)
     assert_eq(prop(listed, "directories"), Json(["src"]))
-    ignore(post(url, "/api/directories", { "directory": "../" }, 400))
-    ignore(post(url, "/api/directories", { "directory": "escape" }, 403))
+    ignore(post(http, "/api/directories", { "directory": "../" }, 400))
+    ignore(post(http, "/api/directories", { "directory": "escape" }, 403))
     let good_headers = "Host: 127.0.0.1:" +
       port.to_string() +
       "\r\nX-Moon-Repomix: webui\r\n"
+    // Parameterize the existing wire-level checks instead of maintaining a
+    // second security harness for the context routes.
+    for name in ["session", "pack", "task-context", "code-context"] {
+      let path = "/api/" + name
+      let verb = if name == "session" { "GET" } else { "POST" }
+      let common = "Content-Type: application/json\r\nContent-Length: 0\r\n"
+      let evidence = log + "/" + name
+      assert_true(
+        raw(
+          port,
+          "Host: evil.invalid\r\nX-Moon-Repomix: webui\r\n" + common,
+          verb~,
+          path~,
+          evidence=evidence + "-host",
+        ).has_prefix("HTTP/1.1 403"),
+      )
+      assert_true(
+        raw(
+          port,
+          good_headers + common + "Origin: http://evil.invalid\r\n",
+          verb~,
+          path~,
+          evidence=evidence + "-origin",
+        ).has_prefix("HTTP/1.1 403"),
+      )
+      assert_true(
+        raw(
+          port,
+          "Host: 127.0.0.1:" + port.to_string() + "\r\n" + common,
+          verb~,
+          path~,
+          evidence=evidence + "-header",
+        ).has_prefix("HTTP/1.1 403"),
+      )
+      if name != "session" {
+        let oversized = post(http, path, Json("x".repeat(65537)), 413)
+        assert_eq(
+          prop(prop(oversized, "error"), "code"),
+          Json("body_too_large"),
+        )
+        let wrong_type = post(http, path, {}, 400, content_type="text/plain")
+        assert_eq(
+          prop(prop(wrong_type, "error"), "code"),
+          Json("invalid_content_type"),
+        )
+      }
+    }
     assert_true(
-      raw(port, "Host: evil.invalid\r\nX-Moon-Repomix: webui\r\n").has_prefix(
+      raw(port, good_headers, verb="OPTIONS", evidence=log + "/preflight").has_prefix(
         "HTTP/1.1 403",
       ),
     )
-    assert_true(
-      raw(port, good_headers + "Origin: http://evil.invalid\r\n").has_prefix(
-        "HTTP/1.1 403",
-      ),
-    )
-    assert_true(
-      raw(port, good_headers, verb="OPTIONS").has_prefix("HTTP/1.1 403"),
-    )
-    assert_true(
-      raw(port, "Host: 127.0.0.1:" + port.to_string() + "\r\n").has_prefix(
-        "HTTP/1.1 403",
-      ),
-    )
-    let (oversize, _) = @http.post(url + "/api/pack", "x".repeat(65537), headers={
-      "x-moon-repomix": "webui",
-      "content-type": "application/json",
-    })
-    assert_eq(oversize.code, 413)
-    let (wrong_type, _) = @http.post(url + "/api/pack", "{}", headers={
-      "x-moon-repomix": "webui",
-    })
-    assert_eq(wrong_type.code, 400)
-    let packed = post(url, "/api/pack", request("raw"), 200)
+    let packed = post(http, "/api/pack", request("raw"), 200)
     @fs.write_file(log + "/raw.json", packed.stringify(), create_mode=CreateNew)
     let result = prop(packed, "result")
     let serialized = text(prop(result, "serialized"))
@@ -247,7 +788,7 @@ async fn run(binary : String, vocab : String) -> Unit {
       Json("excluded"),
     )
     // Independent existing CLI route must produce exactly the same raw document.
-    let (code, oracle, _) = @process.collect_output(
+    let (code, oracle, oracle_error) = @process.collect_output(
       binary,
       [
         root + "/src",
@@ -259,10 +800,20 @@ async fn run(binary : String, vocab : String) -> Unit {
       ],
       cwd=root,
     )
+    @fs.write_file(
+      log + "/cli-oracle.json",
+      (
+        {
+          "exitCode": code,
+          "stdout": oracle.text(),
+          "stderr": oracle_error.text(),
+        } : Json).stringify(),
+      create_mode=CreateNew,
+    )
     assert_eq(code, 0)
     assert_eq(oracle.text(), serialized)
     for profile in ["skeleton", "mixed"] {
-      let compressed = post(url, "/api/pack", request(profile), 200)
+      let compressed = post(http, "/api/pack", request(profile), 200)
       @fs.write_file(
         log + "/" + profile + ".json",
         compressed.stringify(),
@@ -279,6 +830,7 @@ async fn run(binary : String, vocab : String) -> Unit {
       )
       assert_true(text(prop(selected, "serialized")).contains("answer"))
     }
+    contexts(http, main_source, context_lines)
     let (html, html_body) = @http.get(url + "/")
     assert_eq(html.code, 200)
     assert_true(html_body.text().contains("native test"))
@@ -312,6 +864,8 @@ async fn run(binary : String, vocab : String) -> Unit {
   let port = reservation.addr.port()
   reservation.close()
   let url = "http://127.0.0.1:" + port.to_string()
+  @fs.mkdir(log + "/quota-http")
+  let quota : Http = { url, log: log + "/quota-http", next: 0, }
   let stderr = @process.redirect_to_file(
     log + "/quota-stderr.txt",
     create_mode=CreateNew,
@@ -338,7 +892,7 @@ async fn run(binary : String, vocab : String) -> Unit {
     guard @async.with_timeout(15000, () => output.read_some()) is Some(_) else {
       fail("quota child failed")
     }
-    let rejected = post(url, "/api/pack", request("raw"), 413)
+    let rejected = post(quota, "/api/pack", request("raw"), 413)
     assert_eq(
       prop(prop(rejected, "error"), "code"),
       Json("input_limit_exceeded"),
@@ -350,8 +904,20 @@ async fn run(binary : String, vocab : String) -> Unit {
     )
     group.return_immediately(())
   })
+  @fs.write_file(
+    log + "/summary.json",
+    (
+      {
+        "passed": true,
+        "mainPostRequests": http.next,
+        "quotaPostRequests": quota.next,
+        "ownedServerGroupsClosed": 2,
+        "readonlySnapshotUnchanged": after == before,
+      } : Json).stringify(),
+    create_mode=CreateNew,
+  )
   println(
-    "PASS: native HTTP, CLI oracle, profiles, Host/Origin/preflight, scope/symlink, body/quota, static CSP, readonly",
+    "PASS: native HTTP, task budgets/audit, code selectors/aggregate sessions, CLI oracle, profiles, Host/Origin/preflight, scope/symlink, body/quota, static CSP, readonly",
   )
 }
 
