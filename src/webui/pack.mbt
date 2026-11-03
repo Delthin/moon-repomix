@@ -89,16 +89,14 @@ async fn build(state : State, request : PackRequest) -> Json {
         "result": packed_json(selected, request.budget),
         "baseline": packed_json(baseline, request.budget),
       }
-      if @utf8.encode(value.stringify()).length() > 16777216 {
-        raise PublicError(
-          413, "output_too_large", "Combined response exceeds 16 MiB.",
-        )
-      }
+      check_output(value)
       value
     },
     error=PublicError(
       422, "pack_timeout", "Pack operation exceeded 60 seconds.",
     ),
   )
+  @async.sleep(0)
+  state.code_session = None
   response
 }

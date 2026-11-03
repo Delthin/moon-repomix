@@ -5,6 +5,8 @@ priv struct State {
   resource : String
   port : Int32
   mut busy : Bool
+  mut code_session : CodeSession?
+  mut next_run : Int64
 }
 
 ///|
@@ -50,6 +52,8 @@ fn session(state : State) -> Json {
       "maxOutputBytes": 16777216,
     },
     "port": state.port,
+    "capabilities": ["pack", "task-context", "code-context"],
+    "codeMaxRounds": 3,
   }
 }
 
@@ -88,6 +92,19 @@ async fn handle(
           build(state, pack_request(value)).stringify(),
           "application/json; charset=utf-8",
         )
+      }
+      (Post, "/api/task-context" | "/api/code-context") => {
+        let value = @async.with_timeout(
+          10000,
+          () => read_json(body),
+          error=PublicError(400, "body_timeout", "Request body timed out."),
+        )
+        let result = if request.path == "/api/task-context" {
+          task_context(state, value)
+        } else {
+          code_context(state, value)
+        }
+        (200, result.stringify(), "application/json; charset=utf-8")
       }
       (Get, "/" | "/index.html") =>
         (
@@ -174,7 +191,15 @@ pub async fn serve(
       2097152
     },
   }
-  let state : State = { options, runtime, resource, port, busy: false, }
+  let state : State = {
+    options,
+    runtime,
+    resource,
+    port,
+    busy: false,
+    code_session: None,
+    next_run: 1L,
+  }
   let server = @http.Server(
     @socket.Addr::parse("127.0.0.1:" + port.to_string()),
   )

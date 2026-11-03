@@ -203,7 +203,15 @@ async test "single pack gate returns 409 and cancellation releases it" {
     max_files=2000,
     max_total_size=16777216L,
   )
-  let state : State = { options, runtime, resource, port: 8765, busy: false, }
+  let state : State = {
+    options,
+    runtime,
+    resource,
+    port: 8765,
+    busy: false,
+    code_session: None,
+    next_run: 1L,
+  }
   let request : PackRequest = {
     directory: ".",
     profile: "raw",
