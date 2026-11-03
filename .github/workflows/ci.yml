@@ -89,6 +89,11 @@ jobs:
           --log-dir "${{ runner.temp }}/volume-cli"
           ${{ runner.os == 'Linux' && '--xml-oracle' || '' }}
       - name: Native WebUI HTTP functional test
+        # Windows honors these; async 0.19.2 uses /tmp on Unix.
+        env:
+          TMPDIR: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
         run: >-
           moon run --target native scripts/webui-test.mbtx --
           "${{ github.workspace }}/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe"
