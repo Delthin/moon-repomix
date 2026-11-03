@@ -1,0 +1,501 @@
+----
+import {
+  "moonbitlang/async@0.19.2",
+  "moonbitlang/async@0.19.2/fs",
+  "moonbitlang/async@0.19.2/io",
+  "moonbitlang/async@0.19.2/http",
+  "moonbitlang/async@0.19.2/socket",
+  "moonbitlang/async@0.19.2/process",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/encoding/hex",
+  "moonbitlang/x@0.5.5/crypto",
+}
+----
+
+// No product build. Preparation starts no product processes.
+// --prepare-only NEW_ABSOLUTE_LOG_DIR ABSOLUTE_SDK_SUPPORT_MBT
+// --ready BINARY VOCAB SOURCE_ROOT SOURCE_SHA PREPARED_LOG_DIR
+// --verify-only BINARY VOCAB SOURCE_ROOT SOURCE_SHA RUN_LOG_DIR
+// --verify-only reuses captured transports; it never starts product processes.
+// Run --ready only after the owner freezes all three identities.
+// The external workspace consumer compiles against SOURCE_ROOT via moon.work.
+
+fn prop(value : Json, key : String) -> Json raise {
+  guard value is Object(fields) && fields.get(key) is Some(found) else { fail("missing " + key) }
+  found
+}
+fn object(value : Json) -> Map[String, Json] raise {
+  guard value is Object(found) else { fail("expected object") }
+  found
+}
+fn text(value : Json) -> String raise {
+  guard value is String(found) else { fail("expected string") }
+  found
+}
+fn rows(value : Json) -> Array[Json] raise {
+  guard value is Array(found) else { fail("expected array") }
+  found
+}
+fn number(value : Json) -> Int raise {
+  match value {
+    Number(n, ..) => { assert_eq(n, n.to_int().to_double()); n.to_int() }
+    String(s) => @string.parse_int(s)
+    _ => fail("expected integer or decimal string")
+  }
+}
+async fn put(path : String, body : String) -> Unit {
+  @fs.write_file(path, body, create_mode=CreateNew)
+}
+async fn save(log : String, name : String, value : Json) -> Unit {
+  put(log + "/" + name + ".json", value.stringify())
+}
+async fn load(log : String, name : String) -> Json {
+  @json.parse(@fs.read_file(log + "/" + name + ".json").text())
+}
+async fn digest(path : String) -> String {
+  @hex.encode(Bytes::from_array(@crypto.sha256(@fs.read_file(path).binary())[:]))
+}
+fn portable(operation : String, spec : Json, id : String?) -> Json {
+  let fields : Map[String, Json] = { "schemaVersion": Json(1), "operation": Json(operation), "spec": spec }
+  if id is Some(id) { fields["continueFrom"] = Json(id) }
+  Json::object(fields)
+}
+fn failed_spec() -> Json {
+  { "requests": [{ "path": "src/secret.mbt", "symbols": ["harmless"] }] }
+}
+async fn prepare(log : String, support : String) -> Unit {
+  assert_true(log.has_prefix("/") && support.has_prefix("/"))
+  @fs.mkdir(log, permission=0o700)
+  @fs.mkdir(log + "/fixture")
+  @fs.mkdir(log + "/fixture/src")
+  let files : Map[String, String] = {
+    "src/main.mbt": "///|\r\npub fn helper(value : Int) -> Int {\r\n  value + 7\r\n}\r\n\r\n///|\r\npub fn answer(value : Int) -> Int {\r\n  // 完整实现\r\n  let total = helper(value)\r\n  total * 2\r\n}\r\n" + "// unrelated padding\r\n".repeat(20),
+    "src/api.mbti": "// Public interface\npub fn helper(Int) -> Int\npub fn answer(Int) -> Int\n",
+    "src/ranges.ts": "export const first = '中文';\n// gap one\n// gap two\n// gap three\nexport const last = 73;\n",
+    "src/required.txt": "REQUIRED_UNICODE_正文\r\nstable required payload\r\n",
+    "src/optional.txt": "OPTIONAL_OMITTED_" + "0123456789abcdef 非重复语义 token background 73\n".repeat(2400),
+    "src/ignored.txt": "EXCLUDED_SOURCE_SENTINEL\n",
+    "README.md": "OUTSIDE_INCLUDE_SENTINEL\n",
+    ".repomixignore": "src/ignored.txt\n",
+    "src/secret.mbt": "pub fn harmless() -> Int { 1 }\n" + "// distant padding\n".repeat(100) + "let credential = \"" + "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" + "\"\n",
+  }
+  let hashes : Map[String, Json] = Map([])
+  for path, body in files {
+    put(log + "/fixture/" + path, body)
+    hashes[path] = Json(digest(log + "/fixture/" + path))
+  }
+  put(log + "/outside.txt", "OUTSIDE_ROOT_SENTINEL\n")
+  let specs : Array[Json] = [
+    { "maxTokens": 16000, "requests": [{ "path": "src/main.mbt", "symbols": ["answer"], "includeDependencies": true }] },
+    { "requests": [{ "path": "src/api.mbti", "outline": true }] },
+    { "requests": [{ "path": "src/ranges.ts", "ranges": [{ "startLine": 1, "endLine": 1 }, { "startLine": 5, "endLine": 5 }] }] },
+    { "maxTokens": 1600, "tasks": [{ "id": "parity", "required": [{ "path": "src/required.txt", "mode": "full" }], "optional": [{ "path": "src/optional.txt", "mode": "full" }, { "path": "src/secret.mbt", "mode": "full" }, { "path": "src/ignored.txt", "mode": "full" }] }] },
+  ]
+  for i, spec in specs {
+    let request = portable(if i == 3 { "plan_task_context" } else { "read_code_context" }, spec, if i == 1 || i == 2 { Some("sdk-latest") } else { None })
+    assert_true(@utf8.encode(request.stringify()).length() <= 65536)
+    save(log, "request-" + i.to_string(), request)
+  }
+  @fs.mkdir(log + "/consumer")
+  put(log + "/consumer/main.mbt", @fs.read_file(support).text())
+  put(log + "/consumer/moon.mod", "name = \"parity/local_consumer\"\npreferred_target = \"native\"\nimport { \"Delthin/moon_repomix@0.6.0\", \"moonbitlang/async@0.19.2\" }\n")
+  put(log + "/consumer/moon.pkg", "import { \"Delthin/moon_repomix\" @repomix, \"Delthin/moon_repomix/config\", \"Delthin/moon_repomix/compression\", \"moonbitlang/async\", \"moonbitlang/async/fs\", \"moonbitlang/core/env\", \"moonbitlang/core/json\", \"moonbitlang/core/encoding/utf8\" }\nsupported_targets = \"native\"\npkgtype(kind: \"executable\")\n")
+  save(log, "prepared", { "state": "prepared", "productInvocations": 0, "fixtureSHA256": Json::object(hashes), "sdkSupportSHA256": digest(support) })
+  println("prepared; product invocations=0")
+}
+
+struct Pipe {
+  input : @process.WriteToProcess
+  output : @process.ReadFromProcess
+  log : String
+  mut pending : Bytes
+  mut calls : Int
+}
+async fn exchange(p : Pipe, value : Json) -> Json {
+  p.calls += 1
+  let line = value.stringify() + "\n"
+  @fs.write_file(p.log + "-in.jsonl", line, append=true, create_mode=OpenExisting)
+  @io.Writer::write(p.input, line)
+  @async.with_timeout(70000, () => {
+    for ;; {
+      if p.pending.find(b"\n") is Some(end) {
+        let line = @utf8.decode(p.pending[:end])
+        p.pending = p.pending[end + 1:].to_owned()
+        let response = @json.parse(line)
+        if response is { "method": _, .. } { continue }
+        return response
+      }
+      guard @io.Reader::read_some(p.output) is Some(chunk) else { fail("unexpected child EOF") }
+      @fs.write_file(p.log + "-out.jsonl", chunk, append=true, create_mode=OpenExisting)
+      p.pending = p.pending + chunk
+      assert_true(p.pending.length() <= 16777216)
+    }
+  })
+}
+async fn rpc(p : Pipe, method_ : String, params : Json, expected_error~ : Int? = None) -> Json {
+  let fields = object(params).copy()
+  fields["_meta"] = { "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {} }
+  let id = p.calls + 1
+  let response = exchange(p, { "jsonrpc": "2.0", "id": id, "method": method_, "params": Json::object(fields) })
+  assert_eq(prop(response, "id"), Json(id))
+  if expected_error is Some(code) {
+    assert_eq(prop(prop(response, "error"), "code"), Json(code))
+    return response
+  }
+  assert_false(object(response).contains("error"), msg=response.stringify())
+  let result = prop(response, "result")
+  assert_eq(prop(result, "resultType"), Json("complete"))
+  result
+}
+async fn tool(p : Pipe, name : String, arguments : Json) -> Json {
+  rpc(p, "tools/call", { "name": name, "arguments": arguments })
+}
+async fn resource(p : Pipe, uri : String) -> String {
+  let result = rpc(p, "resources/read", { "uri": uri })
+  assert_eq(prop(result, "ttlMs"), Json(0))
+  assert_eq(prop(result, "cacheScope"), Json("private"))
+  let contents = rows(prop(result, "contents"))
+  assert_eq(contents.length(), 1)
+  text(prop(contents[0], "text"))
+}
+fn session(value : Json, cli : Bool) -> Json raise {
+  if value is Null { return value }
+  let limit = number(prop(value, if cli { "maxTokens" } else { "limit" }))
+  let spent = number(prop(value, if cli { "sessionTokens" } else { "spent" }))
+  let rounds = number(prop(value, if cli { "round" } else { "rounds" }))
+  let remaining = number(prop(value, if cli { "remainingTokens" } else { "remaining" }))
+  assert_eq(remaining, limit - spent)
+  let can_continue = rounds < 3 && spent < limit
+  if object(value).contains("canContinue") { assert_eq(prop(value, "canContinue"), Json(can_continue)) }
+  if object(value).contains("maxRounds") { assert_eq(prop(value, "maxRounds"), Json(3)) }
+  { "limit": limit, "spent": spent, "remaining": remaining, "rounds": rounds, "maxRounds": 3, "canContinue": can_continue }
+}
+fn cli_projection(value : Json, task : Bool) -> Json raise {
+  assert_eq(prop(value, "ok"), Json(true))
+  let body = text(prop(value, "text"))
+  let audit = if task { text(prop(value, "auditText")) } else { prop(value, "audit").stringify() }
+  { "status": prop(value, "status"), "body": body, "tokens": number(prop(value, "tokens")), "bytes": number(prop(value, "bytes")), "security": prop(value, "security"), "audit": audit, "auditTokens": if task { prop(value, "auditTokens") } else { Json::null() }, "auditBytes": @utf8.encode(audit).length(), "included": !task, "session": if task { Json::null() } else { session(value, true) } }
+}
+fn http_projection(value : Json, task : Bool) -> Json raise {
+  let result = prop(value, "result")
+  let report = prop(result, "report")
+  let body = text(prop(result, "serialized"))
+  assert_eq(prop(result, "document"), @json.parse(body))
+  let audit = prop(value, "audit")
+  let audit_body = text(prop(audit, "serialized"))
+  assert_eq(prop(audit, "document"), @json.parse(audit_body))
+  assert_eq(prop(audit, "includedInDocument"), Json(!task))
+  { "status": prop(result, "status"), "body": body, "tokens": number(prop(prop(report, "tokens"), "total")), "bytes": number(prop(prop(report, "bytes"), "total")), "security": prop(report, "security"), "audit": audit_body, "auditTokens": number(prop(audit, "tokens")), "auditBytes": number(prop(audit, "bytes")), "included": !task, "session": session(prop(value, "codeSession"), false) }
+}
+async fn mcp_projection(p : Pipe, value : Json, task : Bool) -> (Json, Map[String, String]) {
+  assert_eq(prop(value, "isError"), Json(false))
+  let summary = prop(value, "structuredContent")
+  let originals : Map[String, String] = Map([])
+  let mut body = ""
+  let mut audit = ""
+  for description in rows(prop(summary, "resources")) {
+    let uri = text(prop(description, "uri"))
+    let content = resource(p, uri)
+    originals[uri] = content
+    assert_eq(number(prop(description, "bytes")), @utf8.encode(content).length())
+    if prop(description, "name") == Json("audit.json") { audit = content } else { body = content }
+  }
+  assert_false(body.is_empty())
+  if !task { audit = prop(@json.parse(body), "audit").stringify() }
+  assert_false(audit.is_empty())
+  let sec = prop(summary, "security")
+  let sec = if sec is String(_) { ({ "status": sec, "enabled": true } : Json) } else { sec }
+  ({ "status": prop(summary, "status"), "body": body, "tokens": number(prop(summary, "tokens")), "bytes": number(prop(summary, "bytes")), "security": sec, "audit": audit, "auditTokens": if task { Json(number(prop(summary, "auditTokens"))) } else { Json::null() }, "auditBytes": @utf8.encode(audit).length(), "included": !task, "session": if task { Json::null() } else { session(summary, true) } }, originals)
+}
+struct Http {
+  url : String
+  log : String
+  mut calls : Int
+}
+async fn post(h : Http, path : String, value : Json, status : Int) -> Json {
+  h.calls += 1
+  let stem = "http-call-" + h.calls.to_string()
+  save(h.log, stem + "-request", { "path": path, "body": value })
+  let (response, body) = @http.post(h.url + path, value, headers={ "x-moon-repomix": "webui", "origin": h.url, "content-type": "application/json" })
+  let serialized = body.text()
+  save(h.log, stem + "-response", { "status": response.code, "body": serialized })
+  assert_eq(response.code, status, msg=serialized)
+  @json.parse(serialized)
+}
+async fn command(log : String, name : String, binary : String, argv : Array[String], cwd : String) -> String {
+  let (code, out, err) = @process.collect_output(binary, argv, cwd~)
+  put(log + "/" + name + "-stdout.txt", out.text())
+  put(log + "/" + name + "-stderr.txt", err.text())
+  save(log, name + "-exit", { "exitCode": code, "argv": argv })
+  assert_eq(code, 0, msg=name + " " + err.text())
+  out.text()
+}
+
+fn fixture_contract(value : Json, i : Int) -> Unit raise {
+  let body = text(prop(value, "body"))
+  let document = @json.parse(body)
+  let audit = @json.parse(text(prop(value, "audit")))
+  if i == 3 {
+    assert_eq(prop(value, "status"), Json("with_omissions"))
+    assert_eq(prop(document, "files"), ({ "src/required.txt": "REQUIRED_UNICODE_正文\r\nstable required payload\r\n" } : Json))
+    assert_eq(prop(value, "security"), ({ "enabled": true, "status": "excluded" } : Json))
+    let paths = rows(prop(audit, "paths"))
+    let secret = paths.filter(row => prop(row, "path") == Json("src/secret.mbt"))
+    assert_eq(secret.length(), 1)
+    assert_eq(prop(secret[0], "scanned"), Json(true))
+    assert_eq(prop(secret[0], "selected"), Json(false))
+    assert_eq(prop(secret[0], "reason"), Json("SecurityFinding"))
+    for path in ["src/optional.txt", "src/ignored.txt"] {
+      let omitted = paths.filter(row => prop(row, "path") == Json(path))
+      assert_eq(omitted.length(), 1)
+      assert_eq(prop(omitted[0], "selected"), Json(false))
+    }
+    return
+  }
+  assert_eq(prop(value, "status"), Json("complete"))
+  let files = rows(prop(document, "files"))
+  assert_eq(files.length(), 1)
+  let file = files[0]
+  match i {
+    0 => {
+      assert_eq(prop(file, "path"), Json("src/main.mbt"))
+      assert_eq(prop(file, "mode"), Json("ranges"))
+      assert_eq(prop(file, "fragments"), ([
+        { "startLine": 2, "endLine": 4, "text": "pub fn helper(value : Int) -> Int {\r\n  value + 7\r\n}\r\n" },
+        { "startLine": 7, "endLine": 11, "text": "pub fn answer(value : Int) -> Int {\r\n  // 完整实现\r\n  let total = helper(value)\r\n  total * 2\r\n}\r\n" },
+      ] : Json))
+    }
+    1 => {
+      assert_eq(prop(file, "path"), Json("src/api.mbti"))
+      assert_eq(prop(file, "mode"), Json("outline"))
+      assert_eq(prop(file, "definitions"), ([
+        { "name": "helper", "qualifiedName": "helper", "startLine": 2, "endLine": 2 },
+        { "name": "answer", "qualifiedName": "answer", "startLine": 3, "endLine": 3 },
+      ] : Json))
+    }
+    _ => {
+      assert_eq(prop(file, "path"), Json("src/ranges.ts"))
+      assert_eq(prop(file, "mode"), Json("ranges"))
+      assert_eq(prop(file, "fragments"), ([
+        { "startLine": 1, "endLine": 1, "text": "export const first = '中文';\n" },
+        { "startLine": 5, "endLine": 5, "text": "export const last = 73;\n" },
+      ] : Json))
+    }
+  }
+}
+
+async fn ready(binary : String, vocab : String, source : String, sha : String, prepared : String, log : String) -> Unit {
+  assert_true([binary, vocab, source, prepared, log].all(path => path.has_prefix("/")))
+  assert_true(@fs.exists(prepared + "/prepared.json"))
+  @fs.mkdir(log + "/consumer")
+  for name in ["prepared.json", "request-0.json", "request-1.json", "request-2.json", "request-3.json", "consumer/main.mbt", "consumer/moon.mod", "consumer/moon.pkg"] {
+    put(log + "/" + name, @fs.read_file(prepared + "/" + name).text())
+  }
+  let revision = command(log, "source-head", "git", ["-C", source, "rev-parse", "HEAD"], log).trim().to_owned()
+  assert_eq(revision, sha)
+  let dirty = command(log, "source-status", "git", ["-C", source, "status", "--porcelain"], log)
+  assert_eq(dirty, "", msg="frozen SDK source must be clean")
+  let binary_hash = digest(binary)
+  let vocab_hash = digest(vocab)
+  save(log, "identity", { "source": source, "sourceSHA": sha, "binary": binary, "binarySHA256": binary_hash, "vocab": vocab, "vocabSHA256": vocab_hash, "fixture": prepared + "/fixture", "sdkSupportSHA256": digest(log + "/consumer/main.mbt"), "async": "0.19.2", "protocol": "2026-07-28" })
+  let root = @fs.realpath(prepared + "/fixture")
+  assert_eq(root, prepared + "/fixture", msg="use a canonical absolute evidence directory")
+  ignore(command(log, "toolchain", "moon", ["version", "--all"], log))
+  // WebUI constrains its launch flags. All entries use identical default
+  // include/ignore/gitignore/display/template; context operations force Json.
+  let common = [root, "--max-files", "2000", "--max-total-size", "16777216", "--max-file-size", "2097152", "--tokenizer-path", vocab]
+  save(log, "host-arguments", { "common": common, "cli": ["--style", "json", "--context-stdio"], "mcp": ["--style", "json", "--mcp", "--mcp-max-tokens", "16000", "--mcp-max-output-bytes", "4194304"], "http": ["--webui"], "includeIgnoreDisplayTemplate": "unchanged defaults", "security": true })
+  ignore(command(log, "workspace-init", "moon", ["work", "init", source, log + "/consumer"], log))
+  let manifest = @fs.read_file(log + "/moon.work").text()
+  assert_true(manifest.contains(source))
+  assert_true(manifest.contains(log + "/consumer") || manifest.contains("\"./consumer\""))
+  put(log + "/workspace-manifest.txt", manifest)
+  ignore(command(log, "sdk-check", "moon", ["check", "-v", "--target", "native", "--target-dir", log + "/sdk-build", "."], log + "/consumer"))
+  let (cli_stdin, cli_input) = @process.write_to_process()
+  let (cli_output, cli_stdout) = @process.read_from_process()
+  let (mcp_stdin, mcp_input) = @process.write_to_process()
+  let (mcp_output, mcp_stdout) = @process.read_from_process()
+  defer cli_input.close()
+  defer cli_output.close()
+  defer mcp_input.close()
+  defer mcp_output.close()
+  for name in ["cli", "mcp"] { put(log + "/" + name + "-in.jsonl", ""); put(log + "/" + name + "-out.jsonl", "") }
+  let cli : Pipe = { input: cli_input, output: cli_output, log: log + "/cli", pending: b"", calls: 0 }
+  let mcp : Pipe = { input: mcp_input, output: mcp_output, log: log + "/mcp", pending: b"", calls: 0 }
+  let reservation = @socket.TcpServer(@socket.Addr::parse("127.0.0.1:0"))
+  let port = reservation.addr.port()
+  reservation.close()
+  let h : Http = { url: "http://127.0.0.1:" + port.to_string(), log, calls: 0 }
+  let (http_output, http_stdout) = @process.read_from_process()
+  defer http_output.close()
+  @async.with_task_group(group => {
+    let cli_child = @process.spawn(group, binary, common + ["--style", "json", "--context-stdio"], stdin=cli_stdin, stdout=cli_stdout, stderr=@process.redirect_to_file(log + "/cli-stderr.txt", create_mode=CreateNew), cwd=root)
+    let mcp_child = @process.spawn(group, binary, common + ["--style", "json", "--mcp", "--mcp-max-tokens", "16000", "--mcp-max-output-bytes", "4194304"], stdin=mcp_stdin, stdout=mcp_stdout, stderr=@process.redirect_to_file(log + "/mcp-stderr.txt", create_mode=CreateNew), cwd=root)
+    let http_child = @process.spawn(group, binary, common + ["--webui", "--webui-port=" + port.to_string()], stdout=http_stdout, stderr=@process.redirect_to_file(log + "/http-stderr.txt", create_mode=CreateNew), cwd=root)
+    let announcement = @async.with_timeout(15000, () => @io.Reader::read_some(http_output))
+    guard announcement is Some(announcement) else { fail("HTTP startup EOF") }
+    put(log + "/http-startup.txt", @utf8.decode(announcement))
+    assert_true(@utf8.decode(announcement).contains(h.url))
+    let (response, body) = @http.get(h.url + "/api/session", headers={ "x-moon-repomix": "webui" })
+    assert_eq(response.code, 200)
+    let metadata = body.json()
+    save(log, "http-session", metadata)
+    assert_eq(prop(prop(metadata, "limits"), "maxFiles"), Json(2000))
+    let caps = tool(mcp, "context_capabilities", {})
+    save(log, "mcp-capabilities", caps)
+    assert_eq(prop(prop(caps, "structuredContent"), "capabilities"), prop(metadata, "context"))
+    let host = prop(prop(caps, "structuredContent"), "host")
+    assert_eq(prop(host, "maxTokens"), Json(16000))
+    assert_eq(prop(host, "maxFiles"), Json(2000))
+    assert_eq(number(prop(host, "maxTotalBytes")), 16777216)
+    let mut cli_id = ""
+    let mut mcp_id = ""
+    let mut http_id = ""
+    for i in 0..<4 {
+      let value = load(log, "request-" + i.to_string())
+      let spec = prop(value, "spec")
+      let operation = text(prop(value, "operation"))
+      let continuing = i == 1 || i == 2
+      let task = i == 3
+      let c = exchange(cli, portable(operation, spec, if continuing { Some(cli_id) } else { None }))
+      let m = if i == 1 {
+        let fields = object(spec).copy(); fields["continueFrom"] = Json(mcp_id)
+        tool(mcp, "read_code_context", Json::object(fields))
+      } else { tool(mcp, "execute_context_request", portable(operation, spec, if continuing { Some(mcp_id) } else { None })) }
+      let hv = if i == 1 {
+        post(h, "/api/code-context", { "directory": ".", "runId": http_id, "spec": spec }, 200)
+      } else { post(h, "/api/context-request", { "directory": ".", "request": portable(operation, spec, if continuing { Some(http_id) } else { None }) }, 200) }
+      let cp = cli_projection(c, task)
+      let (mp, originals) = mcp_projection(mcp, m, task)
+      let hp = http_projection(hv, task)
+      for (name, projection) in [("cli", cp), ("mcp", mp), ("http", hp)] {
+        save(log, name + "-" + i.to_string(), projection)
+      }
+      if !task {
+        cli_id = text(prop(c, "runId"))
+        mcp_id = text(prop(prop(m, "structuredContent"), "runId"))
+        http_id = text(prop(prop(hv, "codeSession"), "runId"))
+      }
+      if i == 0 {
+        let failure = portable("read_code_context", failed_spec(), Some(cli_id))
+        let cf = exchange(cli, failure)
+        assert_eq(prop(cf, "ok"), Json(false))
+        assert_eq(prop(cf, "status"), Json("unavailable"))
+        assert_eq(prop(cf, "security"), ({ "enabled": true, "status": "excluded" } : Json))
+        assert_eq(prop(rows(prop(prop(cf, "audit"), "requests"))[0], "reason"), Json("SecurityFinding"))
+        let mf = tool(mcp, "execute_context_request", portable("read_code_context", failed_spec(), Some(mcp_id)))
+        assert_eq(prop(mf, "isError"), Json(true))
+        assert_eq(prop(prop(prop(mf, "structuredContent"), "audit"), "security"), Json("excluded"))
+        assert_eq(prop(prop(mf, "structuredContent"), "audit"), prop(cf, "audit"))
+        for uri, content in originals { assert_eq(resource(mcp, uri), content) }
+        let hf = post(h, "/api/context-request", { "directory": ".", "request": portable("read_code_context", failed_spec(), Some(http_id)) }, 200)
+        assert_eq(prop(prop(hf, "result"), "status"), Json("unavailable"))
+        assert_eq(prop(prop(hf, "audit"), "document"), prop(cf, "audit"))
+        assert_eq(prop(hf, "codeSession"), prop(hv, "codeSession"))
+        let invalid_fields = object(portable("read_code_context", prop(load(log, "request-0"), "spec"), None)).copy()
+        invalid_fields["directory"] = Json("..")
+        let invalid = Json::object(invalid_fields)
+        assert_eq(prop(exchange(cli, invalid), "ok"), Json(false))
+        let mi = rpc(mcp, "tools/call", { "name": "execute_context_request", "arguments": invalid }, expected_error=Some(-32602))
+        assert_eq(prop(prop(mi, "error"), "message"), Json("Invalid params"))
+        ignore(post(h, "/api/context-request/validate", invalid, 400))
+        for uri, content in originals { assert_eq(resource(mcp, uri), content) }
+        save(log, "failure-retention", { "cli": cf, "mcp": mf, "http": hf, "mcpOldResourcesUnchanged": true, "httpSessionUnchanged": true, "invalidRejected": true })
+      }
+    }
+    cli_input.close(); mcp_input.close()
+    assert_true(@async.with_timeout(5000, () => @io.Reader::read_all(cli_output).binary()).is_empty())
+    assert_true(@async.with_timeout(5000, () => @io.Reader::read_all(mcp_output).binary()).is_empty())
+    assert_eq(@async.with_timeout(5000, () => cli_child.wait()), 0)
+    assert_eq(@async.with_timeout(5000, () => mcp_child.wait()), 0)
+    ignore(http_child)
+    group.return_immediately(())
+  })
+  verify(binary, vocab, source, sha, log)
+}
+async fn verify(binary : String, vocab : String, source : String, sha : String, log : String) -> Unit {
+  let identity = load(log, "identity")
+  assert_eq(prop(identity, "sourceSHA"), Json(sha))
+  assert_eq(prop(identity, "source"), Json(source))
+  assert_eq(Json(digest(log + "/consumer/main.mbt")), prop(identity, "sdkSupportSHA256"))
+  assert_eq(Json(digest(binary)), prop(identity, "binarySHA256"))
+  assert_eq(Json(digest(vocab)), prop(identity, "vocabSHA256"))
+  let (head_code, head, _) = @process.collect_output("git", ["-C", source, "rev-parse", "HEAD"])
+  assert_eq(head_code, 0)
+  assert_eq(head.text().trim().to_owned(), sha)
+  let (status_code, status, _) = @process.collect_output("git", ["-C", source, "status", "--porcelain"])
+  assert_eq(status_code, 0)
+  assert_eq(status.text(), "")
+  let root = text(prop(identity, "fixture"))
+  // Reusing completed SDK artifacts avoids repeated planning on compare-only fixes.
+  if !@fs.exists(log + "/sdk-recounts.json") {
+    ignore(command(log, "sdk", "moon", ["run", "--target", "native", "--target-dir", log + "/sdk-build", ".", "--", root, vocab, log], log + "/consumer"))
+  }
+  let sdk_capabilities = load(log, "sdk-capabilities")
+  assert_eq(sdk_capabilities, prop(load(log, "http-session"), "context"))
+  assert_eq(sdk_capabilities, prop(prop(load(log, "mcp-capabilities"), "structuredContent"), "capabilities"))
+  let comparisons : Array[Json] = []
+  for i in 0..<4 {
+    let expected = load(log, "sdk-" + i.to_string())
+    fixture_contract(expected, i)
+    let body = text(prop(expected, "body"))
+    for forbidden in ["EXCLUDED_SOURCE_SENTINEL", "OUTSIDE_INCLUDE_SENTINEL", "OUTSIDE_ROOT_SENTINEL", "A1b2C3d4E5f6G7h8I9j0"] { assert_false(body.contains(forbidden)) }
+    for transport in ["cli", "mcp", "http"] {
+      let actual = load(log, transport + "-" + i.to_string())
+      for key in ["status", "body", "tokens", "bytes", "security", "audit", "auditBytes", "included", "session"] {
+        assert_eq(prop(actual, key), prop(expected, key), msg=transport + " case " + i.to_string() + " " + key)
+      }
+      if prop(actual, "auditTokens") is Null {} else { assert_eq(prop(actual, "auditTokens"), prop(expected, "auditTokens")) }
+    }
+    comparisons.push({ "case": i, "status": prop(expected, "status"), "tokens": prop(expected, "tokens"), "bytes": prop(expected, "bytes"), "bodyAuditAndSessionEqual": true })
+  }
+  assert_eq(Json(digest(binary)), prop(identity, "binarySHA256"))
+  assert_eq(Json(digest(vocab)), prop(identity, "vocabSHA256"))
+  let hashes = object(prop(load(log, "prepared"), "fixtureSHA256"))
+  for path, hash in hashes { assert_eq(Json(digest(root + "/" + path)), hash) }
+  let (final_head_code, final_head, _) = @process.collect_output("git", ["-C", source, "rev-parse", "HEAD"])
+  let (final_status_code, final_status, _) = @process.collect_output("git", ["-C", source, "status", "--porcelain"])
+  assert_eq(final_head_code, 0)
+  assert_eq(final_status_code, 0)
+  assert_eq(final_head.text().trim().to_owned(), sha)
+  assert_eq(final_status.text(), "")
+  let verified : Json = { "sourceSHA": sha, "sourceStatus": final_status.text(), "binarySHA256": digest(binary), "vocabSHA256": digest(vocab), "sdkSupportSHA256": digest(log + "/consumer/main.mbt") }
+  if @fs.exists(log + "/verified-identity.json") { assert_eq(load(log, "verified-identity"), verified) }
+  else { save(log, "verified-identity", verified) }
+  let cli_calls = @fs.read_file(log + "/cli-in.jsonl").text().split("\n").filter(line => !line.is_empty()).count()
+  let mcp_calls = @fs.read_file(log + "/mcp-in.jsonl").text().split("\n").filter(line => !line.is_empty()).count()
+  let http_posts = @fs.readdir(log).filter(name => name.has_prefix("http-call-") && name.has_suffix("-request.json")).length()
+  let result : Json = { "state": "passed", "comparisons": comparisons, "cliCalls": cli_calls, "mcpCallsIncludingResources": mcp_calls, "httpPosts": http_posts, "httpGets": 1, "sdkPlanCalls": 5, "productProcesses": 3, "transportProjection": "IDs/URIs excluded; decimal strings parsed; MCP/CLI embedded audit metrics independently recounted by local SDK; canContinue checked when supplied, derived only if absent",  "uncovered": ["browser", "legacy MCP", "non-JSON host styles", "cancellation races", "CLI atomic file publication (separate entry test)"] }
+  if @fs.exists(log + "/result.json") { assert_eq(load(log, "result"), result) }
+  else { save(log, "result", result) }
+  println("entry parity passed; full bodies, whole-document counts, audit, failure retention and three-round accounting")
+  println("artifacts: " + log)
+}
+async fn main {
+  let args = @env.args()
+  if args.length() == 4 && args[1] == "--prepare-only" { prepare(args[2], args[3]); return }
+  guard args.length() == 7 && ["--ready", "--verify-only"].contains(args[1]) else { fail("expected --prepare-only NEW_LOG_DIR SDK_SUPPORT_MBT or --ready/--verify-only BINARY VOCAB SOURCE_ROOT SOURCE_SHA LOG_DIR") }
+  assert_true([args[2], args[3], args[4], args[6]].all(path => path.has_prefix("/")), msg="all paths must be absolute")
+  let log = if args[1] == "--ready" {
+    let mut attempt = 1
+    while @fs.exists(args[6] + "/run-" + attempt.to_string()) { attempt += 1 }
+    let log = args[6] + "/run-" + attempt.to_string()
+    @fs.mkdir(log, permission=0o700)
+    log
+  } else { args[6] }
+  try {
+    if args[1] == "--ready" { ready(args[2], args[3], args[4], args[5], args[6], log) }
+    else { verify(args[2], args[3], args[4], args[5], log) }
+  } catch {
+    error => {
+      let mut name = "failure"
+      let mut n = 0
+      while @fs.exists(log + "/" + name + ".json") { n += 1; name = "failure-" + n.to_string() }
+      save(log, name, { "state": "failed", "error": error.to_string() })
+      raise error
+    }
+  }
+}
