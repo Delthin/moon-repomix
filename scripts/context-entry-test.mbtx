@@ -364,7 +364,7 @@ async fn file_cases(f : Fixture) -> (Int32, String) {
   for
     (name, bytes) in [
       ("invalid-utf8", b"\xff"),
-      ("bom", b"\xef\xbb\xbf{}"),
+      ("bom-empty-request", b"\xef\xbb\xbf{}"),
       ("broken-json", b"{broken"),
     ] {
     let path = f.log + "/" + name + ".request.json"
@@ -642,7 +642,35 @@ async fn stream_case(
 }
 
 ///|
+fn absolute_path(path : String, windows : Bool) -> Bool {
+  let path = if windows { path.replace_all(old="\\", new="/") } else { path }
+  if !windows {
+    return path.has_prefix("/")
+  }
+  if path.length() >= 3 &&
+    ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) &&
+    path[1] == ':' &&
+    path[2] == '/' {
+    return true
+  }
+  if path.has_prefix("//") {
+    let parts = path[2:].split("/").to_array()
+    return parts.length() >= 2 &&
+      !["", ".", ".."].contains(parts[0].to_owned()) &&
+      !["", ".", ".."].contains(parts[1].to_owned())
+  }
+  false
+}
+
+///|
 async fn main {
+  assert_true(absolute_path("D:\\a\\_temp\\entry", true))
+  assert_true(absolute_path("\\\\server\\share\\entry", true))
+  assert_false(absolute_path("D:relative", true))
+  assert_false(absolute_path("/relative", true))
+  assert_false(absolute_path("\\\\server", true))
+  assert_false(absolute_path("\\literal", false))
+  assert_true(absolute_path("/tmp/literal\\name", false))
   let args = @env.args()
   guard args.length() == 5 && args[1] == "--ready" else {
     fail("expected --ready FROZEN_NATIVE_BINARY VOCABULARY NEW_LOG_DIRECTORY")
@@ -650,9 +678,8 @@ async fn main {
   let binary = @fs.realpath(args[2])
   let vocab = @fs.realpath(args[3])
   let log = args[4]
-  assert_true(
-    binary.has_prefix("/") && vocab.has_prefix("/") && log.has_prefix("/"),
-  )
+  let windows = @env.get_env_var("OS") == Some("Windows_NT")
+  assert_true([binary, vocab, log].all(path => absolute_path(path, windows)))
   @fs.mkdir(log, permission=0o700)
   let root = log + "/fixture"
   @fs.mkdir(root + "/src", recursive=true)

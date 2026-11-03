@@ -98,6 +98,25 @@ jobs:
           moon run --target native scripts/webui-test.mbtx --
           "${{ github.workspace }}/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe"
           "${{ github.workspace }}/assets/tokenizer-o200k_base.tiktoken"
+      - name: Portable CLI requests and bounded JSONL sessions
+        run: >-
+          moon run --target native scripts/context-entry-test.mbtx -- --ready
+          "${{ github.workspace }}/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe"
+          "${{ github.workspace }}/assets/tokenizer-o200k_base.tiktoken"
+          "${{ runner.temp }}/context-entry"
+      - name: Prepare shared native-entry parity fixture
+        run: >-
+          moon run --target native scripts/context-parity-test.mbtx -- --prepare-only
+          "${{ runner.temp }}/context-parity"
+          "${{ github.workspace }}/scripts/context-parity-sdk.mbt"
+      - name: SDK, CLI, MCP and HTTP context parity
+        shell: bash
+        run: |
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          moon run --target native scripts/context-parity-test.mbtx -- --ready \
+            "$GITHUB_WORKSPACE/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe" \
+            "$GITHUB_WORKSPACE/assets/tokenizer-o200k_base.tiktoken" \
+            "$GITHUB_WORKSPACE" "$SOURCE_SHA" "${{ runner.temp }}/context-parity"
       - name: Prepare fixed MCP stdio fixture
         run: >-
           moon run --target native scripts/mcp-test.mbtx --
@@ -174,6 +193,28 @@ jobs:
             ${{ runner.os == 'Windows' && runner.temp || '/tmp' }}/moon-webui-http-*/*.txt
             ${{ runner.os == 'Windows' && runner.temp || '/tmp' }}/moon-webui-http-*/http/**
             ${{ runner.os == 'Windows' && runner.temp || '/tmp' }}/moon-webui-http-*/quota-http/**
+          if-no-files-found: ignore
+      - name: Portable CLI request diagnostics
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: context-entry-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/context-entry
+            !${{ runner.temp }}/context-entry/fixture/**
+          if-no-files-found: ignore
+      - name: Native-entry parity diagnostics
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: context-parity-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/context-parity/prepared.json
+            ${{ runner.temp }}/context-parity/request-*.json
+            ${{ runner.temp }}/context-parity/run-*/*.json
+            ${{ runner.temp }}/context-parity/run-*/*.jsonl
+            ${{ runner.temp }}/context-parity/run-*/*.txt
+            ${{ runner.temp }}/context-parity/run-*/moon.work
           if-no-files-found: ignore
       - name: MCP stdio diagnostics
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
