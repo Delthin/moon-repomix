@@ -11,7 +11,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Keep the Linux distribution baseline stable across runner image rollouts.
+          - os: ubuntu-24.04
             platform: linux-x64
           - os: macos-latest
             platform: macos-arm64
