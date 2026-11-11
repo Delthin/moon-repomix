@@ -24,7 +24,7 @@ async fn read_stdin(mode : @config.StdinMode) -> Array[String]? {
     Some(@config.parse_file_list(text, nul=mode is Nul))
   } catch {
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       raise InputList

@@ -95,7 +95,7 @@ async fn read_regular(
     read_bounded(file, max_bytes, remaining_bytes, consumed)
   } catch {
     err => {
-      if err is TotalSizeLimitExceeded || @async.is_cancellation_error(err) {
+      if err is TotalSizeLimitExceeded || @async.is_being_cancelled() {
         raise err
       }
       Skipped("Unreadable")
@@ -125,7 +125,7 @@ async fn read_bounded(
     // exact max_len through to the OS for a newly opened, unbuffered file.
     let count = reader.read(chunk, max_len=size) catch {
       err => {
-        if @async.is_cancellation_error(err) {
+        if @async.is_being_cancelled() {
           raise err
         }
         // Keep consumption from previous successful chunks on read failure.

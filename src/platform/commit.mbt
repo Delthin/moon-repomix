@@ -21,10 +21,7 @@ pub async fn commit(path : String, content : String) -> Unit {
     if !closed {
       file.close()
     }
-    @async.protect_from_cancel(
-      () => @fs.remove(temporary) catch { _ => () },
-      resume_on_cancel=false,
-    )
+    @async.protect_from_cancel(() => @fs.remove(temporary) catch { _ => () })
   }
   @io.Writer::write(file, content)
   file.sync()

@@ -167,7 +167,7 @@ async fn prepare(log : String, support : String) -> Unit {
   }
   @fs.mkdir(log + "/consumer")
   put(log + "/consumer/main.mbt", @fs.read_file(support).text())
-  put(log + "/consumer/moon.mod", "name = \"parity/local_consumer\"\npreferred_target = \"native\"\nimport { \"Delthin/moon_repomix@0.6.0\", \"moonbitlang/async@0.19.2\" }\n")
+  put(log + "/consumer/moon.mod", "name = \"parity/local_consumer\"\npreferred_target = \"native\"\nimport { \"Delthin/moon_repomix@0.7.0\", \"moonbitlang/async@0.22.5\" }\n")
   put(log + "/consumer/moon.pkg", "import { \"Delthin/moon_repomix\" @repomix, \"Delthin/moon_repomix/config\", \"Delthin/moon_repomix/compression\", \"moonbitlang/async\", \"moonbitlang/async/fs\", \"moonbitlang/core/env\", \"moonbitlang/core/json\", \"moonbitlang/core/encoding/utf8\" }\nsupported_targets = \"native\"\npkgtype(kind: \"executable\")\n")
   save(log, "prepared", { "state": "prepared", "productInvocations": 0, "fixtureSHA256": Json::object(hashes), "sdkSupportSHA256": digest(support) })
   println("prepared; product invocations=0")
@@ -556,16 +556,16 @@ async fn main {
     @fs.mkdir(log, permission=0o700)
     canonical_path(log)
   } else { prepared }
-  try {
+  let error = try {
     if args[1] == "--ready" { ready(binary, vocab, source, args[5], prepared, log) }
     else { verify(binary, vocab, source, args[5], log) }
+    return
   } catch {
-    error => {
-      let mut name = "failure"
-      let mut n = 0
-      while @fs.exists(log + "/" + name + ".json") { n += 1; name = "failure-" + n.to_string() }
-      save(log, name, { "state": "failed", "error": error.to_string() })
-      raise error
-    }
+    error => error
   }
+  let mut name = "failure"
+  let mut n = 0
+  while @fs.exists(log + "/" + name + ".json") { n += 1; name = "failure-" + n.to_string() }
+  save(log, name, { "state": "failed", "error": error.to_string() })
+  raise error
 }

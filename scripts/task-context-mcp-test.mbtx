@@ -1,4 +1,4 @@
-///|
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -7,6 +7,7 @@ import {
   "moonbitlang/core/json",
   "moonbitlang/core/encoding/utf8",
 }
+----
 
 ///|
 // Real native stdio, modern and legacy protocol; never builds the product.

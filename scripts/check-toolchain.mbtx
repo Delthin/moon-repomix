@@ -1,26 +1,62 @@
-///|
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
   "moonbitlang/async@0.22.5/process",
+  "moonbitlang/core/string",
+}
+----
+
+///|
+fn version_tuple(raw : String) -> (Int32, Int32, Int32) raise {
+  let token = raw.trim().to_owned().split(" ").to_array()[0].to_owned()
+  let token = match token {
+    [.. "v", .. rest] => rest.to_owned()
+    _ => token
+  }
+  let core = token.split("+").to_array()[0].to_owned()
+  let parts = core.split(".").to_array()
+  guard parts.length() == 3 else { fail("Invalid compiler version: " + raw) }
+  let numbers = parts.map(part => {
+    guard !part.is_empty() else { fail("Invalid compiler version: " + raw) }
+    for ch in part {
+      guard ch is ('0'..<='9') else { fail("Invalid compiler version: " + raw) }
+    }
+    @string.parse_int(part, base=10)
+  })
+  (numbers[0], numbers[1], numbers[2])
 }
 
 ///|
 async fn main {
-  let version = @fs.read_file("moon-toolchain").text().trim().to_owned()
-  guard !version.is_empty() else {
-    fail("moon-toolchain must contain the required compiler version")
+  let requirement = @fs.read_file("moon-toolchain").text().trim().to_owned()
+  guard requirement is [.. ">=", .. minimum] else {
+    fail("moon-toolchain must contain >=MAJOR.MINOR.PATCH")
   }
-  let expected = "v" + version
+  let expected = version_tuple(minimum.to_owned())
   let (code, stdout, stderr) = @process.collect_output("moonc", ["-v"])
   let actual = (stdout.text() + stderr.text()).trim().to_owned()
-  guard code == 0 && (actual == expected || actual.has_prefix(expected + " ")) else {
-    fail(
-      "Expected moonc " +
-      expected +
-      "; update the toolchain and golden fixtures together before changing this requirement. Found: " +
-      actual,
-    )
+  guard code == 0 && version_tuple(actual) >= expected else {
+    fail("Expected moonc " + requirement + "; found: " + actual)
   }
-  println("Verified moonc " + expected)
+  println("Verified moonc " + actual + " (requires " + requirement + ")")
+}
+
+///|
+test "minimum compiler version ordering and metadata" {
+  let minimum = version_tuple("0.10.20")
+  assert_true(version_tuple("v0.10.20+65efd5b93 (2026-11-05)") >= minimum)
+  assert_true(version_tuple("0.10.100") > minimum)
+  assert_true(version_tuple("0.11.0") > minimum)
+  assert_true(version_tuple("1.0.0") > minimum)
+  assert_false(version_tuple("0.10.19") >= minimum)
+  for invalid in ["", "0.10", "0.10.20junk", "-1.10.20"] {
+    let rejected = try {
+      let _ = version_tuple(invalid)
+      false
+    } catch {
+      _ => true
+    }
+    assert_true(rejected)
+  }
 }

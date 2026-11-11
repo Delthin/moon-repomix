@@ -296,25 +296,22 @@ async fn FilePipeline::flush(self : FilePipeline) -> Unit {
 }
 
 ///|
-async fn FilePipeline::close(self : FilePipeline) -> Unit {
+async fn FilePipeline::close(self : FilePipeline) -> Unit nocancel {
   if self.closed {
     return
   }
-  @async.protect_from_cancel(
-    async fn() {
-      self.closed = true
-      // Start all stops together; one slow parser must not delay cancelling the
-      // other lanes. Every child close is itself cancellation protected.
-      @async.with_task_group(group => {
-        for lane in self.lanes {
-          let planner = lane.planner
-          group.spawn_bg(async fn() { planner.close() })
-        }
-      })
-      self.lanes.clear()
-      self.active_bytes = 0
-      self.completed.clear()
-    },
-    resume_on_cancel=true,
-  )
+  @async.protect_from_cancel(async fn() {
+    self.closed = true
+    // Start all stops together; one slow parser must not delay cancelling the
+    // other lanes. Every child close is itself cancellation protected.
+    @async.with_task_group(group => {
+      for lane in self.lanes {
+        let planner = lane.planner
+        group.spawn_bg(async fn() { planner.close() })
+      }
+    })
+    self.lanes.clear()
+    self.active_bytes = 0
+    self.completed.clear()
+  })
 }

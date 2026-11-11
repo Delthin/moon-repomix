@@ -93,7 +93,7 @@ MoonBit Map 与类别表仍供 `encode`、旧 count 和强差分使用；C count
 
 内嵌 BPE 源码来自 [tokenizers-moonbit](https://github.com/howtomakeaname/tokenizers-moonbit) 的 Mooncakes **0.16.3** 发布版。原 `src/model/bpe.mbt` 的 SHA-256 为 `00d3af2b82559086cbdb2ab7a82e6634381df04fe481ee25eeb2cf5fd13c072a`。原告知保存在 `LICENSES/tokenizer-tokenizers-moonbit-Apache-2.0.txt`，完整许可在 `LICENSES/tokenizer-Apache-2.0.txt`；修改内容见上文及源码头部。
 
-预切分遵循 MIT 许可下的 [tiktoken 0.14.0 定义](https://github.com/openai/tiktoken/blob/0.14.0/tiktoken_ext/openai_public.py)，Unicode 告知随数据保留。SHA-256 与路径操作使用 `moonbitlang/x@0.5.5`，文件 I/O 使用 `moonbitlang/async@0.19.2`，两者均为 Apache-2.0。
+预切分遵循 MIT 许可下的 [tiktoken 0.14.0 定义](https://github.com/openai/tiktoken/blob/0.14.0/tiktoken_ext/openai_public.py)，Unicode 告知随数据保留。SHA-256 与路径操作使用 `moonbitlang/x@0.5.5`，文件 I/O 使用 `moonbitlang/async@0.22.5`，两者均为 Apache-2.0。
 
 ## 黄金数据与复现
 
@@ -137,4 +137,4 @@ moon info src/metrics --target native
 
 缓存名是公开词表 URL 的 SHA-1；资源完整性由 tiktoken 和本库分别检查 SHA-256。工具准备完成后，缓存使黄金数据生成可离线执行。从其他工作目录启动测试时，将 `TOKENIZER_ASSETS` 设为夹具目录的绝对路径；运行时加载只需要词表绝对路径。
 
-夹具最初在 `moonc v0.10.15+943464bfa` 下验证；当前固定工具链为 `moonc v0.10.17+d971670cd`，期望 token ID 与资源 SHA-256 保持不变。独立 `.mbtx` 脚本自行解析依赖，产品测试使用 `moon.mod` 中的固定依赖；native CI 还验证安装和归档解包后从其他工作目录加载资源。
+夹具最初在 `moonc v0.10.15+943464bfa` 下验证；当前源码支持 MoonBit `>=0.10.20`，期望 token ID 与资源 SHA-256 保持不变。独立 `.mbtx` 脚本自行解析依赖，产品测试使用 `moon.mod` 中的固定依赖；native CI 还验证安装和归档解包后从其他工作目录加载资源。

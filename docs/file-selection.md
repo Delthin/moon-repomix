@@ -65,10 +65,10 @@ files 和 skipped 分别按相对路径的 **UTF-8 字节词典序** 排序，�
 ## 路径、文件类型与输出
 
 - 只遍历普通目录，只返回普通文件。先用 async fs.kind(follow_symlink=false) 分类，再决定递归；目录/文件链接、断链记 Symlink，FIFO/socket/设备/未知类型记 UnsupportedFileType，均不打开。
-- async **0.19.2** 的 `src/internal/event_loop/detect_file_kind.c` 先检查 `FILE_ATTRIBUTE_REPARSE_POINT`，将其判为 SymLink，覆盖 junction 等 reparse point。
+- async **0.22.5** 的 `src/internal/event_loop/fs.c` 先检查 `FILE_ATTRIBUTE_REPARSE_POINT`，将其判为 SymLink，覆盖 junction 等 reparse point。
 - 相对路径从真实根加单个 readdir 名称构造，边界比较带 `/`，不会把 `/root-other` 误当 `/root` 子目录。include 无法指定绝对路径或 `..` 穿越根。
 - output 必须绝对。输出已有时解析真实目标，尚不存在时解析最深已存在父目录再附加剩余组件；保留符号链接后 `..` 的实际解析顺序。解析后与候选路径相同的输出强制记 OutputFile，任何 include、反选或关闭默认忽略都不能恢复它。父目录别名、cwd 别名、文件链接别名均纳入比较；输出位于根外不会排除同名的根内文件。
-- Windows 的 async 0.19.2 realpath 只调用 GetFullPathNameW，不解 junction，因此本包 `canonical.c` 对根和输出的已存在祖先用 metadata-only CreateFileW + GetFinalPathNameByHandleW 取得真实路径；不用于打开遍历候选。
+- Windows 下，本包 `canonical.c` 对根和输出的已存在祖先用 metadata-only CreateFileW + GetFinalPathNameByHandleW 取得真实路径；不用于打开遍历候选。
 - 不同硬链接路径分别保留。lstat 与读取/递归之间存在 TOCTOU 竞争窗口，读取阶段须重新检查类型；规则文件也先做 no-follow 分类。类型检查和打开分离，调用者应避免不可信进程在打包时替换路径。
 - 输出临时文件在 pack 返回后创建；选择阶段不按临时文件名排除其他文件。
 

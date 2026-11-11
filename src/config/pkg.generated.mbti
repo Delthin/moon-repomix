@@ -15,6 +15,7 @@ pub fn parse_json(String) -> Patch raise ConfigError
 pub fn resolve(Cli, Patch?) -> Options raise ConfigError
 
 // Errors
+#derive(Eq, @debug.Debug)
 pub(all) suberror ConfigError {
   InvalidJson
   UnknownField(String)
@@ -23,23 +24,25 @@ pub(all) suberror ConfigError {
   MissingValue(String)
   Conflict(String)
   MultipleDirectories
-} derive(Eq, @debug.Debug)
+}
 pub fn ConfigError::equal(Self, Self) -> Bool
 pub fn ConfigError::not_equal(Self, Self) -> Bool
 pub fn ConfigError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
+#derive(Eq, @debug.Debug)
 pub(all) enum Action {
   Pack
   Init
   Help
   HelpAll
   Version
-} derive(Eq, @debug.Debug)
+}
 pub fn Action::equal(Self, Self) -> Bool
 pub fn Action::not_equal(Self, Self) -> Bool
 pub fn Action::to_repr(Self) -> @debug.Repr
 
+#derive(@debug.Debug)
 pub(all) struct Cli {
   directory : String
   config_path : String?
@@ -59,9 +62,10 @@ pub(all) struct Cli {
   quiet : Bool
   verbose : Bool
   patch : Patch
-} derive(@debug.Debug)
+}
 pub fn Cli::to_repr(Self) -> @debug.Repr
 
+#derive(@debug.Debug)
 pub(all) struct Options {
   directory : String
   output : String
@@ -103,9 +107,10 @@ pub(all) struct Options {
   tokenizer_path : String?
   quiet : Bool
   verbose : Bool
-} derive(@debug.Debug)
+}
 pub fn Options::to_repr(Self) -> @debug.Repr
 
+#derive(@debug.Debug)
 pub(all) struct Patch {
   mut output : String?
   mut style : Style?
@@ -142,50 +147,55 @@ pub(all) struct Patch {
   mut max_files : Int32?
   mut max_total_size : Int64?
   mut tokenizer_path : String?
-} derive(@debug.Debug)
+}
 pub fn Patch::empty() -> Self
 pub fn Patch::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum PathStyle {
   TargetRelative
   CwdRelative
   Absolute
-} derive(Eq, @debug.Debug)
+}
 pub fn PathStyle::equal(Self, Self) -> Bool
 pub fn PathStyle::not_equal(Self, Self) -> Bool
 pub fn PathStyle::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum SplitOutput {
   Disabled
   Enabled(Int32)
-} derive(Eq, @debug.Debug)
+}
 pub fn SplitOutput::equal(Self, Self) -> Bool
 pub fn SplitOutput::not_equal(Self, Self) -> Bool
 pub fn SplitOutput::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum StdinMode {
   Off
   Lines
   Nul
-} derive(Eq, @debug.Debug)
+}
 pub fn StdinMode::equal(Self, Self) -> Bool
 pub fn StdinMode::not_equal(Self, Self) -> Bool
 pub fn StdinMode::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum Style {
   Xml
   Markdown
   Json
   Plain
-} derive(Eq, @debug.Debug)
+}
 pub fn Style::equal(Self, Self) -> Bool
 pub fn Style::not_equal(Self, Self) -> Bool
 pub fn Style::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum TokenCountTree {
   Disabled
   Enabled(Int32)
-} derive(Eq, @debug.Debug)
+}
 pub fn TokenCountTree::equal(Self, Self) -> Bool
 pub fn TokenCountTree::not_equal(Self, Self) -> Bool
 pub fn TokenCountTree::to_repr(Self) -> @debug.Repr

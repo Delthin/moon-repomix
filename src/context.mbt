@@ -117,7 +117,7 @@ async fn git_context(
     max_bytes=options.max_git_bytes,
   ) catch {
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       raise GitError

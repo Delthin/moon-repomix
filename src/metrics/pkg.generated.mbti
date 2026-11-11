@@ -8,9 +8,10 @@ import {
 // Values
 
 // Errors
+#derive(@debug.Debug)
 pub suberror ResourceError {
   ResourceError(String)
-} derive(@debug.Debug)
+}
 #deprecated
 pub fn ResourceError::to_repr(Self) -> @debug.Repr
 

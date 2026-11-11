@@ -128,15 +128,12 @@ async fn check_cancelled_finish(collect~ : Bool = false) -> Unit {
       async fn() {
         // Arrange cancellation before finish deterministically, without a wall
         // clock race against a fast parser or the shared machine's CPU load.
-        @async.protect_from_cancel(
-          async fn() {
-            entered = true
-            while !release {
-              @async.pause()
-            }
-          },
-          resume_on_cancel=true,
-        )
+        @async.protect_from_cancel(async fn() {
+          entered = true
+          while !release {
+            @async.pause()
+          }
+        })
         if collect {
           ignore(ticket.collect())
         } else {
@@ -151,13 +148,15 @@ async fn check_cancelled_finish(collect~ : Bool = false) -> Unit {
     task.cancel()
     release = true
     try task.wait() catch {
-      err => assert_true(@async.is_cancellation_error(err))
+      err => assert_true(err is @async.WaitedTaskAlreadyCancelled)
     } noraise {
       _ => fail("cancellation became success")
     }
   })
   assert_eq(pool_live(planner.handle), 0)
   assert_true(planner.closed)
+  assert_true(ticket.finished)
+  assert_false(ticket.finishing)
   planner.close()
 }
 

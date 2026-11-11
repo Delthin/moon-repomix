@@ -1,4 +1,4 @@
-///|
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -7,6 +7,7 @@ import {
   "moonbitlang/core/json",
   "moonbitlang/core/string",
 }
+----
 
 ///|
 fn packed_tokens(report : String) -> Int32 raise {
@@ -163,7 +164,9 @@ async fn moonbit_self_pack(
 async fn main {
   let args = @env.args()
   guard args.length() == 2 else {
-    fail("Usage: moon run --target native scripts/self-pack-test.mbtx NEW_OUTPUT_DIR")
+    fail(
+      "Usage: moon run --target native scripts/self-pack-test.mbtx NEW_OUTPUT_DIR",
+    )
   }
   let repo = @fs.realpath(".")
   let binary = repo +

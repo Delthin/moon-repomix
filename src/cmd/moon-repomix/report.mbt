@@ -1,4 +1,13 @@
 ///|
+// Finish a complete report before observing any cancellation received while writing.
+async fn finish_report(write : async () -> Unit) -> Unit {
+  @async.protect_from_cancel(write)
+  if @async.is_being_cancelled() {
+    @async.pause()
+  }
+}
+
+///|
 /// JSON quoting keeps file names from injecting terminal lines or control codes.
 fn quote(path : String) -> String {
   Json::string(path).stringify()

@@ -307,7 +307,7 @@ moon run --target native scripts/benchmark-resident.mbtx -- verify "$MCP_WORK" "
 
 ### 当前源码的 Linux 大库复验入口
 
-`.github/workflows/benchmark-large.yml` 仅由 **workflow_dispatch** 手动运行，不随 push 自动测量。它检出 dispatch 所选 ref，以 `github.sha` 冻结源码身份，使用 [moon-toolchain](../moon-toolchain) 固定的 MoonBit（当前 `0.10.17+d971670cd`）和 Node `25.9.0`，只构建 native release CLI；上方历史样本仍对应各自记录的旧工具链，未来运行单独记录源码与编译器身份；参考 Repomix `1.18.1` 在 runner 临时目录独立安装，禁止生命周期脚本并归档 package-lock。语料与上文相同，所有编译、安装和准备均在预热前完成。此入口已完成上节 Linux 五轮实测；未来运行仍保留有利与不利结果，速度不作为通过条件。
+`.github/workflows/benchmark-large.yml` 仅由 **workflow_dispatch** 手动运行，不随 push 自动测量。它检出 dispatch 所选 ref，以 `github.sha` 冻结源码身份，使用满足 [moon-toolchain](../moon-toolchain) 最低要求（`>=0.10.20`）的官方当前稳定版 MoonBit 和 Node `25.9.0`，只构建 native release CLI；上方历史样本仍对应各自记录的旧工具链，未来运行单独记录源码与编译器身份；参考 Repomix `1.18.1` 在 runner 临时目录独立安装，禁止生命周期脚本并归档 package-lock。语料与上文相同，所有编译、安装和准备均在预热前完成。此入口已完成上节 Linux 五轮实测；未来运行仍保留有利与不利结果，速度不作为通过条件。
 
 也可在 Linux 的干净产品 Git 根目录直接复现；先准备指定工具链、Node、npm、Git 和 GNU `/usr/bin/time`，再使用各自尚不存在的绝对临时路径：
 

@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      MOONBIT_INSTALL_VERSION: "0.10.17+d971670cd"
+      MOONBIT_INSTALL_VERSION: "latest"
       SOURCE_REVISION: ${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -25,7 +25,7 @@ jobs:
           printf 'REFERENCE_INSTALL=%s/reference-install\n' "$BENCHMARK_ROOT" >> "$GITHUB_ENV"
           printf 'NATIVE_CLI=%s/_build/native/release/build/cmd/moon-repomix/moon-repomix.exe\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
           printf 'VOCABULARY=%s/assets/tokenizer-o200k_base.tiktoken\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-      - name: Install pinned MoonBit toolchain
+      - name: Install current stable MoonBit toolchain
         shell: bash
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
@@ -36,7 +36,7 @@ jobs:
           package-manager-cache: false
       - run: moon version --all
       - run: moon update
-      - name: Require the pinned compiler
+      - name: Require the minimum supported compiler
         run: moon run --target native scripts/check-toolchain.mbtx
       - name: Build only the native release CLI
         shell: bash

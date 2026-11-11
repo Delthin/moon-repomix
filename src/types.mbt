@@ -28,7 +28,7 @@ pub struct Runtime {
 pub async fn Runtime::load(tokenizer_path : String) -> Runtime {
   let encoder = @metrics.Encoder::load(tokenizer_path) catch {
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       raise ResourceError

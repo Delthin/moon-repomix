@@ -563,7 +563,7 @@ async test "context and pack share busy gate; cancellation and successful pack p
       }
       running.cancel()
       try running.wait() catch {
-        err => assert_true(@async.is_cancellation_error(err))
+        err => assert_true(err is @async.WaitedTaskAlreadyCancelled)
       } noraise {
         _ => fail("cancellation swallowed")
       }

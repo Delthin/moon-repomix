@@ -82,6 +82,10 @@ within runtime v0.25.3's supported ABI range 13–15.
 - `..<=` alongside existing range operators in `range_pattern` and
   `lexmatch_range_pattern` (range expressions already supported it).
 - `errdefer_expression` alongside `defer_expression` in statement expressions.
+- `nocancel` effects and `+ nocancel` combined with existing error effects.
+  Right associativity keeps the combined effect in the function signature.
+- Package-qualified trait names in prefix derive attributes, such as
+  `#derive(@debug.Debug)` and `#derive(Eq, @debug.Debug)` emitted by `moon info`.
 
 The modified grammar and generated parser carry prominent local-change notices.
 Parser tables are generated, not hand-edited. Generation uses **Tree-sitter CLI
@@ -107,8 +111,9 @@ no upstream lifecycle or build script is needed. Retain only the emitted
 
 ```c
 /* Locally regenerated from MoonBit grammar 5435c307 with tuple-for, ..<=
- * range-pattern and errdefer patches, using tree-sitter 0.25.10 (ABI 15).
- * See src/compression/THIRD_PARTY.md and vendor/moonbit/grammar.patch.
+ * range-pattern, errdefer, nocancel and qualified prefix-derive trait patches,
+ * using tree-sitter 0.25.10 (ABI 15). See src/compression/THIRD_PARTY.md and
+ * vendor/moonbit/grammar.patch.
  * Original grammar/source license: Apache-2.0, see ../LICENSE. */
 ```
 
@@ -129,17 +134,17 @@ Shipped MoonBit resource SHA-256 hashes (relative to `vendor/moonbit/`):
 | File | SHA-256 |
 | --- | --- |
 | `LICENSE` | `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4` |
-| `grammar.js` (patched) | `0fe13aa39b633bd49b649e0479f0e99ece814d5daf349f6536c9bae964e15300` |
-| `grammar.patch` | `84e657f90ddc94ca6c805858ed3d190103b5f5d26e3faa6526281d71e697dc4d` |
+| `grammar.js` (patched) | `2a257a4a1ea103f48fd9ca8e6e7c0687c00057145e47bf67a3349ad96d9d45f2` |
+| `grammar.patch` | `67851c494054c6390d92d3a76681a71f808b99b1a45d3e4af6c2cb2adf4cf93a` |
 | `tree-sitter.json` (unchanged) | `ec4fb39f511de1714bb7aff59d9b3162df1165eccfd46660844a7e07a04abcd6` |
-| `src/parser.c` (regenerated, including local-change notice) | `14b917661aeace3e4cfb0ee69f0f5f94fd5a284eac76676490dba62a843915f8` |
+| `src/parser.c` (regenerated, including local-change notice) | `c6260c308f82c9c0efdba762d496bcd20ebe8f91066fe6f04e0456bd1eea0da6` |
 | `src/scanner.c` | `4b6f1eff38807f71902993ac35fb926712cb9e8faf85a817362c5f45c36889c4` |
 | `src/tree_sitter/parser.h` | `180b893c8734778fd32f372dfbc27bd6ad1cd2221f26150b31256ff6716320d2` |
 | `src/tree_sitter/array.h` | `31e60a1bff6f715afacce03b5b70efe42b58371b4f9595dd4af52a577ff9608c` |
 | `src/tree_sitter/alloc.h` | `b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea` |
 
 The raw regenerated `src/parser.c`, before the notice is prepended, has SHA-256
-`f596c6715144f40045fcaf50044b34aafee76c82b446aab353ea522832cf15d5`.
+`48db79824c92c199cc781c43386546edaf24b44079f4562d5261146015897dc4`.
 Scanner, headers, metadata, license and the distribution license copy in
 `LICENSES/tree-sitter-moonbit-Apache-2.0.txt` are byte-identical to the fixed
 upstream archive. There is no upstream `NOTICE` file. Distributions must carry
@@ -197,11 +202,11 @@ Uncompressed vendored sources/provenance/licenses (including duplicate headers):
 | JavaScript | 6 | 2,517,419 |
 | Python | 6 | 3,464,497 |
 | TypeScript + TSX | 15 | 17,583,384 |
-| MoonBit | 9 | 6,200,870 |
+| MoonBit | 9 | 6,209,232 |
 | Go | 5 | 1,557,034 |
 | Rust | 6 | 6,212,241 |
 | Java | 5 | 2,580,790 |
-| **Total** | **100** | **40,922,652** |
+| **Total** | **100** | **40,931,014** |
 
 Approximately 39.03 MiB; generated parser tables dominate. Upstream tests,
 package-manager files, generator binaries and repository history are not shipped.

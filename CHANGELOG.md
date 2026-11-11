@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-11
+
 ### Added
 
 - MoonBit `.mbt` / `.mbti` 的完整定义索引，供符号读取、符号目录和同文件依赖补读使用。
@@ -13,6 +15,7 @@
 
 ### Changed
 
+- 工具链要求改为 MoonBit `>=0.10.20`，CI 跟随官方当前稳定版；异步依赖升级至 `0.22.5`，适配新版派生语法、脚本导入与取消清理效果。
 - SDK、CLI、MCP 和 HTTP 使用共享的代码会话预算与轮数策略，保持三轮成功、累计硬上限和失败不扣额度的规则。
 - CLI 便携请求与工作台配置导入统一接受开头的 UTF-8 BOM，原始字节仍受 64 KiB 上限约束。
 
@@ -98,7 +101,9 @@
 - 对齐默认排除、ignore 开关、自定义 glob 与精确磁盘拼写行为，修正跨平台字面路径选择。
 - 优化精确 tokenizer 的初始化、分词计数、文件选择和安全命中定位，减少文件处理中的定时器分配。
 
-[Unreleased]: https://github.com/Delthin/moon-repomix/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/Delthin/moon-repomix/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.7.0
+[0.6.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.6.0
 [0.5.1]: https://github.com/Delthin/moon-repomix/releases/tag/v0.5.1
 [0.5.0]: https://github.com/Delthin/moon-repomix/releases/tag/v0.5.0
 [0.4.1]: https://github.com/Delthin/moon-repomix/releases/tag/v0.4.1

@@ -1,12 +1,13 @@
 ///|
 /// Locations refer to the original disk UTF-8 bytes, including a stripped BOM.
+#derive(Debug, Eq)
 pub(all) struct Finding {
   rule : String
   path : String
   start : Int32
   end : Int32
   line : Int32
-} derive(Debug, Eq)
+}
 
 ///|
 pub extend Finding with Eq::{equal, not_equal}
@@ -16,12 +17,13 @@ pub extend Finding with Debug::{to_repr}
 
 ///|
 /// Stable categories only: neither text, paths nor engine diagnostics are stored.
+#derive(Debug, Eq)
 pub(all) suberror ScanError {
   InvalidBomOffset
   InvalidText
   InvalidEngineRange
   InputTooLarge
-} derive(Debug, Eq)
+}
 
 ///|
 pub extend ScanError with Eq::{equal, not_equal}

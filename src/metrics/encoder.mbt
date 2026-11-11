@@ -11,9 +11,10 @@ struct Encoder {
 ///|
 /// Invalid resource path, checksum, or resource contents. Filesystem errors and
 /// cancellation propagate unchanged from the async filesystem layer.
+#derive(@debug.Debug)
 pub suberror ResourceError {
   ResourceError(String)
-} derive(@debug.Debug)
+}
 
 ///|
 #deprecated

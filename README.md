@@ -9,12 +9,11 @@
 
 ## 版本边界与当前源码说明
 
-- **已发布版本（`v0.6.0`）**：[GitHub Release v0.6.0](https://github.com/Delthin/moon-repomix/releases/tag/v0.6.0) 与 [Mooncakes 注册表 `Delthin/moon_repomix`](https://mooncakes.io/docs/Delthin/moon_repomix) 当前正式版本仍为 `v0.6.0`，已包含普通打包、SDK `pack` / `read_code_context` / `plan_task_context`、MCP 与浏览器工作台基础功能。
-- **需从当前主线源码构建的功能**：统一 `ContextRequest` 协议与校验 API、CLI `--context-request` / `--context-stdio`、MoonBit（`.mbt` / `.mbti`）符号与同文件依赖索引，以及 WebUI 请求配置保存/导入。
+[GitHub Release v0.7.0](https://github.com/Delthin/moon-repomix/releases/tag/v0.7.0) 与 [Mooncakes 注册表 `Delthin/moon_repomix@0.7.0`](https://mooncakes.io/docs/Delthin/moon_repomix) 提供统一 `ContextRequest` 协议与校验 API、CLI `--context-request` / `--context-stdio`、MoonBit（`.mbt` / `.mbti`）符号与同文件依赖索引，以及 WebUI 请求配置保存/导入。普通打包、SDK `pack` / `read_code_context` / `plan_task_context` 和既有 MCP、工作台用法保持兼容。
 
 ## 统一任务规划与代码补读协议
 
-在当前源码中，任务预算（必选/可选文件模式与优先级）和代码补读（完整符号、不连续行范围、全文或符号目录）共享版本化 `ContextRequest` JSON（规范化上限 64 KiB）。以下请求可直接在本仓库使用，读取 `src/version.mbt` 的 `version` 符号及同文件依赖：
+v0.7.0 中，任务预算（必选/可选文件模式与优先级）和代码补读（完整符号、不连续行范围、全文或符号目录）共享版本化 `ContextRequest` JSON（规范化上限 64 KiB）。以下请求可直接在本仓库使用，读取 `src/version.mbt` 的 `version` 符号及同文件依赖：
 
 ```json
 {
@@ -40,9 +39,9 @@
 
 ## 安装与第一次运行
 
-### 1. 使用 v0.6.0 预编译归档
+### 1. 使用 v0.7.0 预编译归档
 
-从 [GitHub Releases (`v0.6.0`)](https://github.com/Delthin/moon-repomix/releases/tag/v0.6.0) 下载对应平台归档并通过 `SHA256SUMS` 校验。解压时请保留 `bin/`、`share/`、`LICENSES/` 的相对目录位置（分词词表等资源随包附带）。
+从 [GitHub Releases (`v0.7.0`)](https://github.com/Delthin/moon-repomix/releases/tag/v0.7.0) 下载对应平台归档并通过 `SHA256SUMS` 校验。解压时请保留 `bin/`、`share/`、`LICENSES/` 的相对目录位置（分词词表等资源随包附带）。
 
 ```sh
 # Unix
@@ -56,7 +55,7 @@
 
 ### 2. 从当前源码构建与安装
 
-源码构建固定要求 MoonBit `0.10.17+d971670cd` 与平台 C 工具链（默认 `native` 后端），源码运行会自动发现仓库内 `assets`：
+源码构建要求 MoonBit **0.10.20 及以上**与平台 C 工具链（默认 `native` 后端），源码运行会自动发现仓库内 `assets`：
 
 ```sh
 moon update

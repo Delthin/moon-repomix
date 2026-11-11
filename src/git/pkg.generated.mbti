@@ -4,7 +4,7 @@ package "Delthin/moon_repomix/git"
 // Values
 pub async fn checkout(String, revision? : String, history? : Int32) -> Checkout
 
-pub async fn cleanup(Checkout) -> Unit
+pub async fn cleanup(Checkout) -> Unit nocancel
 
 pub async fn collect(String, diffs? : Bool, logs? : Int32, max_bytes? : Int32, accept_diff? : async (Array[String]) -> Bool) -> Snapshot
 

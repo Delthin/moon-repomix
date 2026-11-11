@@ -1,6 +1,4 @@
-///|
-/// Large-source and Go/Rust benchmark; see docs/performance.md.
-/// Reuses an existing reference install; never installs dependencies.
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -12,15 +10,21 @@ import {
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/x@0.5.5/crypto",
 }
+----
 
 ///|
+/// Large-source and Go/Rust benchmark; see docs/performance.md.
+/// Reuses an existing reference install; never installs dependencies.
+
+///|
+#derive(ToJson)
 struct Repo {
   id : String
   url : String
   revision : String
   directory : String
   count : Int32
-} derive(ToJson)
+}
 
 ///|
 fn corpora() -> Array[Repo] {
@@ -57,6 +61,7 @@ struct Harness {
 }
 
 ///|
+#derive(ToJson)
 struct Sample {
   repo : String
   mode : String
@@ -69,7 +74,7 @@ struct Sample {
   output_sha256 : String
   output_bytes : Int32
   api_ok : Bool
-} derive(ToJson)
+}
 
 ///|
 async fn save(path : String, value : Json) -> Unit {
@@ -1326,10 +1331,11 @@ fn stats(values : Array[Double]) -> Json {
 }
 
 ///|
+#derive(ToJson)
 struct VerifiedIdentity {
   source_revision : String
   binary_sha256 : String
-} derive(ToJson)
+}
 
 ///|
 fn require_hex(value : String, length : Int32) -> Unit raise {

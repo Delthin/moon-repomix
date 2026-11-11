@@ -1,5 +1,4 @@
-///|
-/// Reproducible developer benchmark; see docs/performance.md.
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -8,15 +7,20 @@ import {
   "moonbitlang/core/json",
   "moonbitlang/core/string",
 }
+----
 
 ///|
+/// Reproducible developer benchmark; see docs/performance.md.
+
+///|
+#derive(ToJson)
 struct Repo {
   id : String
   url : String
   revision : String
   directory : String
   count : Int32
-} derive(ToJson)
+}
 
 ///|
 fn corpora() -> Array[Repo] {
@@ -53,6 +57,7 @@ struct Harness {
 }
 
 ///|
+#derive(ToJson)
 struct Sample {
   repo : String
   mode : String
@@ -65,7 +70,7 @@ struct Sample {
   output_sha256 : String
   output_bytes : Int32
   api_ok : Bool
-} derive(ToJson)
+}
 
 ///|
 async fn save(path : String, value : Json) -> Unit {

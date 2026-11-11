@@ -146,7 +146,7 @@ async fn read_code(state : State, args : Json) -> Json {
   }
   let plan = @repomix.read_code_context(state.options, state.runtime, spec) catch {
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       return error_result(

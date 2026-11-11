@@ -1,23 +1,26 @@
 ///|
+#derive(Eq, Debug)
 pub(all) enum Style {
   Xml
   Markdown
   Json
   Plain
-} derive(Eq, Debug)
+}
 
 ///|
+#derive(Eq, Debug)
 pub(all) enum PathStyle {
   TargetRelative
   CwdRelative
   Absolute
-} derive(Eq, Debug)
+}
 
 ///|
+#derive(Eq, Debug)
 pub(all) enum SplitOutput {
   Disabled
   Enabled(Int32)
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend SplitOutput with Eq::{equal, not_equal}
@@ -37,30 +40,34 @@ fn parse_path_style(value : String) -> PathStyle raise ConfigError {
 
 ///|
 /// CLI reporting only; thresholds use the sum of accepted file content tokens.
+#derive(Eq, Debug)
 pub(all) enum TokenCountTree {
   Disabled
   Enabled(Int32)
-} derive(Eq, Debug)
+}
 
 ///|
 /// Explicit CLI file-list input. Configuration files never enable stdin reads.
+#derive(Eq, Debug)
 pub(all) enum StdinMode {
   Off
   Lines
   Nul
-} derive(Eq, Debug)
+}
 
 ///|
+#derive(Eq, Debug)
 pub(all) enum Action {
   Pack
   Init
   Help
   HelpAll
   Version
-} derive(Eq, Debug)
+}
 
 ///|
 /// Absent scalars stay None; lists are additive, not replacement values.
+#derive(Debug)
 pub(all) struct Patch {
   mut output : String?
   mut style : Style?
@@ -97,7 +104,7 @@ pub(all) struct Patch {
   mut max_files : Int32?
   mut max_total_size : Int64?
   mut tokenizer_path : String?
-} derive(Debug)
+}
 
 ///|
 pub fn Patch::empty() -> Patch {
@@ -142,6 +149,7 @@ pub fn Patch::empty() -> Patch {
 
 ///|
 /// All paths are unmodified user paths; this package performs no I/O.
+#derive(Debug)
 pub(all) struct Cli {
   directory : String
   config_path : String?
@@ -161,9 +169,10 @@ pub(all) struct Cli {
   quiet : Bool
   verbose : Bool
   patch : Patch
-} derive(Debug)
+}
 
 ///|
+#derive(Debug)
 pub(all) struct Options {
   directory : String
   output : String
@@ -205,10 +214,11 @@ pub(all) struct Options {
   tokenizer_path : String?
   quiet : Bool
   verbose : Bool
-} derive(Debug)
+}
 
 ///|
 /// Error payloads contain field/option names, never source JSON or values.
+#derive(Eq, Debug)
 pub(all) suberror ConfigError {
   InvalidJson
   UnknownField(String)
@@ -217,7 +227,7 @@ pub(all) suberror ConfigError {
   MissingValue(String)
   Conflict(String)
   MultipleDirectories
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Style with Eq::{equal, not_equal}

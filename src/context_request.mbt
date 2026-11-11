@@ -1,9 +1,10 @@
 ///|
 /// Portable operation names, independent of host permissions and transport IDs.
+#derive(Eq, Debug)
 pub(all) enum ContextOperation {
   Task
   Code
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ContextOperation with Eq::{equal, not_equal}

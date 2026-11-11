@@ -1,19 +1,23 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "Delthin/moon_repomix/mcp_rpc"
 
+import {
+  "moonbitlang/core/json",
+}
+
 // Values
-pub async fn serve(Info, handler~ : async (String, Json) -> Json, limits? : Limits) -> Unit
+pub async fn serve(Info, handler~ : async (String, @json.Json) -> @json.Json, limits? : Limits) -> Unit
 
 // Errors
 pub(all) suberror RpcError {
-  Protocol(code~ : Int32, message~ : String, data~ : Json)
+  Protocol(code~ : Int32, message~ : String, data~ : @json.Json)
 }
 
 // Types and methods
 pub(all) struct Info {
   name : String
   version : String
-  capabilities : Json
+  capabilities : @json.Json
   instructions : String
 }
 

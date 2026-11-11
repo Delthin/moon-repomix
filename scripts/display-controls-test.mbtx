@@ -1,8 +1,4 @@
-///|
-// Build the native CLI first, then pass its binary and vocabulary paths:
-// moon build --target native --release
-// moon run --target native scripts/display-controls-test.mbtx BINARY VOCABULARY [--xml-oracle]
-// Record the tested source revision, script SHA, binary SHA before/after, and output.
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -12,6 +8,13 @@ import {
   "moonbitlang/core/string",
   "moonbitlang/core/encoding/utf8",
 }
+----
+
+///|
+// Build the native CLI first, then pass its binary and vocabulary paths:
+// moon build --target native --release
+// moon run --target native scripts/display-controls-test.mbtx BINARY VOCABULARY [--xml-oracle]
+// Record the tested source revision, script SHA, binary SHA before/after, and output.
 
 ///|
 fn check(ok : Bool, message : String) -> Unit raise {

@@ -73,7 +73,7 @@ async fn prepare_pack(options : Options, runtime : Runtime) -> PreparedPack {
         }
       } catch {
         err => {
-          if @async.is_cancellation_error(err) {
+          if @async.is_being_cancelled() {
             raise err
           }
           raise RemoteError
@@ -113,7 +113,7 @@ async fn pack_directory(
     Some(
       @platform.output_path(options.output, cwd) catch {
         err => {
-          if @async.is_cancellation_error(err) {
+          if @async.is_being_cancelled() {
             raise err
           }
           raise ConfigurationError
@@ -138,7 +138,7 @@ async fn pack_directory(
     @selection.SelectionError::FileLimitExceeded(limit~) =>
       raise InputLimitExceeded(kind="maxFiles", limit=limit.to_int64())
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       raise SelectionError

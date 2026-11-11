@@ -42,8 +42,7 @@ async fn invoke(
     let result = @async.with_timeout(timeout, () => handler(name, params))
     success(id, result, modern, cacheable=cacheable_method(name))
   } catch {
-    err if @async.is_being_cancelled() || @async.is_cancellation_error(err) =>
-      raise err
+    err if @async.is_being_cancelled() => raise err
     RpcError::Protocol(code~, message~, data~) =>
       rpc_error(id, protocol_error_code(modern, name, code), message, data~)
     @async.TimeoutError => rpc_error(id, -32000, "Request timed out")
@@ -176,8 +175,7 @@ pub async fn serve(
   limits~ : Limits = Limits::default(),
 ) -> Unit {
   serve_io(info, @stdio.stdin, @stdio.stdout, handler~, limits~) catch {
-    err if @async.is_being_cancelled() || @async.is_cancellation_error(err) =>
-      raise err
+    err if @async.is_being_cancelled() => raise err
     RpcError::Protocol(..) as err => raise err
     _ =>
       raise Protocol(

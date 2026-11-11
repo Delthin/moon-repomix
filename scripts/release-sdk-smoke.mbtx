@@ -1,15 +1,15 @@
 ----
 import {
-  "Delthin/moon_repomix@0.6.0" @repomix,
-  "moonbitlang/async@0.19.2",
-  "moonbitlang/async@0.19.2/fs",
+  "Delthin/moon_repomix@0.7.0" @repomix,
+  "moonbitlang/async@0.22.5",
+  "moonbitlang/async@0.22.5/fs",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/env",
   "moonbitlang/core/json",
 }
 ----
 
-// Registry-only v0.6.0 consumer. Run from an independent directory after resolving
+// Registry-only v0.7.0 consumer. Run from an independent directory after resolving
 // the published package and checking its ZIP and bundled tokenizer resources.
 
 ///|
@@ -22,7 +22,7 @@ let evidence_root : String = {
 }
 
 ///|
-let header : String = "Registry SDK v0.6.0: inspect public declarations and preserved implementation."
+let header : String = "Registry SDK v0.7.0: inspect public declarations and preserved implementation."
 
 ///|
 let inventory_signature : String = "pub fn inventory_total(values : Array[Int], offset~ : Int = 1) -> Int"
@@ -174,7 +174,7 @@ async fn verify_progressive_context(
   assert_eq(runtime.encoder.encode(code_text).length(), code.tokens)
   assert_eq(@utf8.encode(code_text).length(), code.bytes)
   let payload = @json.parse(code_text)
-  assert_eq(field(payload, "schemaVersion"), (1).to_json())
+  assert_eq(field(payload, "schemaVersion"), Json(1))
   assert_eq(text(field(payload, "headerText")), header)
   assert_eq(field(payload, "audit"), code.audit)
   let files = items(field(payload, "files"))
@@ -184,8 +184,8 @@ async fn verify_progressive_context(
   let fragments = items(field(files[0], "fragments"))
   assert_eq(fragments.length(), 1)
   // Independent expected fixture coordinates and the COMPLETE original function.
-  assert_eq(field(fragments[0], "startLine"), (401).to_json())
-  assert_eq(field(fragments[0], "endLine"), (405).to_json())
+  assert_eq(field(fragments[0], "startLine"), Json(401))
+  assert_eq(field(fragments[0], "endLine"), Json(405))
   assert_eq(text(field(fragments[0], "text")), answer_source)
   assert_false(code_text.contains("CONTEXT_PADDING_SENTINEL"))
 
@@ -360,7 +360,7 @@ async fn main {
   )
   assert_true(options.security_check)
   let runtime = @repomix.Runtime::load(ranks)
-  assert_eq(@repomix.version(), "0.6.0")
+  assert_eq(@repomix.version(), "0.7.0")
   println("version: \{@repomix.version()}")
   let result = @repomix.pack(options, runtime)
   // Save actual responses before assertions, retaining diagnostics on failure.
@@ -407,7 +407,7 @@ async fn main {
     field(@json.parse(result.text), "metadata"),
     "compression",
   )
-  assert_eq(field(overview, "keptFull"), (1).to_json())
+  assert_eq(field(overview, "keptFull"), Json(1))
   println(
     "pack: tokens=\{result.tokens} bytes=\{result.bytes}; kept-full + AST compression passed",
   )
@@ -488,7 +488,7 @@ async fn main {
   assert_eq(volumes.file_names.length(), 2)
   assert_eq(@json.parse(partition.index_text), partition.index)
   assert_true(partition.index_text.has_suffix("\n"))
-  assert_eq(field(partition.index, "schemaVersion"), (1).to_json())
+  assert_eq(field(partition.index, "schemaVersion"), Json(1))
   assert_eq(field(partition.index, "metadata"), result.document.metadata)
   assert_eq(object_size(field(partition.index, "files")), 2)
   assert_eq(object_size(field(partition.index, "sections")), 0)
@@ -534,13 +534,10 @@ async fn main {
     let summary = index_volumes[i]
     assert_eq(text(field(summary, "id")), volume.id)
     assert_eq(text(field(summary, "fileName")), name)
-    assert_eq(field(summary, "tokens"), volume.tokens.to_json())
-    assert_eq(field(summary, "bytes"), volume.bytes.to_json())
-    assert_eq(field(summary, "fileIndices"), volume.file_indices.to_json())
-    assert_eq(
-      field(summary, "sectionIndices"),
-      volume.section_indices.to_json(),
-    )
+    assert_eq(field(summary, "tokens"), Json(volume.tokens))
+    assert_eq(field(summary, "bytes"), Json(volume.bytes))
+    assert_eq(field(summary, "fileIndices"), Json(volume.file_indices))
+    assert_eq(field(summary, "sectionIndices"), Json(volume.section_indices))
     total += runtime.encoder.count(volume.text).to_int64()
     summaries.push({
       "id": volume.id,
@@ -559,6 +556,30 @@ async fn main {
   }
   assert_eq(partition.total_tokens, total)
   let progressive_context = verify_progressive_context(fixture, runtime)
+  let request = @repomix.ContextRequest::from_json({
+    "schemaVersion": 1,
+    "operation": "read_code_context",
+    "spec": {
+      "maxTokens": 100000,
+      "requests": [{ "path": "inventory.mbt", "symbols": ["inventory_total"] }],
+    },
+  })
+  assert_true(request.operation is Code)
+  let indexed = @repomix.read_code_context(
+    options,
+    runtime,
+    @repomix.CodeContextSpec::from_json(request.spec_json()),
+  )
+  assert_eq(indexed.status, "complete")
+  assert_true(indexed.security is @repomix.SecurityStatus::Passed)
+  guard indexed.text is Some(indexed_text) else {
+    abort("missing MoonBit definition")
+  }
+  assert_true(indexed_text.contains(inventory_signature))
+  assert_true(indexed_text.contains("total += value"))
+  assert_eq(runtime.encoder.count(indexed_text), indexed.tokens)
+  assert_eq(@utf8.encode(indexed_text).length(), indexed.bytes)
+  save("moonbit-request.json", indexed_text)
   let manifest : Json = {
     "version": @repomix.version(),
     "dependencyMode": "registry-only script imports; no workspace or local replacements",
@@ -573,6 +594,11 @@ async fn main {
     "indexBytes": @utf8.encode(partition.index_text).length(),
     "totalTokens": partition.total_tokens.to_string(),
     "progressiveContext": progressive_context,
+    "portableRequest": {
+      "path": "inventory.mbt",
+      "status": indexed.status,
+      "tokens": indexed.tokens,
+    },
     "checks": [
       "exact allowlist", "MoonBit declaration and default retained", "keep-full exact source",
       "AST body omitted", "header and numbered JSON", "security enabled", "explain hostNotListed",

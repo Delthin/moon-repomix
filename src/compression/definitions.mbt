@@ -1,4 +1,5 @@
 ///|
+#derive(Debug, Eq)
 pub(all) struct Definition {
   name : String
   qualified_name : String
@@ -7,13 +8,14 @@ pub(all) struct Definition {
   start_line : Int32
   end_line : Int32
   references : Array[String]
-} derive(Debug, Eq)
+}
 
 ///|
+#derive(Debug, Eq)
 pub(all) struct DefinitionIndex {
   definitions : Array[Definition]
   reason : String?
-} derive(Debug, Eq)
+}
 
 ///|
 pub extend Definition with Eq::{equal, not_equal}

@@ -1,4 +1,4 @@
-name: Release verified v0.6.0 assets
+name: Release verified v0.7.0 assets
 on:
   workflow_dispatch:
     inputs:
@@ -7,7 +7,7 @@ on:
         type: string
         required: true
       tag_object_sha:
-        description: Immutable annotated v0.6.0 tag object
+        description: Immutable annotated v0.7.0 tag object
         type: string
         required: true
       registry_sha256:
@@ -31,7 +31,7 @@ permissions:
   contents: write
   actions: read
 concurrency:
-  group: release-github-v0.6.0
+  group: release-github-v0.7.0
   cancel-in-progress: false
 jobs:
   release:
@@ -62,7 +62,7 @@ jobs:
           [[ "$NATIVE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$REGISTRY_RUN_ID" =~ ^[1-9][0-9]*$ ]]
           [[ "$REGISTRY_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-          OUT="$RUNNER_TEMP/verified-release-060-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          OUT="$RUNNER_TEMP/verified-release-070-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir "$OUT"
           mkdir "$OUT/native" "$OUT/registry" "$OUT/assets" "$OUT/report"
           printf 'OUT=%s\n' "$OUT" >> "$GITHUB_ENV"
@@ -71,16 +71,16 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_SHA" = "$SOURCE_SHA"
-          test "$(git rev-parse 'v0.6.0^{}')" = "$SOURCE_SHA"
-          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.6.0" > "$OUT/report/tag-ref-before.json"
+          test "$(git rev-parse 'v0.7.0^{}')" = "$SOURCE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.7.0" > "$OUT/report/tag-ref-before.json"
           jq -e --arg tag "$TAG_OBJECT_SHA" '.object.type == "tag" and .object.sha == $tag' "$OUT/report/tag-ref-before.json"
           gh api "repos/$GITHUB_REPOSITORY/git/tags/$TAG_OBJECT_SHA" > "$OUT/report/tag-object.json"
-          jq -e --arg sha "$SOURCE_SHA" '.tag == "v0.6.0" and .object.type == "commit" and .object.sha == $sha' "$OUT/report/tag-object.json"
+          jq -e --arg sha "$SOURCE_SHA" '.tag == "v0.7.0" and .object.type == "commit" and .object.sha == $sha' "$OUT/report/tag-object.json"
           gh run view "$NATIVE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json headSha,status,conclusion,jobs > "$OUT/report/native-ci.json"
           jq -e --arg sha "$SOURCE_SHA" '.headSha == $sha and .status == "completed" and .conclusion == "success" and (.jobs | length) == 3 and all(.jobs[]; .conclusion == "success")' "$OUT/report/native-ci.json"
           gh run view "$REGISTRY_RUN_ID" --repo "$GITHUB_REPOSITORY" --json headSha,status,conclusion,jobs > "$OUT/report/registry-ci.json"
           jq -e --arg sha "$SOURCE_SHA" '.headSha == $sha and .status == "completed" and .conclusion == "success" and (.jobs | length) > 0 and all(.jobs[]; .conclusion == "success")' "$OUT/report/registry-ci.json"
-          if gh release view v0.6.0 --repo "$GITHUB_REPOSITORY" --json id > "$OUT/report/preexisting-release.json" 2> "$OUT/report/preflight.stderr"; then
+          if gh release view v0.7.0 --repo "$GITHUB_REPOSITORY" --json id > "$OUT/report/preexisting-release.json" 2> "$OUT/report/preflight.stderr"; then
             echo "Release already exists; inspect it before any further mutation" >&2
             exit 1
           fi
@@ -90,16 +90,16 @@ jobs:
         run: |
           set -euo pipefail
           gh run download "$NATIVE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name moon-repomix-macos-arm64 --name moon-repomix-linux-x64 --name moon-repomix-windows-x64 --dir "$OUT/native"
-          gh run download "$REGISTRY_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "mooncakes-release-0.6.0-$REGISTRY_RUN_ID-$REGISTRY_ATTEMPT" --dir "$OUT/registry"
+          gh run download "$REGISTRY_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "mooncakes-release-0.7.0-$REGISTRY_RUN_ID-$REGISTRY_ATTEMPT" --dir "$OUT/registry"
           test "$(tr -d '\r\n' < "$OUT/registry/source-revision.txt")" = "$SOURCE_SHA"
-          jq -e --arg sha "$REGISTRY_SHA256" '.version == "0.6.0" and .yanked == false and .checksum == $sha' "$OUT/registry/registry-release.json"
+          jq -e --arg sha "$REGISTRY_SHA256" '.version == "0.7.0" and .yanked == false and .checksum == $sha' "$OUT/registry/registry-release.json"
           jq -e --arg sha "$REGISTRY_SHA256" '.sourceEntriesEqual == true and (.entryCount | type == "number" and . > 0 and floor == .) and .registryZipSha256 == $sha and .expectedZipSha256 == $sha' "$OUT/registry/source-comparison.json"
-          jq -e '.version == "0.6.0" and .security == "Passed" and .dependencyMode == "registry-only script imports; no workspace or local replacements" and .progressiveContext.code.status == "complete" and .progressiveContext.task.status == "complete"' "$OUT/registry/sdk/manifest.json"
+          jq -e '.version == "0.7.0" and .security == "Passed" and .dependencyMode == "registry-only script imports; no workspace or local replacements" and .progressiveContext.code.status == "complete" and .progressiveContext.task.status == "complete" and .portableRequest.path == "inventory.mbt" and .portableRequest.status == "complete"' "$OUT/registry/sdk/manifest.json"
           cp "$OUT/native/moon-repomix-macos-arm64/moon-repomix-macos-arm64.tar.gz" "$OUT/assets/"
           cp "$OUT/native/moon-repomix-linux-x64/moon-repomix-linux-x64.tar.gz" "$OUT/assets/"
           cp "$OUT/native/moon-repomix-windows-x64/moon-repomix-windows-x64.tar.gz" "$OUT/assets/"
-          cp "$OUT/registry/Delthin-moon_repomix-0.6.0.zip" "$OUT/assets/"
-          printf '%s  %s\n' "$REGISTRY_SHA256" "$OUT/assets/Delthin-moon_repomix-0.6.0.zip" | sha256sum -c -
+          cp "$OUT/registry/Delthin-moon_repomix-0.7.0.zip" "$OUT/assets/"
+          printf '%s  %s\n' "$REGISTRY_SHA256" "$OUT/assets/Delthin-moon_repomix-0.7.0.zip" | sha256sum -c -
           cp "$OUT/registry/sdk/manifest.json" "$OUT/report/sdk-manifest.json"
           cp "$OUT/registry/registry-release.json" "$OUT/report/registry-release.json"
           cp "$OUT/registry/source-comparison.json" "$OUT/report/source-comparison.json"
@@ -108,10 +108,10 @@ jobs:
         run: |
           set -euo pipefail
           {
-            printf '# v0.6.0 性能资料\n\n发行源码：`%s`。本版使用 MoonBit `0.10.17+d971670cd` 完成功能与交付验证；下文为各表所注明工具链和固定输入的既有性能测量，本次发行没有重测这些数据。\n\n' "$SOURCE_SHA"
+            printf '# v0.7.0 性能资料\n\n发行源码：`%s`。构建要求 MoonBit `>=0.10.20`，实际工具链见本版关联的 CI 记录。下文沿用各表注明工具链和固定输入的既有性能测量。\n\n' "$SOURCE_SHA"
             git show "$SOURCE_SHA:docs/performance.md"
           } > "$OUT/assets/PERFORMANCE.md"
-          cp .github/release-notes-v0.6.0.md "$OUT/report/release-notes.md"
+          cp .github/release-notes-v0.7.0.md "$OUT/report/release-notes.md"
           cd "$OUT/assets"
           sha256sum *.tar.gz *.zip PERFORMANCE.md > SHA256SUMS
           sha256sum -c SHA256SUMS
@@ -122,10 +122,10 @@ jobs:
         run: |
           set -euo pipefail
           # The existing annotated tag pins source; target_commitish is unused.
-          gh release create v0.6.0 "$OUT"/assets/* --repo "$GITHUB_REPOSITORY" --verify-tag --title v0.6.0 --notes-file "$OUT/report/release-notes.md" --draft
-          gh release view v0.6.0 --repo "$GITHUB_REPOSITORY" --json tagName,targetCommitish,isDraft,isPrerelease,assets,url > "$OUT/report/github-draft.json"
-          jq -e '.tagName == "v0.6.0" and .isDraft == true and .isPrerelease == false and (.assets | length) == 6 and all(.assets[]; .state == "uploaded")' "$OUT/report/github-draft.json"
-          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == "v0.6.0")' > "$OUT/report/github-draft-api.json"
+          gh release create v0.7.0 "$OUT"/assets/* --repo "$GITHUB_REPOSITORY" --verify-tag --title v0.7.0 --notes-file "$OUT/report/release-notes.md" --draft
+          gh release view v0.7.0 --repo "$GITHUB_REPOSITORY" --json tagName,targetCommitish,isDraft,isPrerelease,assets,url > "$OUT/report/github-draft.json"
+          jq -e '.tagName == "v0.7.0" and .isDraft == true and .isPrerelease == false and (.assets | length) == 6 and all(.assets[]; .state == "uploaded")' "$OUT/report/github-draft.json"
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[] | select(.tag_name == "v0.7.0")' > "$OUT/report/github-draft-api.json"
           while read -r HASH NAME; do
             jq -e --arg name "$NAME" --arg digest "sha256:$HASH" 'any(.assets[]; .name == $name and .digest == $digest)' "$OUT/report/github-draft-api.json"
           done < "$OUT/assets/SHA256SUMS"
@@ -133,18 +133,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.6.0" > "$OUT/report/tag-ref-draft.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.7.0" > "$OUT/report/tag-ref-draft.json"
           jq -e --arg tag "$TAG_OBJECT_SHA" '.object.type == "tag" and .object.sha == $tag' "$OUT/report/tag-ref-draft.json"
-          gh release edit v0.6.0 --repo "$GITHUB_REPOSITORY" --draft=false --latest
-          gh release view v0.6.0 --repo "$GITHUB_REPOSITORY" --json tagName,targetCommitish,isDraft,isPrerelease,publishedAt,assets,url > "$OUT/report/github-release.json"
-          jq -e '.tagName == "v0.6.0" and .isDraft == false and .isPrerelease == false and (.assets | length) == 6' "$OUT/report/github-release.json"
-          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.6.0" > "$OUT/report/tag-ref-published.json"
+          gh release edit v0.7.0 --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          gh release view v0.7.0 --repo "$GITHUB_REPOSITORY" --json tagName,targetCommitish,isDraft,isPrerelease,publishedAt,assets,url > "$OUT/report/github-release.json"
+          jq -e '.tagName == "v0.7.0" and .isDraft == false and .isPrerelease == false and (.assets | length) == 6' "$OUT/report/github-release.json"
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v0.7.0" > "$OUT/report/tag-ref-published.json"
           jq -e --arg tag "$TAG_OBJECT_SHA" '.object.type == "tag" and .object.sha == $tag' "$OUT/report/tag-ref-published.json"
       - name: Preserve public release evidence
         if: always() && env.OUT != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: github-release-0.6.0-${{ github.run_id }}-${{ github.run_attempt }}
+          name: github-release-0.7.0-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.OUT }}/report/
           if-no-files-found: warn
           retention-days: 14

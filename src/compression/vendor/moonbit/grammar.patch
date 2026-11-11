@@ -1,15 +1,17 @@
 --- a/grammar.js
 +++ b/grammar.js
-@@ -1,0 +1,3 @@
+@@ -1,0 +1,5 @@
 +// Local changes: tuple identifier binders in for-in loops, inclusive ..<= range
-+// patterns, and errdefer expressions. Generated with tree-sitter 0.25.10, ABI 15.
++// patterns, errdefer expressions, nocancel effects (including + nocancel),
++// and package-qualified traits in prefix derive attributes.
++// Generated with tree-sitter 0.25.10, ABI 15.
 +// See src/compression/THIRD_PARTY.md and grammar.patch for provenance.
-@@ -1303,0 +1307 @@
+@@ -1303,0 +1309 @@
 +        $.errdefer_expression,
-@@ -1310,0 +1315,2 @@
-+
+@@ -1311,0 +1318,2 @@
 +    errdefer_expression: ($) => seq("errdefer", $._expression),
-@@ -1468 +1474,10 @@
++
+@@ -1468 +1476,10 @@
 -        strictList(",", $._lowercase_identifier),
 +        choice(
 +          strictList(",", $._lowercase_identifier),
@@ -21,9 +23,22 @@
 +            ")"
 +          )
 +        ),
-@@ -1609 +1624 @@
+@@ -1609 +1626 @@
 -          choice("..<", "..="),
 +          choice("..<", "..=", "..<="),
-@@ -1661 +1676 @@
+@@ -1661 +1678 @@
 -      seq($._simple_pattern, choice("..<", "..="), $._simple_pattern),
 +      seq($._simple_pattern, choice("..<", "..=", "..<="), $._simple_pattern),
+@@ -1703 +1720,9 @@
+-      choice("raise", "noraise", seq("raise", $._type), seq("raise", "?")),
++      prec.right(
++        choice(
++          "nocancel",
++          seq(
++            choice("raise", "noraise", seq("raise", $._type), seq("raise", "?")),
++            optional(seq("+", "nocancel"))
++          )
++        )
++      ),
+@@ -1822,0 +1848 @@
++        seq($.package_identifier, $.dot_uppercase_identifier),

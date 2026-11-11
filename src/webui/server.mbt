@@ -10,7 +10,7 @@ priv struct State {
 }
 
 ///|
-let response_headers : Map[String, String] = {
+let response_headers : @http.Headers = {
   "cache-control": "no-store",
   "x-content-type-options": "nosniff",
   "cross-origin-resource-policy": "same-origin",
@@ -148,7 +148,7 @@ async fn handle(
       (413, error.stringify(), "application/json; charset=utf-8")
     }
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       // No raw filesystem paths, scanner findings or source text cross this boundary.

@@ -9,10 +9,11 @@ import {
   "Delthin/moon_repomix/security",
   "Delthin/moon_repomix/selection",
   "moonbitlang/core/debug",
+  "moonbitlang/core/json",
 }
 
 // Values
-pub fn context_capabilities() -> Json
+pub fn context_capabilities() -> @json.Json
 
 pub async fn explain_selection(@config.Options, Array[String]) -> SelectionReport
 
@@ -72,7 +73,7 @@ pub struct CodeContextPlan {
   tokens : Int32
   bytes : Int32
   required_tokens : Int32?
-  audit : Json
+  audit : @json.Json
   security : SecurityStatus
 }
 
@@ -86,19 +87,20 @@ pub fn CodeContextSession::can_continue(Self) -> Bool
 pub fn CodeContextSession::max_rounds() -> Int32
 pub fn CodeContextSession::new(Int32) -> Self raise CodeSessionError
 pub fn CodeContextSession::remaining(Self) -> Int32
-pub fn CodeContextSession::request(Self, Json) -> CodeContextSpec raise
-pub fn CodeContextSession::to_json(Self) -> Json
+pub fn CodeContextSession::request(Self, @json.Json) -> CodeContextSpec raise
+pub fn CodeContextSession::to_json(Self) -> @json.Json
 
 pub struct CodeContextSpec {
   max_tokens : Int32
   // private fields
 }
-pub fn CodeContextSpec::from_json(Json) -> Self raise CodeContextError
+pub fn CodeContextSpec::from_json(@json.Json) -> Self raise CodeContextError
 
+#derive(Eq, @debug.Debug)
 pub(all) enum ContextOperation {
   Task
   Code
-} derive(Eq, @debug.Debug)
+}
 pub fn ContextOperation::equal(Self, Self) -> Bool
 pub fn ContextOperation::not_equal(Self, Self) -> Bool
 pub fn ContextOperation::to_repr(Self) -> @debug.Repr
@@ -108,9 +110,9 @@ pub struct ContextRequest {
   continue_from : String?
   // private fields
 }
-pub fn ContextRequest::from_json(Json) -> Self raise ContextRequestError
-pub fn ContextRequest::spec_json(Self) -> Json
-pub fn ContextRequest::to_json(Self) -> Json
+pub fn ContextRequest::from_json(@json.Json) -> Self raise ContextRequestError
+pub fn ContextRequest::spec_json(Self) -> @json.Json
+pub fn ContextRequest::to_json(Self) -> @json.Json
 
 pub(all) struct FileStats {
   path : String
@@ -163,14 +165,14 @@ pub struct SelectionReport {
   max_files : Int32
   max_total_size : Int64
 }
-pub fn SelectionReport::to_json(Self) -> Json
+pub fn SelectionReport::to_json(Self) -> @json.Json
 
 pub struct TaskContextPlan {
   status : String
   text : String?
   tokens : Int32
   bytes : Int32
-  audit : Json
+  audit : @json.Json
   audit_text : String
   audit_tokens : Int32
   audit_bytes : Int32
@@ -181,7 +183,7 @@ pub struct TaskContextSpec {
   max_tokens : Int32
   // private fields
 }
-pub fn TaskContextSpec::from_json(Json) -> Self raise TaskContextError
+pub fn TaskContextSpec::from_json(@json.Json) -> Self raise TaskContextError
 
 pub struct VolumePackResult {
   partition : @partition.Partition

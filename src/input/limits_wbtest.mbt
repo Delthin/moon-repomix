@@ -119,7 +119,12 @@ async test "raw read budgets bound actual reads, count probes and retain partial
       ignore(task.wait())
       false
     } catch {
-      err => if @async.is_cancellation_error(err) { true } else { raise err }
+      err =>
+        if err is @async.WaitedTaskAlreadyCancelled {
+          true
+        } else {
+          raise err
+        }
     }
   })
   assert_true(cancelled)

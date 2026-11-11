@@ -4,7 +4,7 @@
 
 ## 本地准备
 
-项目使用 MoonBit native，清单为 `moon.mod` / `moon.pkg`，脚本为 `.mbtx`。固定工具链为 **0.10.17+d971670cd**，需要平台 C 工具链；安装和构建方法见 [工具链](docs/toolchain.md)。首次准备依赖与检查工具链：
+项目使用 MoonBit native，清单为 `moon.mod` / `moon.pkg`，脚本为 `.mbtx`。最低支持 MoonBit **0.10.20**，接受后续稳定版本，需要平台 C 工具链；安装和构建方法见 [工具链](docs/toolchain.md)。首次准备依赖与检查工具链：
 
 ```sh
 moon run --target native scripts/check-toolchain.mbtx

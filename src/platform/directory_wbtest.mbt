@@ -58,7 +58,12 @@ async test "directory publication: staging failure, cancellation and commit-poin
       task.wait()
       false
     } catch {
-      err => if @async.is_cancellation_error(err) { true } else { raise err }
+      err =>
+        if err is @async.WaitedTaskAlreadyCancelled {
+          true
+        } else {
+          raise err
+        }
     }
   })
   assert_true(cancelled)

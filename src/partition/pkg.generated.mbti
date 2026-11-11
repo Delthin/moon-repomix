@@ -4,12 +4,14 @@ package "Delthin/moon_repomix/partition"
 import {
   "Delthin/moon_repomix/document",
   "moonbitlang/core/debug",
+  "moonbitlang/core/json",
 }
 
 // Values
-pub fn partition(@document.Document, Int32, render~ : (@document.Document) -> String raise, count~ : (String) -> Int32 raise, project_metadata~ : (Array[Int32], Array[Int32]) -> Json raise) -> Partition raise
+pub fn partition(@document.Document, Int32, render~ : (@document.Document) -> String raise, count~ : (String) -> Int32 raise, project_metadata~ : (Array[Int32], Array[Int32]) -> @json.Json raise) -> Partition raise
 
 // Errors
+#derive(Eq, @debug.Debug)
 pub(all) suberror PartitionError {
   InvalidCap(Int32)
   DuplicatePath(String)
@@ -18,7 +20,7 @@ pub(all) suberror PartitionError {
   InvalidCount(Int32)
   Overflow(String)
   InvalidTextEncoding
-} derive(Eq, @debug.Debug)
+}
 pub fn PartitionError::equal(Self, Self) -> Bool
 pub fn PartitionError::not_equal(Self, Self) -> Bool
 pub fn PartitionError::to_repr(Self) -> @debug.Repr
@@ -26,17 +28,18 @@ pub fn PartitionError::to_repr(Self) -> @debug.Repr
 // Types and methods
 pub struct Partition {
   volumes : Array[Volume]
-  index : Json
+  index : @json.Json
   index_text : String
   index_tokens : Int32
   total_tokens : Int64
 }
-pub fn Partition::with_index(Self, Json, count~ : (String) -> Int32 raise) -> Self raise
+pub fn Partition::with_index(Self, @json.Json, count~ : (String) -> Int32 raise) -> Self raise
 
+#derive(Eq, @debug.Debug)
 pub(all) enum UnitIdentity {
   FilePath(String)
   SectionIndex(Int32)
-} derive(Eq, @debug.Debug)
+}
 pub fn UnitIdentity::equal(Self, Self) -> Bool
 pub fn UnitIdentity::not_equal(Self, Self) -> Bool
 pub fn UnitIdentity::to_repr(Self) -> @debug.Repr

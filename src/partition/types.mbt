@@ -1,9 +1,10 @@
 ///|
 /// Identity in the input document, independent of section titles.
+#derive(Debug, Eq)
 pub(all) enum UnitIdentity {
   FilePath(String)
   SectionIndex(Int32)
-} derive(Debug, Eq)
+}
 
 ///|
 pub extend UnitIdentity with Eq::{equal, not_equal}
@@ -13,6 +14,7 @@ pub extend UnitIdentity with Debug::{to_repr}
 
 ///|
 /// Callback errors propagate unchanged; these errors describe partition failures.
+#derive(Debug, Eq)
 pub(all) suberror PartitionError {
   InvalidCap(Int32)
   DuplicatePath(String)
@@ -21,7 +23,7 @@ pub(all) suberror PartitionError {
   InvalidCount(Int32)
   Overflow(String)
   InvalidTextEncoding
-} derive(Debug, Eq)
+}
 
 ///|
 pub extend PartitionError with Eq::{equal, not_equal}

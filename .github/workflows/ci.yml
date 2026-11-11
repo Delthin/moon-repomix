@@ -5,8 +5,8 @@ permissions:
 jobs:
   native:
     env:
-      # Keep this equal to moon-toolchain; check-toolchain verifies the installation.
-      MOONBIT_INSTALL_VERSION: "0.10.17+d971670cd"
+      # Follow stable releases; check-toolchain enforces the minimum in moon-toolchain.
+      MOONBIT_INSTALL_VERSION: "latest"
     strategy:
       fail-fast: false
       matrix:
@@ -20,13 +20,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install pinned MoonBit toolchain (Unix)
+      - name: Install current stable MoonBit toolchain (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
-      - name: Install pinned MoonBit toolchain (Windows)
+      - name: Install current stable MoonBit toolchain (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -38,8 +38,9 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: git -C "$HOME/.moon/registry/index" show HEAD:user/Delthin/moon_repomix.index
-      - name: Require the verified compiler version
+      - name: Require the minimum supported compiler
         run: moon run --target native scripts/check-toolchain.mbtx
+      - run: moon test --target native scripts/check-toolchain.mbtx
       - run: moon check --target native --deny-warn
       - run: moon test --target native
       - run: moon build --target native --release
@@ -89,7 +90,7 @@ jobs:
           --log-dir "${{ runner.temp }}/volume-cli"
           ${{ runner.os == 'Linux' && '--xml-oracle' || '' }}
       - name: Native WebUI HTTP functional test
-        # Windows honors these; async 0.19.2 uses /tmp on Unix.
+        # Windows honors these; the HTTP test client uses /tmp on Unix.
         env:
           TMPDIR: ${{ runner.temp }}
           TMP: ${{ runner.temp }}

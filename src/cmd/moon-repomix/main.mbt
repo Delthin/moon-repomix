@@ -84,29 +84,26 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
       path, "{\n  \"output\": { \"style\": \"xml\" },\n  \"security\": { \"enableSecurityCheck\": true }\n}\n",
     ) catch {
       err => {
-        if @async.is_cancellation_error(err) {
+        if @async.is_being_cancelled() {
           raise err
         }
         raise Write
       }
     }
     state.publication = "committed"
-    @async.protect_from_cancel(
-      () => {
-        if cli.report_json {
-          write_json_report({
-            "schemaVersion": 1,
-            "status": "ok",
-            "operation": "init",
-            "publication": "committed",
-            "exitCode": 0,
-          })
-        } else if !cli.quiet {
-          @stdio.stderr.write("Created configuration.\n")
-        }
-      },
-      resume_on_cancel=false,
-    )
+    finish_report(() => {
+      if cli.report_json {
+        write_json_report({
+          "schemaVersion": 1,
+          "status": "ok",
+          "operation": "init",
+          "publication": "committed",
+          "exitCode": 0,
+        })
+      } else if !cli.quiet {
+        @stdio.stderr.write("Created configuration.\n")
+      }
+    })
     return 0
   }
   let patch = read_config(cli, cwd)
@@ -148,7 +145,7 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
       Some(
         @platform.directory_output_path(resolved.output, cwd) catch {
           err => {
-            if @async.is_cancellation_error(err) {
+            if @async.is_being_cancelled() {
               raise err
             }
             raise Write
@@ -170,29 +167,26 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
     state.publication = "unknown"
     @stdio.stdout.write(text) catch {
       err => {
-        if @async.is_cancellation_error(err) {
+        if @async.is_being_cancelled() {
           raise err
         }
         raise Write
       }
     }
     state.publication = "committed"
-    @async.protect_from_cancel(
-      () => {
-        if cli.report_json {
-          write_json_report(explanation_report(result))
-        } else if !cli.quiet {
-          @stdio.stderr.write(
-            "Explained " +
-            result.paths.length().to_string() +
-            " requested paths; accepted " +
-            result.accepted_count.to_string() +
-            ".\n",
-          )
-        }
-      },
-      resume_on_cancel=false,
-    )
+    finish_report(() => {
+      if cli.report_json {
+        write_json_report(explanation_report(result))
+      } else if !cli.quiet {
+        @stdio.stderr.write(
+          "Explained " +
+          result.paths.length().to_string() +
+          " requested paths; accepted " +
+          result.accepted_count.to_string() +
+          ".\n",
+        )
+      }
+    })
     return 0
   }
   let resource = match options.tokenizer_path {
@@ -229,23 +223,20 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
     state.publication = "unknown"
     @platform.commit_directory(target, entries) catch {
       err => {
-        if @async.is_cancellation_error(err) {
+        if @async.is_being_cancelled() {
           raise err
         }
         raise Write
       }
     }
     state.publication = "committed"
-    @async.protect_from_cancel(
-      () => {
-        if cli.report_json {
-          write_json_report(volumes_report(result, split_options, cap))
-        } else {
-          report_volumes(result, split_options, cap)
-        }
-      },
-      resume_on_cancel=false,
-    )
+    finish_report(() => {
+      if cli.report_json {
+        write_json_report(volumes_report(result, split_options, cap))
+      } else {
+        report_volumes(result, split_options, cap)
+      }
+    })
     return 0
   }
   let result = @repomix.pack(options, runtime)
@@ -253,7 +244,7 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
     state.publication = "unknown"
     @stdio.stdout.write(result.text) catch {
       err => {
-        if @async.is_cancellation_error(err) {
+        if @async.is_being_cancelled() {
           raise err
         }
         raise Write
@@ -262,7 +253,7 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
   } else {
     let path = @platform.output_path(options.output, cwd) catch {
       err => {
-        if @async.is_cancellation_error(err) {
+        if @async.is_being_cancelled() {
           raise err
         }
         raise Write
@@ -271,7 +262,7 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
     state.publication = "unknown"
     @platform.commit(path, result.text) catch {
       err => {
-        if @async.is_cancellation_error(err) {
+        if @async.is_being_cancelled() {
           raise err
         }
         raise Write
@@ -279,16 +270,13 @@ async fn run(cli : @config.Cli, state : RunState) -> Int32 {
     }
   }
   state.publication = "committed"
-  @async.protect_from_cancel(
-    () => {
-      if cli.report_json {
-        write_json_report(single_report(result, options))
-      } else {
-        report(result, options)
-      }
-    },
-    resume_on_cancel=false,
-  )
+  finish_report(() => {
+    if cli.report_json {
+      write_json_report(single_report(result, options))
+    } else {
+      report(result, options)
+    }
+  })
   if result.budget is Exceeded(_) {
     1
   } else {
@@ -341,7 +329,7 @@ async fn main {
         }
         _ => ()
       }
-      let category = if @async.is_cancellation_error(err) {
+      let category = if @async.is_being_cancelled() {
         "Cancelled"
       } else {
         match err {
@@ -377,42 +365,37 @@ async fn main {
             }
         }
       }
-      @async.protect_from_cancel(
-        () => {
-          if state.report_json {
-            let safe_category = match err {
-              @repomix.ContextTextError(_) => "ContextTextError"
-              @repomix.ContextSecurityFinding(_) => "ContextSecurityError"
-              @repomix.InputLimitExceeded(kind=_, limit=_) => "InputLimitError"
-              _ => category
-            }
-            let report = error_report(
-              safe_category,
-              field,
-              limit,
-              state.publication,
-            )
-            if state.operation != "pack" && report is Object(fields) {
-              fields["operation"] = Json(state.operation)
-            }
-            write_json_report(report) catch {
-              _ => ()
-            }
-          } else {
-            let output_note = match state.publication {
-              "committed" => "; complete output already published"
-              "unknown" => "; output publication state unknown"
-              _ => ""
-            }
-            @stdio.stderr.write(
-              "moon-repomix: " + category + output_note + "\n",
-            ) catch {
-              _ => ()
-            }
+      finish_report(() => {
+        if state.report_json {
+          let safe_category = match err {
+            @repomix.ContextTextError(_) => "ContextTextError"
+            @repomix.ContextSecurityFinding(_) => "ContextSecurityError"
+            @repomix.InputLimitExceeded(kind=_, limit=_) => "InputLimitError"
+            _ => category
           }
-        },
-        resume_on_cancel=false,
-      )
+          let report = error_report(
+            safe_category,
+            field,
+            limit,
+            state.publication,
+          )
+          if state.operation != "pack" && report is Object(fields) {
+            fields["operation"] = Json(state.operation)
+          }
+          write_json_report(report) catch {
+            _ => ()
+          }
+        } else {
+          let output_note = match state.publication {
+            "committed" => "; complete output already published"
+            "unknown" => "; output publication state unknown"
+            _ => ""
+          }
+          @stdio.stderr.write("moon-repomix: " + category + output_note + "\n") catch {
+            _ => ()
+          }
+        }
+      })
       1
     }
   }

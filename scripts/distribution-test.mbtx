@@ -1,10 +1,11 @@
-///|
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
   "moonbitlang/async@0.22.5/process",
   "moonbitlang/core/env",
 }
+----
 
 ///|
 async fn smoke(binary : String, cwd : String) -> Unit {
@@ -101,7 +102,11 @@ async fn main {
     )
   }
   check_webui(unpacked + "/moon-repomix-" + platform)
-  assert_true(@fs.exists(unpacked + "/moon-repomix-" + platform + "/assets/demo/webui.gif"))
+  assert_true(
+    @fs.exists(
+      unpacked + "/moon-repomix-" + platform + "/assets/demo/webui.gif",
+    ),
+  )
   smoke(
     unpacked + "/moon-repomix-" + platform + "/bin/moon-repomix" + suffix,
     fixture,

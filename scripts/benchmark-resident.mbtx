@@ -1,5 +1,4 @@
-///|
-/// Fixed-source macOS resident MCP evidence; never modifies SDK or product limits.
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -11,6 +10,10 @@ import {
   "moonbitlang/core/encoding/hex",
   "moonbitlang/x@0.5.5/crypto",
 }
+----
+
+///|
+/// Fixed-source macOS resident MCP evidence; never modifies SDK or product limits.
 
 ///|
 struct Session {

@@ -1,4 +1,4 @@
-///|
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -8,6 +8,7 @@ import {
   "moonbitlang/core/string",
   "moonbitlang/core/encoding/utf8",
 }
+----
 
 ///|
 async fn git(args : Array[String], cwd : String) -> Bytes {
@@ -57,13 +58,15 @@ async fn git(args : Array[String], cwd : String) -> Bytes {
 ///|
 // Only used for the fresh owned tmpdir below. The empty parent repository has
 // no read-only objects; native Git clean removes its nested fixture repository.
-async fn cleanup(temp : String) -> Unit {
-  ignore(
-    git(["init", "--quiet", "--template=", "--initial-branch=fixture"], temp),
-  )
-  ignore(git(["clean", "--quiet", "-ffdx", "--", "."], temp))
-  assert_eq(@fs.readdir(temp), [".git"])
-  @fs.rmdir(temp, recursive=true)
+async fn cleanup(temp : String) -> Unit nocancel {
+  @async.protect_from_cancel(() => {
+    ignore(
+      git(["init", "--quiet", "--template=", "--initial-branch=fixture"], temp),
+    )
+    ignore(git(["clean", "--quiet", "-ffdx", "--", "."], temp))
+    assert_eq(@fs.readdir(temp), [".git"])
+    @fs.rmdir(temp, recursive=true)
+  })
 }
 
 ///|

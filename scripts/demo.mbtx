@@ -1,4 +1,4 @@
-///|
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -6,6 +6,7 @@ import {
   "moonbitlang/async@0.22.5/io",
   "moonbitlang/core/env",
 }
+----
 
 ///|
 async fn put(path : String, data : &@io.Data) -> Unit {

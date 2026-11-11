@@ -13,6 +13,7 @@ pub fn definition_extensions() -> Array[String]
 pub fn index_definitions(String, String) -> DefinitionIndex
 
 // Errors
+#derive(@debug.Debug)
 pub(all) suberror PlannerError {
   InvalidWorkers
   BatchLimit
@@ -20,7 +21,7 @@ pub(all) suberror PlannerError {
   Closed
   Finished
   Unavailable
-} derive(@debug.Debug)
+}
 pub fn PlannerError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
@@ -29,6 +30,7 @@ pub async fn BatchTicket::collect(Self) -> PlannedBatch
 pub async fn BatchTicket::finish(Self) -> Array[Outcome]
 pub fn BatchTicket::is_ready(Self) -> Bool
 
+#derive(Eq, @debug.Debug)
 pub(all) struct Definition {
   name : String
   qualified_name : String
@@ -37,34 +39,37 @@ pub(all) struct Definition {
   start_line : Int32
   end_line : Int32
   references : Array[String]
-} derive(Eq, @debug.Debug)
+}
 pub fn Definition::equal(Self, Self) -> Bool
 pub fn Definition::not_equal(Self, Self) -> Bool
 pub fn Definition::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) struct DefinitionIndex {
   definitions : Array[Definition]
   reason : String?
-} derive(Eq, @debug.Debug)
+}
 pub fn DefinitionIndex::equal(Self, Self) -> Bool
 pub fn DefinitionIndex::not_equal(Self, Self) -> Bool
 pub fn DefinitionIndex::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) struct LineRange {
   start_line : Int32
   end_line : Int32
-} derive(Eq, @debug.Debug)
+}
 pub fn LineRange::equal(Self, Self) -> Bool
 pub fn LineRange::not_equal(Self, Self) -> Bool
 pub fn LineRange::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) struct Outcome {
   text : String
   language : String?
   applied : Bool
   reason : String?
   ranges : Array[LineRange]
-} derive(Eq, @debug.Debug)
+}
 pub fn Outcome::equal(Self, Self) -> Bool
 pub fn Outcome::not_equal(Self, Self) -> Bool
 pub fn Outcome::to_repr(Self) -> @debug.Repr
@@ -73,15 +78,16 @@ type PlannedBatch
 pub fn PlannedBatch::materialize(Self) -> Array[Outcome]
 
 type Planner
-pub async fn Planner::close(Self) -> Unit
+pub async fn Planner::close(Self) -> Unit nocancel
 pub async fn Planner::compress(Self, Array[Source]) -> Array[Outcome]
 pub fn Planner::new(workers? : Int32) -> Self raise PlannerError
 pub fn Planner::submit(Self, Array[Source]) -> BatchTicket raise PlannerError
 
+#derive(Eq, @debug.Debug)
 pub(all) struct Source {
   path : String
   text : String
-} derive(Eq, @debug.Debug)
+}
 pub fn Source::equal(Self, Self) -> Bool
 pub fn Source::not_equal(Self, Self) -> Bool
 pub fn Source::to_repr(Self) -> @debug.Repr

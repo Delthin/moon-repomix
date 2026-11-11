@@ -12,24 +12,26 @@ pub fn scan(String, String, Int32) -> Array[Finding] raise ScanError
 pub fn scan_validated(String, @validated_text.Text) -> Array[Finding] raise ScanError
 
 // Errors
+#derive(Eq, @debug.Debug)
 pub(all) suberror ScanError {
   InvalidBomOffset
   InvalidText
   InvalidEngineRange
   InputTooLarge
-} derive(Eq, @debug.Debug)
+}
 pub fn ScanError::equal(Self, Self) -> Bool
 pub fn ScanError::not_equal(Self, Self) -> Bool
 pub fn ScanError::to_repr(Self) -> @debug.Repr
 
 // Types and methods
+#derive(Eq, @debug.Debug)
 pub(all) struct Finding {
   rule : String
   path : String
   start : Int32
   end : Int32
   line : Int32
-} derive(Eq, @debug.Debug)
+}
 pub fn Finding::equal(Self, Self) -> Bool
 pub fn Finding::not_equal(Self, Self) -> Bool
 pub fn Finding::to_repr(Self) -> @debug.Repr

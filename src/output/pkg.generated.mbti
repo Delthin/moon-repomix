@@ -20,6 +20,7 @@ pub fn xml_representable(String) -> Bool
 // Errors
 
 // Types and methods
+#derive(Eq, @debug.Debug)
 pub(all) struct Display {
   file_summary : Bool
   directory_structure : Bool
@@ -28,7 +29,7 @@ pub(all) struct Display {
   metadata : Bool
   line_numbers : Bool
   path_prefix : String
-} derive(Eq, @debug.Debug)
+}
 pub fn Display::default() -> Self
 pub fn Display::equal(Self, Self) -> Bool
 pub fn Display::not_equal(Self, Self) -> Bool

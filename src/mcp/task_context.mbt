@@ -27,7 +27,7 @@ async fn plan_tasks(state : State, args : Json) -> Json {
   }
   let plan = @repomix.plan_task_context(state.options, state.runtime, spec) catch {
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       let category = match err {

@@ -15,7 +15,9 @@ These components are compiled into the application. Original license files accom
 | [ICU/Unicode subset](https://github.com/unicode-org/icu) | `552b01f61127d30d6589aa4bf99468224979b661` | `tree-sitter-ICU.txt` |
 
 MoonBit's root grammar serves both file extensions. Its local `grammar.patch`
-adds tuple `for` identifier binders, inclusive `..<=` range patterns and `errdefer`;
+adds tuple `for` identifier binders, inclusive `..<=` range patterns, `errdefer`,
+`nocancel` effects (including `+ nocancel` combined with error effects), and
+package-qualified traits in prefix derive attributes;
 the parser is regenerated with Tree-sitter CLI 0.25.10, ABI 15. Modified grammar
 and parser files carry local-change notices. The patched grammar, exact patch,
 original generation metadata, generated C, original scanner, all three original

@@ -5,12 +5,13 @@
 // and caches with direct OpenAI byte ranks and original-byte span lookups.
 
 ///|
+#derive(Eq)
 priv struct Merge {
   rank : Int32
   pos : Int32
   right : Int32
   end : Int32
-} derive(Eq)
+}
 
 ///|
 impl Compare for Merge with fn compare(self, other) {

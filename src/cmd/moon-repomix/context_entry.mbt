@@ -109,7 +109,7 @@ async fn context_file(path : String) -> Bytes {
     buffer.to_bytes()
   } catch {
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       match err {
@@ -175,7 +175,7 @@ async fn context_plan(
       @platform.output_path(options.output, @env.current_dir().unwrap_or(".")),
     ) catch {
       err => {
-        if @async.is_cancellation_error(err) {
+        if @async.is_being_cancelled() {
           raise err
         }
         raise Write
@@ -271,7 +271,7 @@ async fn context_write_stdout(text : String, state : RunState) -> Unit {
   state.publication = "unknown"
   @stdio.stdout.write(text) catch {
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       raise Write
@@ -306,7 +306,7 @@ async fn context_publish(
       }
       @platform.commit(path, text) catch {
         err => {
-          if @async.is_cancellation_error(err) {
+          if @async.is_being_cancelled() {
             raise err
           }
           state.publication = "not_started"
@@ -323,26 +323,23 @@ async fn context_publish(
   }
   let code = if pending.success { 0 } else { 1 }
   if state.report_json {
-    @async.protect_from_cancel(
-      () => {
-        write_json_report({
-          "schemaVersion": 1,
-          "operation": state.operation,
-          "status": if pending.success {
-            "ok"
-          } else {
-            "error"
-          },
-          "resultStatus": match pending.response {
-            Object(fields) => fields["status"]
-            _ => Json::null()
-          },
-          "publication": state.publication,
-          "exitCode": code,
-        })
-      },
-      resume_on_cancel=false,
-    )
+    finish_report(() => {
+      write_json_report({
+        "schemaVersion": 1,
+        "operation": state.operation,
+        "status": if pending.success {
+          "ok"
+        } else {
+          "error"
+        },
+        "resultStatus": match pending.response {
+          Object(fields) => fields["status"]
+          _ => Json::null()
+        },
+        "publication": state.publication,
+        "exitCode": code,
+      })
+    })
   }
   code
 }
@@ -390,7 +387,7 @@ async fn run_context(
       context_publish(pending, options, state, host)
     } catch {
       err => {
-        if @async.is_cancellation_error(err) {
+        if @async.is_being_cancelled() {
           raise err
         }
         if err is RequestTooLarge {

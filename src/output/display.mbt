@@ -1,6 +1,7 @@
 ///|
 /// Presentation controls. Canonical Document paths, bodies and metadata stay intact.
 /// path_prefix is supplied by the caller for cwd-relative or absolute labels.
+#derive(Eq, Debug)
 pub(all) struct Display {
   file_summary : Bool
   directory_structure : Bool
@@ -9,7 +10,7 @@ pub(all) struct Display {
   metadata : Bool
   line_numbers : Bool
   path_prefix : String
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend Display with Eq::{equal, not_equal}

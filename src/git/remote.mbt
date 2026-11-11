@@ -178,8 +178,8 @@ async fn temporary_checkout(
 ///|
 /// Delete only a checkout allocated by this process. Errors propagate; successful
 /// cleanup invalidates the handle. Shields deletion even in an already cancelled
-/// task, then resumes cancellation (does not turn cancellation into success).
-pub async fn cleanup(checkout : Checkout) -> Unit {
+/// task. Cancellation remains pending for the next unprotected async operation.
+pub async fn cleanup(checkout : Checkout) -> Unit nocancel {
   @async.protect_from_cancel(() => {
     guard owned_checkouts.contains(checkout.directory) else {
       raise InvalidInput(

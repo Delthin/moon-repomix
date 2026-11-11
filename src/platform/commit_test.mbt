@@ -32,7 +32,7 @@ async test "atomic replacement and executable-relative resource paths" {
       task.wait()
       false
     } catch {
-      error => @async.is_cancellation_error(error)
+      error => error is @async.WaitedTaskAlreadyCancelled
     }
   })
   assert_true(cancelled)

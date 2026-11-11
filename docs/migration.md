@@ -1,5 +1,15 @@
 # 版本升级
 
+## 当前源码工具链
+
+当前源码支持 MoonBit **0.10.20 及以上**，CI 跟随官方当前稳定版。版本检查按主、次、补丁版本数值比较；安装和验证入口见[工具链说明](toolchain.md)。下文保留已发行版本各自的构建要求。
+
+## 升级到 v0.7.0
+
+下载 [v0.7.0 安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.7.0)，或将 SDK 依赖更新到 `0.7.0` 后执行 `moon update`。源码构建与 SDK 消费要求 MoonBit **0.10.20 及以上**；平台归档包含原生程序与运行资源。
+
+本版统一 SDK、CLI、MCP 和 HTTP 的版本化上下文请求，增加 CLI 单次/JSONL 会话、工作台配置保存/导入与 MoonBit 完整定义索引。原有打包、任务预算和代码补读入口继续使用；请求配置与权限、限额的关系见[共享请求协议](context-requests.md)。
+
 ## 升级到 v0.6.0
 
 下载 [v0.6.0 安装包](https://github.com/Delthin/moon-repomix/releases/tag/v0.6.0)，或将 SDK 依赖更新到 `0.6.0` 后执行 `moon update`。构建工具链仍为 MoonBit `0.10.17+d971670cd`，既有 CLI、配置、Root SDK 和 MCP 用法保持兼容。

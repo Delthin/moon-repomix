@@ -131,6 +131,7 @@ pub async fn commit_directory(
     owned = true
   })
   for entry in entries {
+    @async.pause()
     // File is an unbuffered Writer (no separate flush API). Shield acquisition
     // through close so cancellation cannot strand an open file during cleanup.
     @async.protect_from_cancel(() => {

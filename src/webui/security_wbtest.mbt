@@ -79,7 +79,7 @@ test "strict webui request schema and bounded patterns" {
 
 ///|
 test "exact Host Origin and mandatory custom client header" {
-  let headers : Map[String, String] = {
+  let headers : @http.Headers = {
     "host": "127.0.0.1:8765",
     "x-moon-repomix": "webui",
   }
@@ -237,7 +237,7 @@ async test "single pack gate returns 409 and cancellation releases it" {
       ignore(running.wait())
       false
     } catch {
-      err => @async.is_cancellation_error(err)
+      err => err is @async.WaitedTaskAlreadyCancelled
     }
     assert_true(cancelled)
     assert_false(state.busy)

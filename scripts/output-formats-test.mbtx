@@ -1,4 +1,4 @@
-///|
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -8,6 +8,7 @@ import {
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/string",
 }
+----
 
 ///|
 async fn cli(

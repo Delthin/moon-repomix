@@ -1,9 +1,10 @@
 ///|
+#derive(FromJson)
 priv struct Golden {
   name : String
   text : String
   ids : Array[Int32]
-} derive(FromJson)
+}
 
 ///|
 async fn assets_dir() -> String {
@@ -91,7 +92,7 @@ async test "absolute resources, checksums, IO failure and cancellation" {
     @metrics.ResourceError(_) =>
       fail("missing Unicode file must retain its IO error")
     error => {
-      if @async.is_cancellation_error(error) {
+      if @async.is_being_cancelled() {
         raise error
       }
       rejected = true
@@ -124,7 +125,7 @@ async test "absolute resources, checksums, IO failure and cancellation" {
       false
     } catch {
       error =>
-        if @async.is_cancellation_error(error) {
+        if error is @async.WaitedTaskAlreadyCancelled {
           true
         } else {
           raise error

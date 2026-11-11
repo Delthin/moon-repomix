@@ -46,7 +46,7 @@ pub async fn explain_selection(
     Some(
       @platform.output_path(options.output, cwd) catch {
         err => {
-          if @async.is_cancellation_error(err) {
+          if @async.is_being_cancelled() {
             raise err
           }
           raise ConfigurationError
@@ -71,7 +71,7 @@ pub async fn explain_selection(
     @selection.SelectionError::FileLimitExceeded(limit~) =>
       raise InputLimitExceeded(kind="maxFiles", limit=limit.to_int64())
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       raise SelectionError

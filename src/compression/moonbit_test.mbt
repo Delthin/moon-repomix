@@ -86,6 +86,49 @@ test "MoonBit AST declarations, effects, async, nested functions and literal bou
 }
 
 ///|
+test "MoonBit non-cancellable cleanup signatures remain compressible" {
+  let source =
+    #|pub async fn close() -> Unit nocancel {
+    #|  let detail = "cleanup implementation details"
+    #|  ignore(detail)
+    #|}
+    #|
+  let out = @compression.compress("cleanup.mbt", source)
+  assert_eq(out.reason, None)
+  assert_true(out.applied)
+  assert_true(out.text.contains("-> Unit nocancel"))
+  assert_false(out.text.contains("cleanup implementation details"))
+  let combined = source.replace_all(
+    old="Unit nocancel",
+    new="Unit noraise + nocancel",
+  )
+  let combined_out = @compression.compress("cleanup.mbt", combined)
+  assert_eq(combined_out.reason, None)
+  assert_true(combined_out.text.contains("-> Unit noraise + nocancel"))
+  let interface = "pub async fn close() -> Unit nocancel\n" +
+    "pub async fn pause() -> Unit noraise + nocancel\n"
+  let unchanged = @compression.compress("cleanup.mbti", interface)
+  assert_eq(unchanged.reason, Some("not-smaller"))
+  assert_eq(unchanged.text, interface)
+}
+
+///|
+test "MoonBit generated interface prefix derives accept qualified traits" {
+  let interface =
+    #|package "example/compression"
+    #|import { "moonbitlang/core/debug" }
+    #|#derive(@debug.Debug)
+    #|pub(all) suberror PlannerError { Closed }
+    #|#derive(Eq, @debug.Debug)
+    #|pub(all) struct Source { path : String }
+    #|pub async fn close() -> Unit nocancel
+    #|
+  let out = @compression.compress("pkg.generated.mbti", interface)
+  assert_eq(out.reason, Some("not-smaller"))
+  assert_eq(out.text, interface)
+}
+
+///|
 test "MoonBit interfaces, exact CRLF ranges and honest syntax fallback" {
   let source = "///| 文档 😀\r\npub fn Point::get(self : Point) -> Int raise Error {\r\n  let result = self.x + 123456789\r\n  result\r\n}\r\n"
   let out = @compression.compress("point.mbt", source)

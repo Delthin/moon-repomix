@@ -1,5 +1,7 @@
 // Local changes: tuple identifier binders in for-in loops, inclusive ..<= range
-// patterns, and errdefer expressions. Generated with tree-sitter 0.25.10, ABI 15.
+// patterns, errdefer expressions, nocancel effects (including + nocancel),
+// and package-qualified traits in prefix derive attributes.
+// Generated with tree-sitter 0.25.10, ABI 15.
 // See src/compression/THIRD_PARTY.md and grammar.patch for provenance.
 /// <reference types="tree-sitter-cli/dsl" />
 // @ts-check
@@ -1715,7 +1717,15 @@ module.exports = grammar({
     type_annotation: ($) => seq(":", $._type),
 
     error_annotation: ($) =>
-      choice("raise", "noraise", seq("raise", $._type), seq("raise", "?")),
+      prec.right(
+        choice(
+          "nocancel",
+          seq(
+            choice("raise", "noraise", seq("raise", $._type), seq("raise", "?")),
+            optional(seq("+", "nocancel"))
+          )
+        )
+      ),
 
     return_type: ($) =>
       choice(
@@ -1835,6 +1845,7 @@ module.exports = grammar({
       choice(
         $._lowercase_identifier,
         $._uppercase_identifier,
+        seq($.package_identifier, $.dot_uppercase_identifier),
         seq($._lowercase_identifier, $.dot_lowercase_identifier),
         seq($._lowercase_identifier, $.attribute_properties),
         seq(

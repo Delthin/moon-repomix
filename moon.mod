@@ -1,6 +1,6 @@
 name = "Delthin/moon_repomix"
 
-version = "0.6.0"
+version = "0.7.0"
 
 readme = "README.md"
 
@@ -17,7 +17,7 @@ source = "src"
 preferred_target = "native"
 
 import {
-  "moonbitlang/async@0.19.2",
+  "moonbitlang/async@0.22.5",
   "123123213weqw/moon_scrub@0.5.2",
   "moonbitlang/x@0.5.5",
 }

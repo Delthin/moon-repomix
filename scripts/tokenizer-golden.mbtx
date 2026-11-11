@@ -1,4 +1,4 @@
-///|
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -7,6 +7,7 @@ import {
   "moonbitlang/core/json",
   "moonbitlang/core/string",
 }
+----
 
 // Usage: moon run scripts/tokenizer-golden.mbtx --target native ABS_REPO PYTHON REF_DIR
 // REF_DIR is an isolated uv --target directory containing tiktoken==0.14.0
@@ -14,17 +15,19 @@ import {
 // Python/JS/shell adapter. No product code is involved in computing the IDs.
 
 ///|
+#derive(FromJson)
 struct Input {
   name : String
   text : String
-} derive(FromJson)
+}
 
 ///|
+#derive(ToJson)
 struct Golden {
   name : String
   text : String
   ids : Array[Int32]
-} derive(ToJson)
+}
 
 ///|
 async fn main {

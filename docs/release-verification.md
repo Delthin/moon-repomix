@@ -1,6 +1,6 @@
 # 验证 Mooncakes 发行
 
-`Publish and verify Mooncakes v0.6.0` 是手动触发的发行工作流，固定版本为 `0.6.0`，固定 MoonBit `0.10.17+d971670cd`。它核对当前提交与版本、生成待发布源码包，并先更新公共注册表索引。
+`Publish and verify Mooncakes v0.7.0` 是手动触发的发行工作流，目标包版本为 `0.7.0`，安装满足 [最低工具链要求](../moon-toolchain) 的官方当前稳定版 MoonBit，并记录 `moon version --all`。它核对当前提交与版本、生成待发布源码包，并先更新公共注册表索引。
 
 - `publish-and-verify`：版本不存在时最多调用一次 `moon publish`；版本已存在时跳过上传，直接验证。
 - `verify-only`：不接触发布凭证，只验证已经存在的版本。版本不存在即停止。
@@ -13,19 +13,19 @@
 
 ## 源码与 SDK 核验
 
-工作流在独立目录解析 `scripts/release-sdk-smoke.mbtx`，只从注册表取得 `Delthin/moon_repomix@0.6.0`，不使用 checkout 覆盖库源码。随后：
+工作流在独立目录解析 `scripts/release-sdk-smoke.mbtx`，只从注册表取得 `Delthin/moon_repomix@0.7.0`，不使用 checkout 覆盖库源码。随后：
 
 1. 核对实际下载 ZIP 的 SHA-256 与公共索引一致。
 2. `scripts/release-source-verify.mbtx` 流式读取两个 ZIP，比较文件集合和每个文件的全部字节；ZIP 条目顺序及压缩时间不作为源码差异，不把路径解压到文件系统。
 3. 从规范注册表 ZIP 取得 tokenizer 资源，再编译、运行独立消费者。
-4. 验证版本、混合与骨架结果、源行范围、精确计数及字节数、完整分卷与索引、入选解释、完整函数读取、读取预算边界及任务上下文的必选全文。
+4. 验证版本、混合与骨架结果、源行范围、精确计数及字节数、完整分卷与索引、入选解释、完整函数读取、读取预算边界及任务上下文的必选全文；通过共享 `ContextRequest` 读取 MoonBit 完整定义并独立核对计量。
 
 公开 artifact 包含注册表条目、源码身份比较、规范源码 ZIP 和消费验证结果。完整凭证、发布私有日志及整个 `MOON_HOME` 均不归档。正常的三平台 CI 和安装包验证仍由 `native` 工作流承担。
 
 ## GitHub 发行附件
 
-`Release verified v0.6.0 assets` 手动工作流使用 CI 自带的短期 `GITHUB_TOKEN`，仅申请发行所需的 `contents: write` 和读取既有工件所需的 `actions: read`。它不读取 Mooncakes 发布凭证。
+`Release verified v0.7.0 assets` 手动工作流使用 CI 自带的短期 `GITHUB_TOKEN`，仅申请发行所需的 `contents: write` 和读取既有工件所需的 `actions: read`。它不读取 Mooncakes 发布凭证。
 
 通过发行标签触发，传入 `source_sha`、`tag_object_sha`、`registry_sha256`、`native_run_id`、`registry_run_id`、`registry_attempt`。前两项分别是完整源码提交与 annotated tag 对象，不能混用；后两项 CI 均须成功且属于同一源码提交。`registry_attempt` 默认为 1。
 
-工作流核对既有 v0.6.0 标签对象及其解引用提交、三平台检查、完整源码比较和注册表 SDK 验证，再取得对应原生归档与规范注册表源码。源码文件数从实际比较记录读取，不固定为旧版本数量。生成校验和后先创建草稿，核对上传文件的 SHA-256，最后设为正式最新版。版本或文件不一致即停止；已有 Release 时不自动覆盖。
+工作流核对既有 v0.7.0 标签对象及其解引用提交、三平台检查、完整源码比较和注册表 SDK 验证，再取得对应原生归档与规范注册表源码。源码文件数从实际比较记录读取，不固定为旧版本数量。生成校验和后先创建草稿，核对上传文件的 SHA-256，最后设为正式最新版。版本或文件不一致即停止；已有 Release 时不自动覆盖。

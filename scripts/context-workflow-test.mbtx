@@ -1,4 +1,4 @@
-///|
+----
 import {
   "moonbitlang/async@0.22.5",
   "moonbitlang/async@0.22.5/fs",
@@ -10,6 +10,7 @@ import {
   "moonbitlang/core/encoding/hex",
   "moonbitlang/x@0.5.5/crypto",
 }
+----
 
 ///|
 // Compare real CLI and MCP results on the same synthetic inputs.

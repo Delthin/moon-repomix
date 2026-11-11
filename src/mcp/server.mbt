@@ -21,7 +21,7 @@ async fn build(state : State, args : Json) -> Json {
   }
   let result = @repomix.pack_volumes(options, state.runtime, max_tokens=cap) catch {
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       let category = match err {
@@ -126,7 +126,7 @@ async fn explain(state : State, args : Json) -> Json {
   }
   let report = @repomix.explain_selection(state.options, paths) catch {
     err => {
-      if @async.is_cancellation_error(err) {
+      if @async.is_being_cancelled() {
         raise err
       }
       let category = match err {

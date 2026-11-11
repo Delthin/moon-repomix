@@ -1,4 +1,4 @@
-name: Publish and verify Mooncakes v0.6.0
+name: Publish and verify Mooncakes v0.7.0
 on:
   workflow_dispatch:
     inputs:
@@ -14,7 +14,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: mooncakes-publish-0.6.0
+  group: mooncakes-publish-0.7.0
   cancel-in-progress: false
 jobs:
   publish:
@@ -22,8 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      MOONBIT_INSTALL_VERSION: '0.10.17+d971670cd'
-      RELEASE_VERSION: '0.6.0'
+      MOONBIT_INSTALL_VERSION: 'latest'
+      RELEASE_VERSION: '0.7.0'
       RELEASE_MODE: ${{ inputs.mode }}
       RELEASE_SOURCE_REF: ${{ inputs.source_ref }}
     steps:
@@ -40,7 +40,7 @@ jobs:
           printf '%s\n' "$GITHUB_SHA" > "$EVIDENCE/attempt-source.txt"
           printf '%s\n' "$RELEASE_MODE" > "$EVIDENCE/attempt-mode.txt"
           printf 'EVIDENCE=%s\nMOON_HOME=%s/.moon\n' "$EVIDENCE" "$HOME" >> "$GITHUB_ENV"
-      - name: Install pinned official toolchain
+      - name: Install current stable official toolchain
         shell: bash
         run: |
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
@@ -62,7 +62,7 @@ jobs:
             cd "$RUNNER_TEMP/frozen-publish-source"
           fi
           grep -Fx 'name = "Delthin/moon_repomix"' moon.mod
-          grep -Fx 'version = "0.6.0"' moon.mod
+          grep -Fx 'version = "0.7.0"' moon.mod
           printf '%s\n' "$PACKAGE_SHA" > "$EVIDENCE/source-revision.txt"
           printf '%s\n' "$GITHUB_SHA" > "$EVIDENCE/verification-revision.txt"
           moon package --list > "$EVIDENCE/package-list.txt" 2>&1
@@ -164,7 +164,7 @@ jobs:
         if: always() && env.EVIDENCE != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mooncakes-release-0.6.0-${{ github.run_id }}-${{ github.run_attempt }}
+          name: mooncakes-release-0.7.0-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.EVIDENCE }}
           if-no-files-found: warn
           retention-days: 14

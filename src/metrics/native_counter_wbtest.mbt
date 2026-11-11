@@ -7,11 +7,12 @@ extern "c" fn native_piece_end(
 ) -> Int32 = "moon_repomix_counter_piece_end"
 
 ///|
+#derive(FromJson)
 priv struct NativeGolden {
   name : String
   text : String
   ids : Array[Int32]
-} derive(FromJson)
+}
 
 ///|
 async fn native_test_assets() -> String {

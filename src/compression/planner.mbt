@@ -1,11 +1,13 @@
 ///|
 /// Input text is already read and security-scanned by the caller.
+#derive(Debug, Eq)
 pub(all) struct Source {
   path : String
   text : String
-} derive(Debug, Eq)
+}
 
 ///|
+#derive(Debug)
 pub(all) suberror PlannerError {
   InvalidWorkers
   BatchLimit
@@ -13,7 +15,7 @@ pub(all) suberror PlannerError {
   Closed
   Finished
   Unavailable
-} derive(Debug)
+}
 
 ///|
 pub extend Source with Eq::{equal, not_equal}
@@ -208,10 +210,7 @@ pub async fn BatchTicket::collect(self : BatchTicket) -> PlannedBatch {
     self.finishing = false
   }
   errdefer {
-    @async.protect_from_cancel(
-      async fn() { planner.close() },
-      resume_on_cancel=true,
-    )
+    planner.close()
     self.finished = true
   }
   if @async.is_being_cancelled() {
@@ -295,7 +294,7 @@ pub async fn Planner::compress(
 ///|
 /// Idempotent cancellation-protected stop, async drain, then join and release.
 /// A pending ticket becomes Closed; a cancelled finish always propagates cancellation.
-pub async fn Planner::close(self : Planner) -> Unit {
+pub async fn Planner::close(self : Planner) -> Unit nocancel {
   @async.protect_from_cancel(async fn() {
     self.closed = true
     pool_stop(self.handle)
